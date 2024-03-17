@@ -13,6 +13,7 @@ type Task struct {
 	// TODO: consider a TaskType for categorizing tasks, e.g. WS vs HTTP
 	Cadence  time.Duration
 	Execute  func() // Function to execute, e.g., making an HTTP request
+	NextExec time.Time
 }
 
 type TaskGroup struct {
