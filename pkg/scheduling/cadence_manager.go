@@ -54,7 +54,7 @@ func (cm *CadenceManager) RefreshTasksPeriodically() {
 		cm.pool.SubmitGroup(taskGroup)
 		taskGroup.ExecuteTogether() // Trigger simultaneous execution */
 
-		time.Sleep(1 * time.Minute) // TODO: make this refresh rate configurable
+		time.Sleep(15 * time.Second) // TODO: make this refresh rate configurable
 	}
 }
 
