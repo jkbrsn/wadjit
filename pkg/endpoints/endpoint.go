@@ -6,19 +6,19 @@ import (
 	"github.com/jakobilobi/wadjit/pkg/schedule"
 )
 
-// Endpoint is a struct representing an endpoint to be monitored.
-type Endpoint struct {
+// EndpointRequest is a struct representing a request used to monitor an endpoint.
+type EndpointRequest struct {
 	ID      string
 	cadence time.Duration
 }
 
-// Cadence returns the cadence of the Endpoint.
-func (e Endpoint) Cadence() time.Duration {
+// Cadence returns the cadence of the EndpointRequest.
+func (e EndpointRequest) Cadence() time.Duration {
 	return e.cadence
 }
 
-// Execute executes the Endpoint.
-func (e Endpoint) Execute() schedule.Result {
+// Execute executes the EndpointRequest.
+func (e EndpointRequest) Execute() schedule.Result {
 	// TODO: Implement task execution logic
 	return schedule.Result{}
 }

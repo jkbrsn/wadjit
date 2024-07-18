@@ -6,9 +6,9 @@ import (
 	"github.com/jakobilobi/wadjit/pkg/schedule"
 )
 
-// Confirm that the Endpoint struct implements the Task interface.
-func TestEndpointImplementsTask(t *testing.T) {
-	var _ schedule.Task = &Endpoint{}
+// Confirm that the EndpointRequest struct implements the Task interface.
+func TestEndpointRequestImplementsTask(t *testing.T) {
+	var _ schedule.Task = &EndpointRequest{}
 
 	// If the above line compiles, the test passes, so no further action is required.
 }
