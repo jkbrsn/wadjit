@@ -4,31 +4,31 @@ import (
 	"log"
 	"time"
 
-	"github.com/jakobilobi/wadjit/pkg/scheduling"
+	"github.com/jakobilobi/wadjit/pkg/schedule"
 )
 
 func main() {
 	// TODO: evaluate and adjust buffer sizes
-    taskChannel := make(chan scheduling.Task, 2000) // Buffered channel to hold tasks
-    resultChannel := make(chan scheduling.Result, 100) // Buffered channel to hold results
+	taskChannel := make(chan schedule.Task, 2000)    // Buffered channel to hold tasks
+	resultChannel := make(chan schedule.Result, 100) // Buffered channel to hold results
 
 	// TODO: add flags for configuring the worker pool size and refresh rate etc.
-	// TODO: add endpoint DB client and fetch tasks from the DB, give handle to the manager
 
-	//workerPool := scheduling.NewWorkerPool(10)
-	scheduler := scheduling.NewScheduler(taskChannel)
+	workerPool := schedule.NewWorkerPool(resultChannel, taskChannel, 10)
+	scheduler := schedule.NewScheduler(taskChannel)
 
+	// TODO: add waitgroup/shutdown procedure to ensure all goroutines are stopped before exiting, and to gracefully handle shutdown
+	go scheduler.Start()
+	go workerPool.Start()
 
-	// TODO: add waitgroup to ensure all goroutines are stopped before exiting, and to gracefully handle shutdown
-    go scheduler.Start()
-    //go workerPool.Start()
-
-	// Add tasks with varying cadences
-	scheduler.AddTask(scheduling.NewDefaultTask("http://example.com/5", 5 * time.Second))
-	scheduler.AddTask(scheduling.NewDefaultTask("http://example.com/8", 8 * time.Second))
-	scheduler.AddTask(scheduling.NewDefaultTask("http://example.com/11", 11 * time.Second))
+	// TODO: add endpoint DB client and fetch tasks from the DB, add these as tasks in scheduler
+	// DEV: add tasks with varying cadences
+	scheduler.AddTask(schedule.NewDefaultTask("http://example.com/5", 5*time.Second))
+	scheduler.AddTask(schedule.NewDefaultTask("http://example.com/8", 8*time.Second))
+	scheduler.AddTask(schedule.NewDefaultTask("http://example.com/11", 11*time.Second))
 
 	// Process results and write to the external database
+	// TODO: implement actual processing logic
 	for result := range resultChannel {
 		if result.Error != nil {
 			log.Printf("Task failed: %v", result.Error)
