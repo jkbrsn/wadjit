@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// CadenceManager manages task scheduling, using a worker pool to execture tasks based on their cadence.
 type CadenceManager struct {
 	tasks map[string]*Task // Map for quick task lookup
 	mu    sync.RWMutex     // Mutex for thread-safe operations
@@ -14,6 +15,7 @@ type CadenceManager struct {
 	quit  chan struct{}    // Channel to signal stopping
 }
 
+// scheduleTasks schedules tasks for execution based on their cadence.
 func (cm *CadenceManager) scheduleTasks() {
     cm.mu.Lock()
     defer cm.mu.Unlock()
@@ -37,7 +39,7 @@ func (cm *CadenceManager) AddOrUpdateTask(newTask *Task) {
 	// Additional logic to schedule the task for execution based on its cadence etc.
 }
 
-// refreshTasksPeriodically fetches updated task configs and updates the task map.
+// RefreshTasksPeriodically fetches updated task configs and updates the task map.
 // TODO: implement
 func (cm *CadenceManager) RefreshTasksPeriodically() {
 	for {
@@ -58,6 +60,7 @@ func (cm *CadenceManager) RefreshTasksPeriodically() {
 	}
 }
 
+// StartScheduling starts the task scheduling loop.
 func (cm *CadenceManager) StartScheduling() {
     ticker := time.NewTicker(2 * time.Second) // TODO: experiment with this, make configurable
     go func() {
@@ -75,7 +78,7 @@ func (cm *CadenceManager) StartScheduling() {
     }()
 }
 
-// NewCadenceManager creates a new CadenceManager and starts the task refresh loop.
+// NewCadenceManager creates and returns a new CadenceManager.
 func NewCadenceManager(pool *WorkerPool) *CadenceManager {
 	cm := &CadenceManager{
 		tasks: make(map[string]*Task),

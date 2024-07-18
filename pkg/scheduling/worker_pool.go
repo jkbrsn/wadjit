@@ -29,6 +29,7 @@ type WorkerPool struct {
 	stopChan chan struct{} // Used to signal stopping of workers
 }
 
+// start starts the worker pool and contains the logic to handle channel signals.
 func (wp *WorkerPool) start() {
     for i := 0; i < wp.Workers; i++ {
         go func() {
@@ -46,6 +47,8 @@ func (wp *WorkerPool) start() {
     }
 }
 
+// ExecuteTogether executes all tasks in the group simultaneously.
+// TODO: more implementation?
 func (tg *TaskGroup) ExecuteTogether() {
     // Signal readiness and wait for all tasks to be ready
     close(tg.ready)
@@ -74,6 +77,7 @@ func (wp *WorkerPool) Stop() {
 	close(wp.stopChan)
 }
 
+// NewTaskGroup returns a TaskGroup with the input tasks.
 func NewTaskGroup(tasks []Task) *TaskGroup {
     return &TaskGroup{
         Tasks: tasks,
@@ -81,6 +85,7 @@ func NewTaskGroup(tasks []Task) *TaskGroup {
     }
 }
 
+// NewWorkerPool creates and starts a worker pool.
 func NewWorkerPool(workers int) *WorkerPool {
 	pool := &WorkerPool{
 		Tasks:    make(chan Task, 100), // TODO: make buffer size configurable

@@ -4,7 +4,7 @@ import "github.com/jakobilobi/wadjit/pkg/scheduling"
 
 func main() {
 	// TODO: add flags for configuring the worker pool size and refresh rate etc.
-	// TODO: add endoint DB client and fetch tasks from the DB, give handle to the manager
+	// TODO: add endpoint DB client and fetch tasks from the DB, give handle to the manager
 
 	workerPool := scheduling.NewWorkerPool(10)
 	manager := scheduling.NewCadenceManager(workerPool)
