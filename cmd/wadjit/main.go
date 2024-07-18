@@ -9,7 +9,7 @@ import (
 
 func main() {
 	// TODO: evaluate and adjust buffer sizes
-	taskChannel := make(chan schedule.Task, 2000)    // Buffered channel to hold tasks
+	taskChannel := make(chan schedule.Task, 1000)    // Buffered channel to hold tasks
 	resultChannel := make(chan schedule.Result, 100) // Buffered channel to hold results
 
 	// TODO: add flags for configuring the worker pool size and refresh rate etc.
@@ -23,9 +23,9 @@ func main() {
 
 	// TODO: add endpoint DB client and fetch tasks from the DB, add these as tasks in scheduler
 	// DEV: add tasks with varying cadences
+	scheduler.AddTask(schedule.NewDefaultTask("http://example.com/2", 2*time.Second))
+	scheduler.AddTask(schedule.NewDefaultTask("http://example.com/3", 3*time.Second))
 	scheduler.AddTask(schedule.NewDefaultTask("http://example.com/5", 5*time.Second))
-	scheduler.AddTask(schedule.NewDefaultTask("http://example.com/8", 8*time.Second))
-	scheduler.AddTask(schedule.NewDefaultTask("http://example.com/11", 11*time.Second))
 
 	// Process results and write to the external database
 	// TODO: implement actual processing logic
