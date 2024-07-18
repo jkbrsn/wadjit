@@ -37,18 +37,6 @@ func (wp *WorkerPool) Start() {
 	}
 }
 
-// SubmitGroup adds a task group to the worker pool for simultaneous execution.
-func (wp *WorkerPool) SubmitGroup(tg *TaskGroup) {
-	tg.waitGroup.Add(len(tg.Tasks))
-	for _, task := range tg.Tasks {
-		go func(t Task) {
-			<-tg.ready // Wait for the signal to start
-			t.Execute()
-			tg.waitGroup.Done()
-		}(task)
-	}
-}
-
 // Stop signals the worker pool to stop processing tasks and exit.
 func (wp *WorkerPool) Stop() {
 	close(wp.TaskChannel)

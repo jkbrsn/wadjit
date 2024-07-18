@@ -1,7 +1,6 @@
 package schedule
 
 import (
-	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -32,13 +31,6 @@ type DefaultTask struct {
 	cadence time.Duration
 }
 
-// TODO: finish implementation of groups
-type TaskGroup struct {
-	Tasks     []Task
-	ready     chan struct{} // Channel to signal readiness for execution
-	waitGroup sync.WaitGroup
-}
-
 // Cadence returns the cadence of the DefaultTask.
 func (dt DefaultTask) Cadence() time.Duration {
 	return dt.cadence
@@ -51,25 +43,10 @@ func (dt DefaultTask) Execute() Result {
 	return Result{}
 }
 
-// ExecuteTogether executes all tasks in the group simultaneously.
-func (tg *TaskGroup) ExecuteTogether() {
-	// Signal readiness and wait for all tasks to be ready
-	close(tg.ready)
-	tg.waitGroup.Wait()
-}
-
 // NewDefaultTask creates and returns a new DefaultTask.
 func NewDefaultTask(id string, cadence time.Duration) *DefaultTask {
 	return &DefaultTask{
 		ID:      id,
 		cadence: cadence,
-	}
-}
-
-// NewTaskGroup returns a TaskGroup with the input tasks.
-func NewTaskGroup(tasks []Task) *TaskGroup {
-	return &TaskGroup{
-		Tasks: tasks,
-		ready: make(chan struct{}),
 	}
 }
