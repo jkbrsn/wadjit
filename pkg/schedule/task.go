@@ -11,6 +11,7 @@ import (
 // Result represents the result of a task execution.
 // TODO: interfacify this too?
 type Result struct {
+	Data       map[string]interface{}
 	Error      error
 	Latency    time.Duration
 	StatusCode int

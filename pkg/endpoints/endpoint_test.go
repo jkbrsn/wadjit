@@ -1,9 +1,15 @@
 package endpoints
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/jakobilobi/wadjit/pkg/schedule"
+	"github.com/rs/zerolog/log"
+	"github.com/stretchr/testify/assert"
 )
 
 // Confirm that the EndpointRequest struct implements the Task interface.
@@ -45,9 +51,43 @@ func TestEndpointRequestExecute(t *testing.T) {
 }
 
 func TestEndpointRequestHTTPExecute(t *testing.T) {
-	er := EndpointRequestHTTP{}
-	result := er.Execute()
+	// Start test server
+	server := testServer(t)
+	defer server.Close()
+
+	// Build request
+	serverURL, _ := url.Parse(server.URL)
+	log.Debug().Msgf("Server URL: %v", serverURL)
+	erh := EndpointRequestHTTP{
+		EndpointRequest: EndpointRequest{
+			cadence: 5,
+			ID:      "test",
+			URL:     *serverURL},
+		Secure: false,
+	}
+
+	// Execute request
+	result := erh.Execute()
 	if result.Error != nil {
 		t.Errorf("Expected nil error, got %v", result.Error)
 	}
+
+	// Check result
+	assert.Equal(t, result.StatusCode, 200)
+	assert.Equal(t, result.Data["status"], "OK")
+	assert.True(t, result.Latency > time.Duration(0))
+}
+
+// HELPERS
+
+func testServer(t *testing.T) *httptest.Server {
+	// Start a local HTTP server
+	server := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		// Test request parameters
+		assert.Equal(t, req.URL.String(), "/")
+		// Send response to be tested
+		jsonString := `{"status": "OK"}`
+		rw.Write([]byte(jsonString))
+	}))
+	return server
 }

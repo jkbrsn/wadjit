@@ -1,6 +1,9 @@
 package endpoints
 
 import (
+	"encoding/json"
+	"io"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -36,11 +39,51 @@ func (er EndpointRequest) Execute() schedule.Result {
 
 func (erh EndpointRequestHTTP) Execute() schedule.Result {
 	log.Trace().Msgf("EndpointRequestHTTP executing: %v", erh)
-	// TODO: Implement task execution logic
-	return schedule.Result{}
+
+	req, err := http.NewRequest(http.MethodGet, erh.URL.String(), nil)
+	if err != nil {
+		log.Error().Err(err).Caller().Str("ID", erh.ID).Msg("Error creating request")
+		return schedule.Result{Error: err}
+	}
+
+	client := &http.Client{
+		Timeout: time.Second * 5,
+	}
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Error().Err(err).Caller().Str("ID", erh.ID).Msgf("Error making request")
+		return schedule.Result{Error: err}
+	}
+	defer resp.Body.Close()
+	duration := time.Since(start)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Error().Err(err).Caller().Str("ID", erh.ID).Msg("Error reading response body")
+		return schedule.Result{Error: err}
+	}
+	log.Trace().Str("ID", erh.ID).Msgf("Response body: %s", body)
+
+	var response map[string]interface{}
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		log.Error().Err(err).Caller().Str("ID", erh.ID).Msg("Error unmarshalling response body")
+		return schedule.Result{Error: err}
+	}
+
+	result := schedule.Result{
+		Data:       response,
+		Error:      nil,
+		Latency:    duration,
+		StatusCode: resp.StatusCode,
+	}
+	return result
 }
 
 func NewEndpointRequest(id string, cadence time.Duration, url url.URL) *EndpointRequest {
+	log.Debug().Msgf("Creating new EndpointRequest with ID %s, cadence %v, and URL %v", id, cadence, url)
 	return &EndpointRequest{
 		cadence: cadence,
 		ID:      id,
@@ -49,6 +92,7 @@ func NewEndpointRequest(id string, cadence time.Duration, url url.URL) *Endpoint
 }
 
 func NewEndpointRequestHTTP(id string, cadence time.Duration, url url.URL) *EndpointRequestHTTP {
+	log.Debug().Msgf("Creating new EndpointRequestHTTP with ID %s, cadence %v, and URL %v", id, cadence, url)
 	return &EndpointRequestHTTP{
 		EndpointRequest: EndpointRequest{
 			cadence: cadence,
