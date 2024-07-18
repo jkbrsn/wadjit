@@ -1,26 +1,9 @@
 package scheduling
 
 import (
-	"sync"
 	"sync/atomic"
-	"time"
 )
 
-type Task struct {
-	// TODO: consider creating a unique TaskID type
-	ID       string // Unique identifier, e.g., endpoint URL
-	// TODO: also consider a GroupID for grouping tasks
-	// TODO: consider a TaskType for categorizing tasks, e.g. WS vs HTTP
-	Cadence  time.Duration
-	Execute  func() // Function to execute, e.g., making an HTTP request
-	NextExec time.Time
-}
-
-type TaskGroup struct {
-    Tasks    []Task
-    ready    chan struct{} // Channel to signal readiness for execution
-    waitGroup sync.WaitGroup
-}
 
 type WorkerPool struct {
 	Tasks    chan Task
