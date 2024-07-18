@@ -24,13 +24,15 @@ type ScheduledTask struct {
 }
 
 // AddTask adds a Task to the Scheduler with the specified cadence.
-func (s *Scheduler) AddTask(task Task, cadence time.Duration) {
-	log.Trace().Msgf("Adding task to scheduler with cadence %v", cadence)
-    next := time.Now().Add(cadence)
+func (s *Scheduler) AddTask(task Task) {
+	log.Trace().Msgf("Adding task to scheduler with cadence %v", task.Cadence())
+    next := time.Now().Add(task.Cadence())
+	s.Lock()
+	defer s.Unlock()
     s.tasks = append(s.tasks, &ScheduledTask{
         Task:     task,
         NextExec: next,
-        Cadence:  cadence,
+        Cadence:  task.Cadence(),
     })
 }
 
@@ -40,10 +42,12 @@ func (s *Scheduler) Start() {
     for {
         select {
         case <-ticker.C:
+			log.Trace().Msg("Checking for tasks to execute")
 			s.RLock()
             now := time.Now()
             for _, scheduledTask := range s.tasks {
                 if now.After(scheduledTask.NextExec) {
+					log.Trace().Msgf("Sending task to worker pool: %v", scheduledTask.Task)
                     s.taskChannel <- scheduledTask.Task
                     scheduledTask.NextExec = now.Add(scheduledTask.Cadence)
 					// TODO: make NextExec depend on previous execution time, not current time?

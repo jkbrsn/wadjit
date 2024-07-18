@@ -24,9 +24,9 @@ func main() {
     //go workerPool.Start()
 
 	// Add tasks with varying cadences
-	scheduler.AddTask(&scheduling.DefaultTask{ID: "http://example.com/1", Cadence: 10 * time.Second}, 10 * time.Second)
-	scheduler.AddTask(&scheduling.DefaultTask{ID: "http://example.com/2", Cadence: 20 * time.Second}, 20 * time.Second)
-	scheduler.AddTask(&scheduling.DefaultTask{ID: "http://example.com/3", Cadence: 30 * time.Second}, 30 * time.Second)
+	scheduler.AddTask(scheduling.NewDefaultTask("http://example.com/5", 5 * time.Second))
+	scheduler.AddTask(scheduling.NewDefaultTask("http://example.com/8", 8 * time.Second))
+	scheduler.AddTask(scheduling.NewDefaultTask("http://example.com/11", 11 * time.Second))
 
 	// Process results and write to the external database
 	for result := range resultChannel {
