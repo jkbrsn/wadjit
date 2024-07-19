@@ -11,6 +11,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type NetworkCheck struct {
+	cadence time.Duration
+	Name    string
+}
+
 // EndpointRequest is a struct representing a request used to monitor an endpoint.
 type EndpointRequest struct {
 	cadence time.Duration
@@ -22,6 +27,19 @@ type EndpointRequestHTTP struct {
 	EndpointRequest
 
 	Secure bool // Whether to use HTTPS
+}
+
+// Cadence returns the cadence of the EndpointRequest.
+func (nc NetworkCheck) Cadence() time.Duration {
+	log.Trace().Msgf("NetworkCheck cadence: %v", nc.cadence)
+	return nc.cadence
+}
+
+// Execute executes the EndpointRequest.
+func (nc NetworkCheck) Execute() schedule.Result {
+	log.Trace().Msgf("NetworkCheck executing: %v", nc)
+	// TODO: Implement task execution logic
+	return schedule.Result{}
 }
 
 // Cadence returns the cadence of the EndpointRequest.

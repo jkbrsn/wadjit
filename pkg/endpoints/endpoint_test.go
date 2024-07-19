@@ -26,6 +26,28 @@ func TestEndpointRequestHTTPImplementsTask(t *testing.T) {
 	// If the above line compiles, the test passes, so no further action is required.
 }
 
+// Confirm that the EndpointRequest struct implements the Task interface.
+func TestNetworkCheckImplementsTask(t *testing.T) {
+	var _ schedule.Task = &NetworkCheck{}
+
+	// If the above line compiles, the test passes, so no further action is required.
+}
+
+func TestNetworkCheckCadence(t *testing.T) {
+	nc := NetworkCheck{cadence: 5}
+	if nc.Cadence() != 5 {
+		t.Errorf("Expected cadence 5, got %d", nc.Cadence())
+	}
+}
+
+func TestNetworkCheckExecute(t *testing.T) {
+	nc := NetworkCheck{}
+	result := nc.Execute()
+	if result.Error != nil {
+		t.Errorf("Expected nil error, got %v", result.Error)
+	}
+}
+
 func TestEndpointRequestCadence(t *testing.T) {
 	er := EndpointRequest{cadence: 5}
 	if er.Cadence() != 5 {
