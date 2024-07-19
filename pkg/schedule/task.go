@@ -17,6 +17,7 @@ type Result struct {
 }
 
 // Task is an interface for tasks that can be executed.
+// TODO: introduce grouping functionality with some type of waitgroup or similar
 type Task interface {
 	Cadence() time.Duration
 	Execute() Result
