@@ -11,17 +11,15 @@ import (
 // Result represents the result of a task execution.
 // TODO: interfacify this too?
 type Result struct {
-	Data       map[string]interface{}
-	Error      error
-	Latency    time.Duration
-	StatusCode int
+	Data    map[string]interface{}
+	Error   error
+	Success bool
 }
 
 // Task is an interface for tasks that can be executed.
 type Task interface {
-	Execute() Result
-
 	Cadence() time.Duration
+	Execute() Result
 }
 
 // DefaultTask is a example task implementation, used in tests and development.
