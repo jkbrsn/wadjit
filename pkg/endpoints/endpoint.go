@@ -61,7 +61,7 @@ func (erh EndpointRequestHTTP) Execute() schedule.Result {
 	req, err := http.NewRequest(http.MethodGet, erh.URL.String(), nil)
 	if err != nil {
 		log.Error().Err(err).Caller().Str("ID", erh.ID).Msg("Error creating request")
-		return schedule.Result{Error: err}
+		return schedule.Result{Error: err, Success: false}
 	}
 
 	client := &http.Client{
@@ -72,7 +72,7 @@ func (erh EndpointRequestHTTP) Execute() schedule.Result {
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Error().Err(err).Caller().Str("ID", erh.ID).Msgf("Error making request")
-		return schedule.Result{Error: err}
+		return schedule.Result{Error: err, Success: false}
 	}
 	defer resp.Body.Close()
 	duration := time.Since(start)
@@ -80,7 +80,7 @@ func (erh EndpointRequestHTTP) Execute() schedule.Result {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Error().Err(err).Caller().Str("ID", erh.ID).Msg("Error reading response body")
-		return schedule.Result{Error: err}
+		return schedule.Result{Error: err, Success: false}
 	}
 	log.Trace().Str("ID", erh.ID).Msgf("Response body: %s", body)
 
@@ -88,14 +88,18 @@ func (erh EndpointRequestHTTP) Execute() schedule.Result {
 	err = json.Unmarshal(body, &response)
 	if err != nil {
 		log.Error().Err(err).Caller().Str("ID", erh.ID).Msg("Error unmarshalling response body")
-		return schedule.Result{Error: err}
+		return schedule.Result{Error: err, Success: false}
+	}
+
+	data := map[string]interface{}{
+		"duration": duration,
+		"response": response,
 	}
 
 	result := schedule.Result{
-		Data:       response,
-		Error:      nil,
-		Latency:    duration,
-		StatusCode: resp.StatusCode,
+		Data:    data,
+		Error:   nil,
+		Success: true,
 	}
 	return result
 }

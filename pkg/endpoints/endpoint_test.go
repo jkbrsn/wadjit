@@ -95,9 +95,20 @@ func TestEndpointRequestHTTPExecute(t *testing.T) {
 	}
 
 	// Check result
-	assert.Equal(t, result.StatusCode, 200)
-	assert.Equal(t, result.Data["status"], "OK")
-	assert.True(t, result.Latency > time.Duration(0))
+	assert.True(t, result.Success)
+	// Assert that the types are correct
+	assert.NotNil(t, result.Data["duration"])
+	assert.NotNil(t, result.Data["response"])
+	var timeDuration time.Duration
+	var mapStrIntf map[string]interface{}
+	assert.IsType(t, result.Data["duration"], timeDuration)
+	assert.IsType(t, result.Data["response"], mapStrIntf)
+	// Assert that the duration is greater than 0
+	assert.Less(t, time.Duration(0), result.Data["duration"])
+	// Assert that the response is not empty and contains the expected key
+	assert.NotEmpty(t, result.Data["response"])
+	assert.Contains(t, result.Data["response"], "status")
+	assert.Equal(t, result.Data["response"].(map[string]interface{})["status"], "OK")
 }
 
 // HELPERS
