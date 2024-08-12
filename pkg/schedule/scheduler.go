@@ -31,6 +31,8 @@ type ScheduledTask struct {
 type ScheduledTaskGroup struct {
 	ID        string
 	TaskCount atomic.Int32
+	waitGroup sync.WaitGroup
+	ready     chan struct{}
 }
 
 // AddTask adds a Task to the Scheduler with the specified cadence.
@@ -50,15 +52,16 @@ func (s *Scheduler) AddTaskToGroup(task Task, groupID string) {
 	log.Trace().Msgf("Adding task to scheduler task group %s with cadence %v", groupID, task.Cadence())
 	s.Lock()
 	defer s.Unlock()
-	if group, ok := s.taskGroups[groupID]; ok {
-		group.TaskCount.Add(1)
-	} else {
+	group, ok := s.taskGroups[groupID]
+	if !ok {
 		group = &ScheduledTaskGroup{
-			ID: groupID,
+			ID:    groupID,
+			ready: make(chan struct{}),
 		}
-		group.TaskCount.Add(1)
 		s.taskGroups[groupID] = group
 	}
+	group.TaskCount.Add(1)
+	group.waitGroup.Add(1)
 	s.tasks = append(s.tasks, &ScheduledTask{
 		Cadence:     task.Cadence(),
 		NextExec:    time.Now().Add(task.Cadence()), // TODO: find a way to sync cadence with other tasks already present in group
