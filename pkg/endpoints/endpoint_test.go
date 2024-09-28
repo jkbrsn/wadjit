@@ -7,28 +7,28 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jakobilobi/wadjit/pkg/schedule"
+	"github.com/jakobilobi/wadjit/pkg/scheduler"
 	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
 )
 
 // Confirm that the EndpointRequest struct implements the Task interface.
 func TestEndpointRequestImplementsTask(t *testing.T) {
-	var _ schedule.Task = &EndpointRequest{}
+	var _ scheduler.Task = &EndpointRequest{}
 
 	// If the above line compiles, the test passes, so no further action is required.
 }
 
 // Confirm that the EndpointRequestHTTP struct implements the Task interface.
 func TestEndpointRequestHTTPImplementsTask(t *testing.T) {
-	var _ schedule.Task = &EndpointRequestHTTP{}
+	var _ scheduler.Task = &EndpointRequestHTTP{}
 
 	// If the above line compiles, the test passes, so no further action is required.
 }
 
 // Confirm that the EndpointRequest struct implements the Task interface.
 func TestNetworkCheckImplementsTask(t *testing.T) {
-	var _ schedule.Task = &NetworkCheck{}
+	var _ scheduler.Task = &NetworkCheck{}
 
 	// If the above line compiles, the test passes, so no further action is required.
 }

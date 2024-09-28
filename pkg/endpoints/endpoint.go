@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/jakobilobi/wadjit/pkg/schedule"
+	"github.com/jakobilobi/wadjit/pkg/scheduler"
 	"github.com/rs/zerolog/log"
 )
 
@@ -41,7 +41,7 @@ func (nc NetworkCheck) Cadence() time.Duration {
 }
 
 // Execute executes the NetworkCheck.
-func (nc NetworkCheck) Execute() schedule.Result {
+func (nc NetworkCheck) Execute() scheduler.Result {
 	log.Trace().Msgf("NetworkCheck executing: %v", nc)
 
 	resultData := make(map[string]interface{})
@@ -51,7 +51,7 @@ func (nc NetworkCheck) Execute() schedule.Result {
 		log.Trace().Msgf("Endpoint data: %v", data)
 		resultData[endpoint.Name()] = data
 	}
-	return schedule.Result{
+	return scheduler.Result{
 		Data:    resultData,
 		Error:   nil,
 		Success: true,
