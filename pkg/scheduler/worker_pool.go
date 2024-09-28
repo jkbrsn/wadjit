@@ -10,10 +10,11 @@ type WorkerPool struct {
 	ResultChannel chan Result
 	TaskChannel   chan Task
 	WorkerCount   int
+
 	activeWorkers atomic.Int32 // Use atomic operations to manage this counter
 }
 
-// worker is a goroutine that executes tasks from the task channel.
+// worker executes tasks from the task channel.
 func (wp *WorkerPool) worker(id int) {
 	for task := range wp.TaskChannel {
 		log.Trace().Msgf("Worker %d executing task", id)
