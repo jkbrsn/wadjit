@@ -20,6 +20,7 @@ func (wp *WorkerPool) worker(id int) {
 		log.Trace().Msgf("Worker %d executing task", id)
 		wp.activeWorkers.Add(1) // Increment active workers
 		result := task.Execute()
+		// TODO: Should the scheduler retry failed tasks? Should errors be logged or sent to a separate error handling component?
 		wp.ResultChannel <- result
 		wp.activeWorkers.Add(-1) // Decrement active workers
 		log.Trace().Msgf("Worker %d finished task", id)

@@ -84,27 +84,39 @@ func (s *Scheduler) run() {
 		select {
 		case <-ticker.C:
 			log.Trace().Msg("Checking for tasks to execute")
-			s.RLock()
 			now := time.Now()
+			tasksToExecute := []*ScheduledTask{}
+			s.RLock()
 			for _, scheduledTask := range s.tasks {
 				if now.After(scheduledTask.NextExec) {
-					// Send tasks to worker pool if due
-					if scheduledTask.TaskGroupID == "" {
-						log.Trace().Msgf("Sending single task to worker pool: %v", scheduledTask.Task)
-						s.taskChannel <- scheduledTask.Task
-						scheduledTask.NextExec = now.Add(scheduledTask.Cadence)
-					} else {
-						log.Trace().Msgf("Sending grouped task to worker pool: %v", scheduledTask.Task)
-						group := s.taskGroups[scheduledTask.TaskGroupID]
-						if group.TaskCount.Load() > 0 { // TODO: this check is redundant?
-							// TODO: implement waitgroup / ready functionality to ensure simultaneous execution of all tasks in a group
-							s.taskChannel <- scheduledTask.Task
-							scheduledTask.NextExec = now.Add(scheduledTask.Cadence)
-						}
-					}
+					tasksToExecute = append(tasksToExecute, scheduledTask)
 				}
 			}
 			s.RUnlock()
+
+			for _, scheduledTask := range tasksToExecute {
+				// Send tasks to worker pool if due
+				if scheduledTask.TaskGroupID == "" {
+					log.Trace().Msgf("Sending single task to worker pool: %v", scheduledTask.Task)
+					s.Lock()
+					scheduledTask.NextExec = now.Add(scheduledTask.Cadence)
+					s.Unlock()
+					s.taskChannel <- scheduledTask.Task
+				} else {
+					log.Trace().Msgf("Sending grouped task to worker pool: %v", scheduledTask.Task)
+					s.RLock()
+					group := s.taskGroups[scheduledTask.TaskGroupID]
+					s.RUnlock()
+					if group.TaskCount.Load() > 0 { // TODO: this check is redundant?
+						// TODO: implement waitgroup / ready functionality to ensure simultaneous execution of all tasks in a group
+						s.Lock()
+						scheduledTask.NextExec = now.Add(scheduledTask.Cadence)
+						s.Unlock()
+						s.taskChannel <- scheduledTask.Task
+					}
+				}
+			}
+
 		case <-s.stopChannel:
 			ticker.Stop()
 			return
