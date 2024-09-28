@@ -72,6 +72,12 @@ func (s *Scheduler) AddTaskToGroup(task Task, groupID string) {
 
 // Start starts the Scheduler.
 func (s *Scheduler) Start() {
+	go s.run()
+}
+
+// run runs the Scheduler.
+// This function is intended to be run as a goroutine.
+func (s *Scheduler) run() {
 	ticker := time.NewTicker(1 * time.Second)
 	for {
 		select {
