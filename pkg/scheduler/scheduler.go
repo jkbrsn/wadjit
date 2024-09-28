@@ -71,6 +71,7 @@ func (s *Scheduler) AddTaskToGroup(task Task, groupID string) {
 }
 
 // Start starts the Scheduler.
+// With this design, the Scheduler manages its own goroutine internally.
 func (s *Scheduler) Start() {
 	go s.run()
 }
@@ -114,7 +115,14 @@ func (s *Scheduler) run() {
 // Stop signals the Scheduler to stop processing tasks and exit.
 func (s *Scheduler) Stop() {
 	log.Debug().Msg("Stopping scheduler")
-	s.stopChannel <- true
+	s.Lock()
+	select {
+	case <-s.stopChannel:
+		// Already closed
+	default:
+		close(s.stopChannel)
+	}
+	s.Unlock()
 }
 
 // NewScheduler creates and returns a new Scheduler.
