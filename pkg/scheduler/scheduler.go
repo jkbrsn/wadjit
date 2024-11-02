@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"container/heap"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -8,16 +9,17 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// TODO: better package name???
-
 // Scheduler manages task scheduling, using a worker pool to execture tasks based on their cadence.
 type Scheduler struct {
 	sync.RWMutex
 
-	stopChannel chan bool                      // Channel to signal stopping the scheduler
-	taskChannel chan<- Task                    // Channel to send tasks to the worker pool
-	tasks       []*ScheduledTask               // A slice to hold the scheduled tasks
-	taskGroups  map[string]*ScheduledTaskGroup // A map to hold task groups
+	newTaskChannel chan bool   // Channel to signal that new tasks have entered the queue
+	stopChannel    chan bool   // Channel to signal stopping the scheduler
+	taskChannel    chan<- Task // Channel to send tasks to the worker pool, TOOD: rename to workerPoolChannel???
+
+	jobQueue PriorityQueue // A priority queue to hold the scheduled jobs
+
+	stopOnce sync.Once
 }
 
 // ScheduledTask represents a task that is scheduled for execution.
@@ -28,46 +30,57 @@ type ScheduledTask struct {
 	TaskGroupID string
 }
 
-type ScheduledTaskGroup struct {
-	ID        string
-	TaskCount atomic.Int32
-	waitGroup sync.WaitGroup
-	ready     chan struct{}
+type ScheduledJob struct {
+	Tasks []Task
+
+	Cadence  time.Duration
+	ID       string
+	NextExec time.Time
+
+	index int          // Index within the heap
+	size  atomic.Int32 // Number of tasks in the group
 }
 
-// AddTask adds a Task to the Scheduler with the specified cadence.
-// TODO: rename do AddSingleTask
+// AddTask adds a Task to the Scheduler.
 func (s *Scheduler) AddTask(task Task) {
-	log.Trace().Msgf("Adding task to scheduler with cadence %v", task.Cadence())
-	s.Lock()
-	defer s.Unlock()
-	s.tasks = append(s.tasks, &ScheduledTask{
-		Task:     task,
-		NextExec: time.Now().Add(task.Cadence()),
-		Cadence:  task.Cadence(),
-	})
+	s.AddTasks([]Task{task}, task.Cadence(), "")
 }
 
-func (s *Scheduler) AddTaskToGroup(task Task, groupID string) {
-	log.Trace().Msgf("Adding task to scheduler task group %s with cadence %v", groupID, task.Cadence())
+// AddTasks adds a group of Tasks to the Scheduler.
+func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, groupID string) {
+	log.Trace().Msgf("Adding group of %d tasks with group ID %s and cadence %v", len(tasks), groupID, cadence)
 	s.Lock()
 	defer s.Unlock()
-	group, ok := s.taskGroups[groupID]
-	if !ok {
-		group = &ScheduledTaskGroup{
-			ID:    groupID,
-			ready: make(chan struct{}),
-		}
-		s.taskGroups[groupID] = group
+
+	// TODO: if the need to keep track of the jobs outside of the queue arises, this will need to be re-implemented
+	/* 	// Defensive check for taskGroups map
+	   	if s.taskGroups == nil {
+	   		s.taskGroups = make(map[string]*ScheduledJob)
+	   	}
+
+	   	// Check if task group already exists
+	   	_, ok := s.taskGroups[groupID]
+	   	if ok {
+	   		log.Warn().Msgf("Task group with ID %s already exists", groupID)
+	   		return
+	   	}
+	*/
+	job := &ScheduledJob{
+		Tasks:    make([]Task, len(tasks)),
+		Cadence:  cadence,
+		ID:       groupID,
+		NextExec: time.Now().Add(cadence),
+		size:     atomic.Int32{},
 	}
-	group.TaskCount.Add(1)
-	group.waitGroup.Add(1)
-	s.tasks = append(s.tasks, &ScheduledTask{
-		Cadence:     task.Cadence(),
-		NextExec:    time.Now().Add(task.Cadence()), // TODO: find a way to sync cadence with other tasks already present in group
-		Task:        task,
-		TaskGroupID: groupID,
-	})
+	job.size.Add(int32(len(tasks))) // TODO: can this be set to len(tasks) directly?
+
+	// Add tasks to the group
+	job.Tasks = append(job.Tasks, tasks...)
+
+	// Add the group to the taskGroups map
+	heap.Push(&s.jobQueue, job)
+	// Signal the scheduler to check for new tasks
+	s.newTaskChannel <- true
 }
 
 // Start starts the Scheduler.
@@ -79,72 +92,76 @@ func (s *Scheduler) Start() {
 // run runs the Scheduler.
 // This function is intended to be run as a goroutine.
 func (s *Scheduler) run() {
-	ticker := time.NewTicker(1 * time.Second)
 	for {
-		select {
-		case <-ticker.C:
-			log.Trace().Msg("Checking for tasks to execute")
+		s.Lock()
+		if s.jobQueue.Len() == 0 {
+			s.Unlock()
+			select {
+			case <-s.newTaskChannel:
+				continue
+			case <-s.stopChannel:
+				return
+			}
+		} else {
+			nextJob := s.jobQueue[0]
 			now := time.Now()
-			tasksToExecute := []*ScheduledTask{}
-			s.RLock()
-			for _, scheduledTask := range s.tasks {
-				if now.After(scheduledTask.NextExec) {
-					tasksToExecute = append(tasksToExecute, scheduledTask)
-				}
-			}
-			s.RUnlock()
+			delay := nextJob.NextExec.Sub(now)
+			if delay <= 0 {
+				heap.Pop(&s.jobQueue)
+				s.Unlock()
 
-			for _, scheduledTask := range tasksToExecute {
-				// Send tasks to worker pool if due
-				if scheduledTask.TaskGroupID == "" {
-					log.Trace().Msgf("Sending single task to worker pool: %v", scheduledTask.Task)
-					s.Lock()
-					scheduledTask.NextExec = now.Add(scheduledTask.Cadence)
-					s.Unlock()
-					s.taskChannel <- scheduledTask.Task
-				} else {
-					log.Trace().Msgf("Sending grouped task to worker pool: %v", scheduledTask.Task)
-					s.RLock()
-					group := s.taskGroups[scheduledTask.TaskGroupID]
-					s.RUnlock()
-					if group.TaskCount.Load() > 0 { // TODO: this check is redundant?
-						// TODO: implement waitgroup / ready functionality to ensure simultaneous execution of all tasks in a group
-						s.Lock()
-						scheduledTask.NextExec = now.Add(scheduledTask.Cadence)
-						s.Unlock()
-						s.taskChannel <- scheduledTask.Task
-					}
+				// Execute all tasks in the job
+				for _, task := range nextJob.Tasks {
+					s.taskChannel <- task
 				}
-			}
 
-		case <-s.stopChannel:
-			ticker.Stop()
-			return
+				// Reschedule the job
+				nextJob.NextExec = nextJob.NextExec.Add(nextJob.Cadence)
+				s.Lock()
+				heap.Push(&s.jobQueue, nextJob)
+				s.Unlock()
+				continue
+			}
+			s.Unlock()
+
+			// Wait until the next job is due or until stopped.
+			select {
+			case <-time.After(delay):
+				// Time to execute the next job
+				continue
+			case <-s.stopChannel:
+				return
+			}
 		}
 	}
 }
 
 // Stop signals the Scheduler to stop processing tasks and exit.
 func (s *Scheduler) Stop() {
-	log.Debug().Msg("Stopping scheduler")
-	s.Lock()
-	select {
-	case <-s.stopChannel:
-		// Already closed
-	default:
-		close(s.stopChannel)
-	}
-	s.Unlock()
+	log.Debug().Msg("Attempting scheduler stop")
+	s.stopOnce.Do(func() {
+		s.Lock()
+		defer s.Unlock()
+
+		select {
+		case <-s.stopChannel:
+			// Already closed
+		default:
+			close(s.stopChannel)
+		}
+	})
 }
 
 // NewScheduler creates and returns a new Scheduler.
 func NewScheduler(taskChan chan<- Task) *Scheduler {
 	log.Debug().Msg("Creating new scheduler")
 	s := &Scheduler{
-		stopChannel: make(chan bool),
-		taskChannel: taskChan,
-		tasks:       []*ScheduledTask{},
-		taskGroups:  make(map[string]*ScheduledTaskGroup),
+		newTaskChannel: make(chan bool),
+		stopChannel:    make(chan bool),
+		taskChannel:    taskChan,
+		jobQueue:       make(PriorityQueue, 0),
+		//jobsMap:     make(map[string]*ScheduledJob), // TODO: implement jobs map if needed
 	}
+	heap.Init(&s.jobQueue)
 	return s
 }
