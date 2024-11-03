@@ -7,6 +7,19 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type MockTask struct {
+	ID      string
+	cadence time.Duration
+}
+
+func (mt MockTask) Cadence() time.Duration {
+	return mt.cadence
+}
+
+func (mt MockTask) Execute() Result {
+	return Result{}
+}
+
 func TestNewScheduler(t *testing.T) {
 	taskChan := make(chan<- Task)
 	scheduler := NewScheduler(taskChan)
@@ -20,7 +33,7 @@ func TestAddTask(t *testing.T) {
 	taskChan := make(chan Task, 1)
 	scheduler := NewScheduler(taskChan)
 
-	testTask := NewDefaultTask("test-task", 100*time.Millisecond)
+	testTask := MockTask{"test-task", 100 * time.Millisecond}
 	scheduler.AddTask(testTask)
 
 	assert.Equal(t, 1, scheduler.jobQueue.Len(), "Expected job queue length to be 1, got %d", scheduler.jobQueue.Len())
@@ -34,9 +47,14 @@ func TestAddTasks(t *testing.T) {
 	taskChan := make(chan Task, 2)
 	scheduler := NewScheduler(taskChan)
 
-	tasks := []Task{
-		NewDefaultTask("task1", 100*time.Millisecond),
-		NewDefaultTask("task2", 100*time.Millisecond),
+	mockTasks := []MockTask{
+		{"task1", 100 * time.Millisecond},
+		{"task2", 100 * time.Millisecond},
+	}
+	// Explicitly convert []MockTask to []Task to satisfy the AddTasks method signature, since slices are not covariant in Go
+	tasks := make([]Task, len(mockTasks))
+	for i, task := range mockTasks {
+		tasks[i] = task
 	}
 	scheduler.AddTasks(tasks, 100*time.Millisecond, "group1")
 
