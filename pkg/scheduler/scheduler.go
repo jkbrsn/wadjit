@@ -15,21 +15,15 @@ type Scheduler struct {
 
 	newTaskChannel chan bool   // Channel to signal that new tasks have entered the queue
 	stopChannel    chan bool   // Channel to signal stopping the scheduler
-	taskChannel    chan<- Task // Channel to send tasks to the worker pool, TOOD: rename to workerPoolChannel???
+	taskChannel    chan<- Task // Send channel, used to send tasks to the worker pool, TODO: rename to workerPoolChannel???
 
 	jobQueue PriorityQueue // A priority queue to hold the scheduled jobs
 
 	stopOnce sync.Once
 }
 
-// ScheduledTask represents a task that is scheduled for execution.
-type ScheduledTask struct {
-	Cadence     time.Duration
-	NextExec    time.Time
-	Task        Task
-	TaskGroupID string
-}
-
+// ScheduledJob represents a group of tasks that are scheduled for execution.
+// TODO: consider adding an option to execute when inserted
 type ScheduledJob struct {
 	Tasks []Task
 
@@ -38,7 +32,7 @@ type ScheduledJob struct {
 	NextExec time.Time
 
 	index int          // Index within the heap
-	size  atomic.Int32 // Number of tasks in the group
+	size  atomic.Int32 // Number of tasks in the group, TODO: consider removing
 }
 
 // AddTask adds a Task to the Scheduler.
@@ -47,40 +41,32 @@ func (s *Scheduler) AddTask(task Task) {
 }
 
 // AddTasks adds a group of Tasks to the Scheduler.
+// TODO: assign random group ID if not provided?
 func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, groupID string) {
-	log.Trace().Msgf("Adding group of %d tasks with group ID %s and cadence %v", len(tasks), groupID, cadence)
-	s.Lock()
-	defer s.Unlock()
+	log.Debug().Msgf("Adding group of %d tasks with group ID '%s' and cadence %v", len(tasks), groupID, cadence)
 
-	// TODO: if the need to keep track of the jobs outside of the queue arises, this will need to be re-implemented
-	/* 	// Defensive check for taskGroups map
-	   	if s.taskGroups == nil {
-	   		s.taskGroups = make(map[string]*ScheduledJob)
-	   	}
-
-	   	// Check if task group already exists
-	   	_, ok := s.taskGroups[groupID]
-	   	if ok {
-	   		log.Warn().Msgf("Task group with ID %s already exists", groupID)
-	   		return
-	   	}
-	*/
 	job := &ScheduledJob{
-		Tasks:    make([]Task, len(tasks)),
+		Tasks: tasks,
+		// TODO: make copy of tasks to remove reference to original slice?
+		//Tasks:    append([]Task(nil), tasks...), // Creates a copy of tasks
 		Cadence:  cadence,
 		ID:       groupID,
 		NextExec: time.Now().Add(cadence),
-		size:     atomic.Int32{},
 	}
-	job.size.Add(int32(len(tasks))) // TODO: can this be set to len(tasks) directly?
+	job.size.Store(int32(len(tasks)))
 
-	// Add tasks to the group
-	job.Tasks = append(job.Tasks, tasks...)
-
-	// Add the group to the taskGroups map
+	// Push the job to the queue
+	s.Lock()
 	heap.Push(&s.jobQueue, job)
+	s.Unlock()
+
 	// Signal the scheduler to check for new tasks
-	s.newTaskChannel <- true
+	log.Debug().Msg("Signaling new job added")
+	select {
+	case s.newTaskChannel <- true:
+	default:
+		// Do nothing if no one is listening
+	}
 }
 
 // Start starts the Scheduler.
@@ -98,6 +84,7 @@ func (s *Scheduler) run() {
 			s.Unlock()
 			select {
 			case <-s.newTaskChannel:
+				log.Debug().Msg("New task added, checking for next job")
 				continue
 			case <-s.stopChannel:
 				return
@@ -107,6 +94,7 @@ func (s *Scheduler) run() {
 			now := time.Now()
 			delay := nextJob.NextExec.Sub(now)
 			if delay <= 0 {
+				log.Debug().Msgf("Executing job %s", nextJob.ID)
 				heap.Pop(&s.jobQueue)
 				s.Unlock()
 
@@ -160,7 +148,6 @@ func NewScheduler(taskChan chan<- Task) *Scheduler {
 		stopChannel:    make(chan bool),
 		taskChannel:    taskChan,
 		jobQueue:       make(PriorityQueue, 0),
-		//jobsMap:     make(map[string]*ScheduledJob), // TODO: implement jobs map if needed
 	}
 	heap.Init(&s.jobQueue)
 	return s
