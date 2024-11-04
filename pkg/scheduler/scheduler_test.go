@@ -42,10 +42,11 @@ func TestMain(m *testing.M) {
 func TestNewScheduler(t *testing.T) {
 	taskChan := make(chan<- Task)
 	scheduler := NewScheduler(taskChan)
+	defer scheduler.Stop()
 
 	assert.NotNil(t, scheduler.jobQueue, "Expected job queue to be non-nil")
 
-	assert.Equal(t, scheduler.workerPoolChan, taskChan, "Expected task channel to be set correctly")
+	assert.Equal(t, scheduler.taskChan, taskChan, "Expected task channel to be set correctly")
 }
 
 func TestSchedulerStop(t *testing.T) {
@@ -53,6 +54,7 @@ func TestSchedulerStop(t *testing.T) {
 	scheduler := NewScheduler(taskChan)
 	scheduler.Start()
 
+	// Immediately stop the scheduler
 	scheduler.Stop()
 
 	// Attempt to add a task after stopping
@@ -75,6 +77,7 @@ func TestSchedulerStop(t *testing.T) {
 func TestAddTask(t *testing.T) {
 	taskChan := make(chan Task, 1)
 	scheduler := NewScheduler(taskChan)
+	defer scheduler.Stop()
 
 	testTask := MockTask{ID: "test-task", cadence: 100 * time.Millisecond}
 	scheduler.AddTask(testTask, testTask.ID)
@@ -89,6 +92,7 @@ func TestAddTask(t *testing.T) {
 func TestAddJob(t *testing.T) {
 	taskChan := make(chan Task, 2)
 	scheduler := NewScheduler(taskChan)
+	defer scheduler.Stop()
 
 	mockTasks := []MockTask{
 		{ID: "task1", cadence: 100 * time.Millisecond},
@@ -148,7 +152,7 @@ func TestTaskExecution(t *testing.T) {
 
 func TestTaskRescheduling(t *testing.T) {
 	taskChan := make(chan Task, 1)
-	resultChan := make(chan Result, 1)
+	resultChan := make(chan Result, 4) // Make room in buffered channel for multiple results, since we're not receiving them in this test
 
 	workerPool := NewWorkerPool(resultChan, taskChan, 10)
 	workerPool.Start()
@@ -176,9 +180,6 @@ func TestTaskRescheduling(t *testing.T) {
 	// Wait for the task to execute multiple times
 	// Sleeing for 350ms should allow for about 3 executions
 	time.Sleep(350 * time.Millisecond)
-
-	// Stop the scheduler to prevent further executions
-	scheduler.Stop()
 
 	mu.Lock()
 	execCount := len(executionTimes)
