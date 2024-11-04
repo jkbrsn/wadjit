@@ -7,6 +7,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// TODO: scaleup and scaledown functions for dynamic worker pool resizing
+// TODO: tests for worker pool
+
 // WorkerPool manages a pool of workers that execute tasks.
 type WorkerPool struct {
 	workerCount   int          // Total number of workers in the pool
@@ -29,6 +32,8 @@ func (wp *WorkerPool) worker(id int) {
 		case task := <-wp.taskChan:
 			log.Trace().Msgf("Worker %d executing task", id)
 			wp.activeWorkers.Add(1) // Increment active workers
+			// TODO: consider processing the task in a separate goroutine, e.g. async task execution within a single worker
+			// TODO cont.: this would allow the worker to continue processing tasks while waiting for the result
 			result := task.Execute()
 			if result.Error != nil {
 				// No retry policy is implemented, we just log the error for now
