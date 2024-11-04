@@ -224,3 +224,27 @@ func TestConcurrentAddTask(t *testing.T) {
 	expectedTasks := numGoroutines * numTasksPerGoroutine
 	assert.Equal(t, expectedTasks, scheduler.jobQueue.Len(), "Expected job queue length to be %d, got %d", expectedTasks, scheduler.jobQueue.Len())
 }
+
+func TestZeroCadenceTask(t *testing.T) {
+	taskChan := make(chan Task, 1)
+	resultChan := make(chan Result, 1)
+
+	workerPool := NewWorkerPool(resultChan, taskChan, 10)
+	workerPool.Start()
+	defer workerPool.Stop()
+	scheduler := NewScheduler(taskChan)
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	testTask := NewDefaultTask("zero-cadence-task", 0)
+	scheduler.AddTask(testTask, testTask.ID)
+
+	// Expect the task to not execute
+	select {
+	case <-taskChan:
+		// Success
+		t.Fatal("Task with zero cadence should not execute")
+	case <-time.After(25 * time.Millisecond):
+		log.Debug().Msg("Task with zero cadence never executed")
+	}
+}

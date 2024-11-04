@@ -45,7 +45,12 @@ func (s *Scheduler) AddTask(task Task, jobID string) {
 // AddTasks adds a group of Tasks to the Scheduler.
 // TODO: assign random group ID if not provided?
 func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, jobID string) {
-	log.Trace().Msgf("Adding group of %d tasks with group ID '%s' and cadence %v", len(tasks), jobID, cadence)
+	// TODO: should we allow tasks with cadence == 0?
+	if cadence <= 0 {
+		log.Warn().Msgf("Ignoring job with ID '%s' and cadence %v, cadence must be greater than 0", jobID, cadence)
+		return
+	}
+	log.Trace().Msgf("Adding job with %d tasks with group ID '%s' and cadence %v", len(tasks), jobID, cadence)
 
 	job := &ScheduledJob{
 		Tasks: tasks,
