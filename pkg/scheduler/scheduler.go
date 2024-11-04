@@ -3,7 +3,6 @@ package scheduler
 import (
 	"container/heap"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -34,8 +33,7 @@ type ScheduledJob struct {
 	ID       string
 	NextExec time.Time
 
-	index int          // Index within the heap
-	size  atomic.Int32 // Number of tasks in the group, TODO: consider removing
+	index int // Index within the heap
 }
 
 // AddTask adds a Task to the Scheduler.
@@ -63,7 +61,6 @@ func (s *Scheduler) AddJob(tasks []Task, cadence time.Duration, jobID string) {
 		ID:       jobID,
 		NextExec: time.Now().Add(cadence),
 	}
-	job.size.Store(int32(len(tasks)))
 
 	// Push the job to the queue
 	s.Lock()
