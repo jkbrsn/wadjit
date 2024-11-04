@@ -14,7 +14,7 @@ type Scheduler struct {
 
 	newTaskChannel chan bool   // Channel to signal that new tasks have entered the queue
 	stopChannel    chan bool   // Channel to signal stopping the scheduler
-	taskChannel    chan<- Task // Send channel, used to send tasks to the worker pool, TODO: rename to workerPoolChannel???
+	workerPoolChan chan<- Task // Send channel, used to send tasks to the worker pool, TODO: rename to workerPoolChannel???
 
 	jobQueue PriorityQueue // A priority queue to hold the scheduled jobs
 
@@ -121,7 +121,7 @@ func (s *Scheduler) run() {
 
 				// Execute all tasks in the job
 				for _, task := range nextJob.Tasks {
-					s.taskChannel <- task
+					s.workerPoolChan <- task
 				}
 
 				// Reschedule the job
@@ -167,7 +167,7 @@ func NewScheduler(taskChan chan<- Task) *Scheduler {
 	s := &Scheduler{
 		newTaskChannel: make(chan bool),
 		stopChannel:    make(chan bool),
-		taskChannel:    taskChan,
+		workerPoolChan: taskChan,
 		jobQueue:       make(PriorityQueue, 0),
 	}
 	heap.Init(&s.jobQueue)

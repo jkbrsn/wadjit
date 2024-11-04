@@ -45,7 +45,7 @@ func TestNewScheduler(t *testing.T) {
 
 	assert.NotNil(t, scheduler.jobQueue, "Expected job queue to be non-nil")
 
-	assert.Equal(t, scheduler.taskChannel, taskChan, "Expected task channel to be set correctly")
+	assert.Equal(t, scheduler.workerPoolChan, taskChan, "Expected task channel to be set correctly")
 }
 
 func TestSchedulerStop(t *testing.T) {
