@@ -256,12 +256,7 @@ func TestConcurrentAddTask(t *testing.T) {
 }
 
 func TestZeroCadenceTask(t *testing.T) {
-	taskChan := make(chan Task, 1)
-	resultChan := make(chan Result, 1)
-
-	workerPool := NewWorkerPool(resultChan, taskChan, 10)
-	workerPool.Start()
-	defer workerPool.Stop()
+	taskChan := make(chan Task)
 	scheduler := NewScheduler(taskChan)
 	scheduler.Start()
 	defer scheduler.Stop()
@@ -274,7 +269,8 @@ func TestZeroCadenceTask(t *testing.T) {
 	case <-taskChan:
 		// Success
 		t.Fatal("Task with zero cadence should not execute")
-	case <-time.After(25 * time.Millisecond):
+	case <-time.After(50 * time.Millisecond):
+		// After 50ms, the task would have executed if it was scheduled
 		log.Debug().Msg("Task with zero cadence never executed")
 	}
 }
