@@ -53,10 +53,9 @@ func (s *Scheduler) AddJob(tasks []Task, cadence time.Duration, jobID string) {
 	}
 	log.Trace().Msgf("Adding job with %d tasks with group ID '%s' and cadence %v", len(tasks), jobID, cadence)
 
+	// The job uses a copy of the tasks slice, to avoid unintended consequences if the original slice is modified
 	job := &ScheduledJob{
-		Tasks: tasks,
-		// TODO: make copy of tasks to remove reference to original slice?
-		//Tasks:    append([]Task(nil), tasks...), // Creates a copy of tasks
+		Tasks:    append([]Task(nil), tasks...),
 		Cadence:  cadence,
 		ID:       jobID,
 		NextExec: time.Now().Add(cadence),
