@@ -2,9 +2,11 @@ package scheduler
 
 import (
 	"container/heap"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
@@ -44,12 +46,16 @@ func (s *Scheduler) AddTask(task Task, jobID string) {
 
 // AddJob adds a job of N tasks to the Scheduler.
 // Requirements: tasks must have a cadence greater than 0, jobID must be unique.
-// TODO: assign random group ID if not provided?
 func (s *Scheduler) AddJob(tasks []Task, cadence time.Duration, jobID string) {
-	// TODO: should we allow tasks with cadence == 0?
+	// Jobs with cadence < 0 are ignored, as a negative cadence makes no sense
+	// Jobs with cadence == 0 are ignored, as a zero cadence would continuously execute the job and risk overwhelming the worker pool
 	if cadence <= 0 {
 		log.Warn().Msgf("Ignoring job with ID '%s' and cadence %v, cadence must be greater than 0", jobID, cadence)
 		return
+	}
+	// If no job ID is provided, generate a 12 char random ID
+	if jobID == "" {
+		jobID = strings.Split(uuid.New().String(), "-")[0]
 	}
 	log.Trace().Msgf("Adding job with %d tasks with group ID '%s' and cadence %v", len(tasks), jobID, cadence)
 
