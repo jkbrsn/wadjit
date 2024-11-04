@@ -105,10 +105,38 @@ func TestAddJob(t *testing.T) {
 	}
 	scheduler.AddJob(tasks, 100*time.Millisecond, "group1")
 
+	// Assert that the job was added
 	assert.Equal(t, 1, scheduler.jobQueue.Len(), "Expected job queue length to be 1, got %d", scheduler.jobQueue.Len())
-
 	job := scheduler.jobQueue[0]
 	assert.Equal(t, 2, len(job.Tasks), "Expected job to have 2 tasks, got %d", len(job.Tasks))
+}
+
+func TestRemoveJob(t *testing.T) {
+	taskChan := make(chan Task, 2)
+	scheduler := NewScheduler(taskChan)
+	defer scheduler.Stop()
+
+	mockTasks := []MockTask{
+		{ID: "task1", cadence: 100 * time.Millisecond},
+		{ID: "task2", cadence: 100 * time.Millisecond},
+	}
+	// Explicitly convert []MockTask to []Task to satisfy the AddJob method signature, since slices are not covariant in Go
+	tasks := make([]Task, len(mockTasks))
+	for i, task := range mockTasks {
+		tasks[i] = task
+	}
+	scheduler.AddJob(tasks, 100*time.Millisecond, "group1")
+
+	// Assert that the job was added
+	assert.Equal(t, 1, scheduler.jobQueue.Len(), "Expected job queue length to be 1, got %d", scheduler.jobQueue.Len())
+	job := scheduler.jobQueue[0]
+	assert.Equal(t, 2, len(job.Tasks), "Expected job to have 2 tasks, got %d", len(job.Tasks))
+
+	// Remove the job
+	scheduler.RemoveJob("group1")
+
+	// Assert that the job was removed
+	assert.Equal(t, 0, scheduler.jobQueue.Len(), "Expected job queue length to be 0, got %d", scheduler.jobQueue.Len())
 }
 
 func TestTaskExecution(t *testing.T) {
