@@ -24,7 +24,9 @@ type Scheduler struct {
 
 // ScheduledJob represents a group of tasks that are scheduled for execution.
 // TODO: consider adding an option to execute when inserted
-// TODO: consider adding an option to stop the group from further execution, without stopping the scheduler
+// TODO: consider adding support for one-hit jobs, either with immediate or delayed execution, and with automatic removal after execution
+// TODO: consider adding an option to stop an individual task
+// TODO: would we for any reason need a cancellation flag here?
 type ScheduledJob struct {
 	Tasks []Task
 
@@ -37,14 +39,15 @@ type ScheduledJob struct {
 }
 
 // AddTask adds a Task to the Scheduler.
-// Note; gives the scheduled job the same ID as the single task.
+// Note: wrapper for AddJob to simplify adding single tasks.
 func (s *Scheduler) AddTask(task Task, jobID string) {
-	s.AddTasks([]Task{task}, task.Cadence(), jobID)
+	s.AddJob([]Task{task}, task.Cadence(), jobID)
 }
 
-// AddTasks adds a group of Tasks to the Scheduler.
+// AddJob adds a job of N tasks to the Scheduler.
+// Requirements: tasks must have a cadence greater than 0, jobID must be unique.
 // TODO: assign random group ID if not provided?
-func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, jobID string) {
+func (s *Scheduler) AddJob(tasks []Task, cadence time.Duration, jobID string) {
 	// TODO: should we allow tasks with cadence == 0?
 	if cadence <= 0 {
 		log.Warn().Msgf("Ignoring job with ID '%s' and cadence %v, cadence must be greater than 0", jobID, cadence)
@@ -73,6 +76,20 @@ func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, jobID string) 
 	case s.newTaskChannel <- true:
 	default:
 		// Do nothing if no one is listening
+	}
+}
+
+// RemoveJob removes a job from the Scheduler.
+func (s *Scheduler) RemoveJob(jobID string) {
+	s.Lock()
+	defer s.Unlock()
+
+	// Find the job in the heap and remove it
+	for i, job := range s.jobQueue {
+		if job.ID == jobID {
+			heap.Remove(&s.jobQueue, i)
+			break
+		}
 	}
 }
 

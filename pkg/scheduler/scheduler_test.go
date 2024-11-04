@@ -32,6 +32,7 @@ func (mt MockTask) Execute() Result {
 }
 
 // TODO: write test comparing what happens when different channel types are used for taskChan
+// TODO: write test where tasks are added mid-run
 
 func TestMain(m *testing.M) {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(zerolog.DebugLevel)
@@ -85,7 +86,7 @@ func TestAddTask(t *testing.T) {
 	assert.Equal(t, testTask, job.Tasks[0], "Expected the task in the job to be the test task")
 }
 
-func TestAddTasks(t *testing.T) {
+func TestAddJob(t *testing.T) {
 	taskChan := make(chan Task, 2)
 	scheduler := NewScheduler(taskChan)
 
@@ -93,12 +94,12 @@ func TestAddTasks(t *testing.T) {
 		{ID: "task1", cadence: 100 * time.Millisecond},
 		{ID: "task2", cadence: 100 * time.Millisecond},
 	}
-	// Explicitly convert []MockTask to []Task to satisfy the AddTasks method signature, since slices are not covariant in Go
+	// Explicitly convert []MockTask to []Task to satisfy the AddJob method signature, since slices are not covariant in Go
 	tasks := make([]Task, len(mockTasks))
 	for i, task := range mockTasks {
 		tasks[i] = task
 	}
-	scheduler.AddTasks(tasks, 100*time.Millisecond, "group1")
+	scheduler.AddJob(tasks, 100*time.Millisecond, "group1")
 
 	assert.Equal(t, 1, scheduler.jobQueue.Len(), "Expected job queue length to be 1, got %d", scheduler.jobQueue.Len())
 
