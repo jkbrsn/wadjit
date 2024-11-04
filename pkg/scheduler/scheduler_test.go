@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -137,5 +138,36 @@ func TestSchedulerStop(t *testing.T) {
 		t.Fatal("Did not expect any tasks to be executed after scheduler is stopped")
 	case <-time.After(200 * time.Millisecond):
 		// No tasks executed, as expected
+	}
+}
+
+func TestConcurrentAddTask(t *testing.T) {
+	taskChan := make(chan Task)
+	scheduler := NewScheduler(taskChan)
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	var wg sync.WaitGroup
+	numGoroutines := 20
+	numTasksPerGoroutine := 100
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < numTasksPerGoroutine; j++ {
+				taskID := fmt.Sprintf("task-%d-%d", id, j)
+				task := NewDefaultTask(taskID, 100*time.Millisecond)
+				scheduler.AddTask(task, taskID)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify that all tasks are scheduled
+	expectedTasks := numGoroutines * numTasksPerGoroutine
+	if scheduler.jobQueue.Len() != expectedTasks {
+		t.Fatalf("Expected job queue length to be %d, got %d", expectedTasks, scheduler.jobQueue.Len())
 	}
 }
