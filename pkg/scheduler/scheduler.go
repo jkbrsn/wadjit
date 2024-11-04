@@ -45,7 +45,7 @@ func (s *Scheduler) AddTask(task Task, jobID string) {
 // AddTasks adds a group of Tasks to the Scheduler.
 // TODO: assign random group ID if not provided?
 func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, jobID string) {
-	log.Debug().Msgf("Adding group of %d tasks with group ID '%s' and cadence %v", len(tasks), jobID, cadence)
+	log.Trace().Msgf("Adding group of %d tasks with group ID '%s' and cadence %v", len(tasks), jobID, cadence)
 
 	job := &ScheduledJob{
 		Tasks: tasks,
@@ -63,7 +63,7 @@ func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, jobID string) 
 	s.Unlock()
 
 	// Signal the scheduler to check for new tasks
-	log.Debug().Msg("Signaling new job added")
+	log.Trace().Msg("Signaling new job added")
 	select {
 	case s.newTaskChannel <- true:
 	default:
@@ -87,7 +87,7 @@ func (s *Scheduler) run() {
 			s.Unlock()
 			select {
 			case <-s.newTaskChannel:
-				log.Debug().Msg("New task added, checking for next job")
+				log.Trace().Msg("New task added, checking for next job")
 				continue
 			case <-s.stopChannel:
 				return

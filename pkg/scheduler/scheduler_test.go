@@ -2,10 +2,12 @@ package scheduler
 
 import (
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/stretchr/testify/assert"
 )
@@ -30,6 +32,11 @@ func (mt MockTask) Execute() Result {
 }
 
 // TODO: write test comparing what happens when different channel types are used for taskChan
+
+func TestMain(m *testing.M) {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(zerolog.DebugLevel)
+	os.Exit(m.Run())
+}
 
 func TestNewScheduler(t *testing.T) {
 	taskChan := make(chan<- Task)
