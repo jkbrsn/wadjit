@@ -25,7 +25,7 @@ func (mt MockTask) Execute() Result {
 	if mt.executeFunc != nil {
 		mt.executeFunc()
 	}
-	return Result{}
+	return Result{Success: true}
 }
 
 // TODO: write test comparing what happens when different channel types are used for taskChan
@@ -112,5 +112,30 @@ func TestTaskExecution(t *testing.T) {
 		}
 	case <-time.After(200 * time.Millisecond):
 		t.Fatal("Task did not execute in expected time")
+	}
+}
+
+func TestSchedulerStop(t *testing.T) {
+	taskChan := make(chan Task)
+	scheduler := NewScheduler(taskChan)
+	scheduler.Start()
+
+	scheduler.Stop()
+
+	// Attempt to add a task after stopping
+	testTask := NewDefaultTask("test-task", 100*time.Millisecond)
+	scheduler.AddTask(testTask, testTask.ID)
+
+	// Since the scheduler is stopped, the task should not be scheduled
+	if scheduler.jobQueue.Len() != 1 {
+		t.Fatalf("Expected job queue length to be 1, got %d", scheduler.jobQueue.Len())
+	}
+
+	// Wait some time to see if the task executes
+	select {
+	case <-taskChan:
+		t.Fatal("Did not expect any tasks to be executed after scheduler is stopped")
+	case <-time.After(200 * time.Millisecond):
+		// No tasks executed, as expected
 	}
 }
