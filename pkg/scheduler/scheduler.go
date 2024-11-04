@@ -37,21 +37,22 @@ type ScheduledJob struct {
 }
 
 // AddTask adds a Task to the Scheduler.
-func (s *Scheduler) AddTask(task Task) {
-	s.AddTasks([]Task{task}, task.Cadence(), "")
+// Note; gives the scheduled job the same ID as the single task.
+func (s *Scheduler) AddTask(task Task, jobID string) {
+	s.AddTasks([]Task{task}, task.Cadence(), jobID)
 }
 
 // AddTasks adds a group of Tasks to the Scheduler.
 // TODO: assign random group ID if not provided?
-func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, groupID string) {
-	log.Debug().Msgf("Adding group of %d tasks with group ID '%s' and cadence %v", len(tasks), groupID, cadence)
+func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, jobID string) {
+	log.Debug().Msgf("Adding group of %d tasks with group ID '%s' and cadence %v", len(tasks), jobID, cadence)
 
 	job := &ScheduledJob{
 		Tasks: tasks,
 		// TODO: make copy of tasks to remove reference to original slice?
 		//Tasks:    append([]Task(nil), tasks...), // Creates a copy of tasks
 		Cadence:  cadence,
-		ID:       groupID,
+		ID:       jobID,
 		NextExec: time.Now().Add(cadence),
 	}
 	job.size.Store(int32(len(tasks)))
@@ -73,6 +74,7 @@ func (s *Scheduler) AddTasks(tasks []Task, cadence time.Duration, groupID string
 // Start starts the Scheduler.
 // With this design, the Scheduler manages its own goroutine internally.
 func (s *Scheduler) Start() {
+	log.Info().Msg("Starting scheduler")
 	go s.run()
 }
 
