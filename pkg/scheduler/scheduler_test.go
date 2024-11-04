@@ -72,7 +72,7 @@ func TestSchedulerStop(t *testing.T) {
 	}
 }
 func TestAddTask(t *testing.T) {
-	taskChan := make(chan<- Task, 1)
+	taskChan := make(chan Task, 1)
 	scheduler := NewScheduler(taskChan)
 
 	testTask := MockTask{ID: "test-task", cadence: 100 * time.Millisecond}
@@ -86,7 +86,7 @@ func TestAddTask(t *testing.T) {
 }
 
 func TestAddTasks(t *testing.T) {
-	taskChan := make(chan<- Task, 2)
+	taskChan := make(chan Task, 2)
 	scheduler := NewScheduler(taskChan)
 
 	mockTasks := []MockTask{
