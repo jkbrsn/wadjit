@@ -24,6 +24,7 @@ type Scheduler struct {
 
 // ScheduledJob represents a group of tasks that are scheduled for execution.
 // TODO: consider adding an option to execute when inserted
+// TODO: consider adding an option to stop the group from further execution, without stopping the scheduler
 type ScheduledJob struct {
 	Tasks []Task
 
