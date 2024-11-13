@@ -50,7 +50,7 @@ func (s *Scheduler) AddJob(tasks []Task, cadence time.Duration, jobID string) {
 	// Jobs with cadence < 0 are ignored, as a negative cadence makes no sense
 	// Jobs with cadence == 0 are ignored, as a zero cadence would continuously execute the job and risk overwhelming the worker pool
 	if cadence <= 0 {
-		log.Warn().Msgf("Ignoring job with ID '%s' and cadence %v, cadence must be greater than 0", jobID, cadence)
+		log.Warn().Msgf("Ignoring job with cadence %v (ID '%s'): cadence must be greater than 0.", cadence, jobID)
 		return
 	}
 	// If no job ID is provided, generate a 12 char random ID
