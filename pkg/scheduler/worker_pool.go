@@ -30,7 +30,7 @@ func (wp *WorkerPool) worker(id int) {
 	for {
 		select {
 		case task := <-wp.taskChan:
-			log.Trace().Msgf("Worker %d executing task", id)
+			log.Debug().Msgf("Worker %d executing task", id)
 			wp.activeWorkers.Add(1) // Increment active workers
 			// TODO: consider processing the task in a separate goroutine, e.g. async task execution within a single worker
 			// TODO cont.: this would allow the worker to continue processing tasks while waiting for the result
@@ -42,9 +42,9 @@ func (wp *WorkerPool) worker(id int) {
 			}
 			wp.resultChan <- result
 			wp.activeWorkers.Add(-1) // Decrement active workers
-			log.Trace().Msgf("Worker %d finished task", id)
+			log.Debug().Msgf("Worker %d finished task", id)
 		case <-wp.stopChan:
-			log.Trace().Msgf("Worker %d received stop signal", id)
+			log.Debug().Msgf("Worker %d received stop signal", id)
 			return
 		}
 	}
@@ -65,9 +65,10 @@ func (wp *WorkerPool) Start() {
 // Stop signals the worker pool to stop processing tasks and exit.
 func (wp *WorkerPool) Stop() {
 	log.Debug().Msg("Attempting worker pool stop")
-	close(wp.stopChan)   // Signal workers to stop
-	wp.wg.Wait()         // Wait for all workers to finish
-	close(wp.resultChan) // Close the result channel
+	close(wp.stopChan) // Signal workers to stop
+	log.Debug().Msg("Waiting for workers to finish")
+	wp.wg.Wait() // Wait for all workers to finish
+	close(wp.resultChan)
 }
 
 // NewWorkerPool creates a worker pool.

@@ -1,6 +1,7 @@
 package scheduler
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -226,6 +227,108 @@ func TestTaskRescheduling(t *testing.T) {
 	mu.Unlock()
 }
 
+// TODO: clean test up, removing some logs
+func TestAddTaskDuringExecution(t *testing.T) {
+	taskChan := make(chan Task, 1)
+	resultChan := make(chan Result, 1)
+
+	workerPool := NewWorkerPool(resultChan, taskChan, 10)
+	workerPool.Start()
+	defer workerPool.Stop()
+	scheduler := NewScheduler(taskChan)
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	// Consume resultChan to prevent workers from blocking
+	go func() {
+		for range resultChan {
+			// Do nothing
+		}
+	}()
+
+	// Use a channel to receive execution times
+	executionMessages := make(chan string, 1)
+	defer close(executionMessages)
+
+	// Use a context to cancel the test
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Create test tasks
+	testTask1 := &MockTask{
+		ID:      "test-add-mid-execution-task-1",
+		cadence: 15 * time.Millisecond,
+		executeFunc: func() {
+			select {
+			case <-ctx.Done():
+				t.Log("Task 1 cancelled")
+				return
+			default:
+				t.Log("Executing task 1")
+				executionMessages <- "task1"
+				t.Log("Executed task 1")
+			}
+		},
+	}
+	testTask2 := &MockTask{
+		ID:      "test-add-mid-execution-task-2",
+		cadence: 10 * time.Millisecond,
+		executeFunc: func() {
+			select {
+			case <-ctx.Done():
+				t.Log("Task 2 cancelled")
+				return
+			default:
+				t.Log("Executing task 2")
+				executionMessages <- "task2"
+				t.Log("Executed task 2")
+			}
+		},
+	}
+
+	trackTasks := map[string]bool{
+		"task1": false,
+		"task2": false,
+	}
+
+	go func() {
+		for {
+			select {
+			case msg := <-executionMessages:
+				trackTasks[msg] = true
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Schedule first task
+	t.Log("Scheduling task 1")
+	scheduler.AddTask(testTask1, testTask1.ID)
+
+	select {
+	case <-executionMessages:
+		// Task executed as expected
+	case <-time.After(20 * time.Millisecond):
+		t.Fatal("Task 1 did not execute within the expected time frame")
+	}
+
+	// Schedule second task after we've had at least one execution of the first task
+	t.Log("Scheduling task 2")
+	scheduler.AddTask(testTask2, testTask2.ID)
+
+	// Sleep enough time to make sure both tasks have executed at least once
+	time.Sleep(20 * time.Millisecond)
+
+	// Check that both tasks have executed
+	for msg, executed := range trackTasks {
+		if !executed {
+			t.Fatalf("Task '%s' did not execute", msg)
+		}
+	}
+	cancel()
+}
+
 func TestConcurrentAddTask(t *testing.T) {
 	taskChan := make(chan Task)
 	scheduler := NewScheduler(taskChan)
@@ -254,6 +357,8 @@ func TestConcurrentAddTask(t *testing.T) {
 	expectedTasks := numGoroutines * numTasksPerGoroutine
 	assert.Equal(t, expectedTasks, scheduler.jobQueue.Len(), "Expected job queue length to be %d, got %d", expectedTasks, scheduler.jobQueue.Len())
 }
+
+// TODO: add test for concurrently running tasks
 
 func TestZeroCadenceTask(t *testing.T) {
 	taskChan := make(chan Task)

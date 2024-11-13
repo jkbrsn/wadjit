@@ -15,6 +15,7 @@ func main() {
 	// TODO: add flags for configuring the worker pool size and refresh rate etc.
 
 	// TODO: should the scheduler set up the worker pool inside itself?
+	// TODO: should channels also be created inside the scheduler?
 	workerPool := scheduler.NewWorkerPool(resultChannel, taskChannel, 10)
 	taskScheduler := scheduler.NewScheduler(taskChannel)
 

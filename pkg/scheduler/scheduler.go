@@ -57,7 +57,7 @@ func (s *Scheduler) AddJob(tasks []Task, cadence time.Duration, jobID string) {
 	if jobID == "" {
 		jobID = strings.Split(uuid.New().String(), "-")[0]
 	}
-	log.Trace().Msgf("Adding job with %d tasks with group ID '%s' and cadence %v", len(tasks), jobID, cadence)
+	log.Debug().Msgf("Adding job with %d tasks with group ID '%s' and cadence %v", len(tasks), jobID, cadence)
 
 	// The job uses a copy of the tasks slice, to avoid unintended consequences if the original slice is modified
 	job := &ScheduledJob{

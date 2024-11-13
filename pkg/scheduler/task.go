@@ -38,7 +38,7 @@ func (dt DefaultTask) Cadence() time.Duration {
 
 // Execute executes the DefaultTask.
 func (dt DefaultTask) Execute() Result {
-	log.Debug().Msgf("Executing task %s", dt.ID)
+	log.Trace().Msgf("Executing task %s", dt.ID)
 	// Placeholder: Implement task execution logic
 	return Result{}
 }
