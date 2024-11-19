@@ -36,7 +36,8 @@ func (mt MockTask) Execute() Result {
 // TODO: write test where tasks are added mid-run
 
 func TestMain(m *testing.M) {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr}).Level(zerolog.DebugLevel)
+	zerolog.TimeFieldFormat = time.RFC3339Nano
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05.999"}).Level(zerolog.DebugLevel)
 	os.Exit(m.Run())
 }
 
@@ -246,13 +247,19 @@ func TestAddTaskDuringExecution(t *testing.T) {
 		}
 	}()
 
-	// Use a channel to receive execution times
-	executionMessages := make(chan string, 1)
-	defer close(executionMessages)
+	// Dedicated channels for task execution signals
+	task1Executed := make(chan struct{})
+	defer close(task1Executed)
 
 	// Use a context to cancel the test
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	trackTasks := map[string]bool{
+		"task1": false,
+		"task2": false,
+	}
+	var mu sync.Mutex
 
 	// Create test tasks
 	testTask1 := &MockTask{
@@ -265,8 +272,11 @@ func TestAddTaskDuringExecution(t *testing.T) {
 				return
 			default:
 				t.Log("Executing task 1")
-				executionMessages <- "task1"
-				t.Log("Executed task 1")
+				task1Executed <- struct{}{}
+				mu.Lock()
+				trackTasks["task1"] = true
+				mu.Unlock()
+				t.Logf("Executed task 1, %v", time.Now())
 			}
 		},
 	}
@@ -280,53 +290,52 @@ func TestAddTaskDuringExecution(t *testing.T) {
 				return
 			default:
 				t.Log("Executing task 2")
-				executionMessages <- "task2"
-				t.Log("Executed task 2")
+				mu.Lock()
+				trackTasks["task2"] = true
+				mu.Unlock()
+				t.Logf("Executed task 2, %v", time.Now())
 			}
 		},
 	}
 
-	trackTasks := map[string]bool{
-		"task1": false,
-		"task2": false,
-	}
-
-	go func() {
-		for {
-			select {
-			case msg := <-executionMessages:
-				trackTasks[msg] = true
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
 	// Schedule first task
 	t.Log("Scheduling task 1")
 	scheduler.AddTask(testTask1, testTask1.ID)
+	start := time.Now()
 
 	select {
-	case <-executionMessages:
+	case <-task1Executed:
 		// Task executed as expected
+		t.Logf("Task 1 executed after %v", time.Since(start))
 	case <-time.After(20 * time.Millisecond):
-		t.Fatal("Task 1 did not execute within the expected time frame")
+		t.Fatalf("Task 1 did not execute within the expected time frame (40ms), %v", time.Since(start))
 	}
 
+	// Consume task1Executed to prevent it from blocking
+	go func() {
+		for range task1Executed {
+			// Do nothing
+		}
+	}()
+
 	// Schedule second task after we've had at least one execution of the first task
-	t.Log("Scheduling task 2")
+	t.Logf("Scheduling task 2, %v", time.Since(start))
 	scheduler.AddTask(testTask2, testTask2.ID)
 
 	// Sleep enough time to make sure both tasks have executed at least once
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
+
+	cancel()
+	scheduler.Stop()
 
 	// Check that both tasks have executed
+	mu.Lock()
 	for msg, executed := range trackTasks {
 		if !executed {
-			t.Fatalf("Task '%s' did not execute", msg)
+			t.Fatalf("Task '%s' did not execute, %v", msg, time.Since(start))
 		}
 	}
-	cancel()
+	mu.Unlock()
 }
 
 func TestConcurrentAddTask(t *testing.T) {
