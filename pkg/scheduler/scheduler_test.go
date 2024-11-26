@@ -32,6 +32,18 @@ func (mt MockTask) Execute() Result {
 	return Result{Success: true}
 }
 
+// Helper function to determine the buffer size of a channel
+func getChannelBufferSize(ch interface{}) int {
+	switch v := ch.(type) {
+	case chan Task:
+		return cap(v)
+	case chan Result:
+		return cap(v)
+	default:
+		return 0
+	}
+}
+
 // TODO: write test comparing what happens when different channel types are used for taskChan
 // TODO: write test where tasks are added mid-run
 
@@ -42,43 +54,53 @@ func TestMain(m *testing.M) {
 }
 
 func TestNewScheduler(t *testing.T) {
-	taskChan := make(chan<- Task)
-	scheduler := NewScheduler(taskChan)
+	scheduler := NewScheduler(10, 1, 1)
 	defer scheduler.Stop()
 
+	// Verify jobQueue is initialized
 	assert.NotNil(t, scheduler.jobQueue, "Expected job queue to be non-nil")
 
-	assert.Equal(t, scheduler.taskChan, taskChan, "Expected task channel to be set correctly")
+	// Verify taskChan is initialized and has the correct buffer size
+	assert.NotNil(t, scheduler.taskChan, "Expected task channel to be non-nil")
+	taskChanBuffer := getChannelBufferSize(scheduler.taskChan)
+	assert.Equal(t, 1, taskChanBuffer, "Expected task channel to have buffer size 1")
+
+	// Verify resultChan is initialized and has the correct buffer size
+	assert.NotNil(t, scheduler.resultChan, "Expected result channel to be non-nil")
+	resultChanBuffer := getChannelBufferSize(scheduler.resultChan)
+	assert.Equal(t, 1, resultChanBuffer, "Expected result channel to have buffer size 1")
 }
 
 func TestSchedulerStop(t *testing.T) {
-	taskChan := make(chan Task)
-	scheduler := NewScheduler(taskChan)
-	scheduler.Start()
+	// NewSceduler starts the scheduler
+	scheduler := NewScheduler(10, 2, 1)
 
 	// Immediately stop the scheduler
 	scheduler.Stop()
 
 	// Attempt to add a task after stopping
-	testTask := MockTask{ID: "test-task", cadence: 100 * time.Millisecond}
+	testChan := make(chan bool)
+	testTask := MockTask{ID: "a-task", cadence: 50 * time.Millisecond, executeFunc: func() {
+		testChan <- true
+	}}
 	scheduler.AddTask(testTask, testTask.ID)
 
-	// Since the scheduler is stopped, the task should not be scheduled
-	if scheduler.jobQueue.Len() != 1 {
-		t.Fatalf("Expected job queue length to be 1, got %d", scheduler.jobQueue.Len())
+	// Since the scheduler is stopped, the task should not have been added to the job queue
+	if scheduler.jobQueue.Len() != 0 {
+		t.Fatalf("Expected job queue length to be 0, got %d", scheduler.jobQueue.Len())
 	}
 
 	// Wait some time to see if the task executes
 	select {
-	case <-taskChan:
+	case <-testChan:
 		t.Fatal("Did not expect any tasks to be executed after scheduler is stopped")
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(100 * time.Millisecond):
 		// No tasks executed, as expected
 	}
 }
+
 func TestAddTask(t *testing.T) {
-	taskChan := make(chan Task, 1)
-	scheduler := NewScheduler(taskChan)
+	scheduler := NewScheduler(10, 2, 1)
 	defer scheduler.Stop()
 
 	testTask := MockTask{ID: "test-task", cadence: 100 * time.Millisecond}
@@ -92,8 +114,7 @@ func TestAddTask(t *testing.T) {
 }
 
 func TestAddJob(t *testing.T) {
-	taskChan := make(chan Task, 2)
-	scheduler := NewScheduler(taskChan)
+	scheduler := NewScheduler(10, 2, 1)
 	defer scheduler.Stop()
 
 	mockTasks := []MockTask{
@@ -114,8 +135,7 @@ func TestAddJob(t *testing.T) {
 }
 
 func TestRemoveJob(t *testing.T) {
-	taskChan := make(chan Task, 2)
-	scheduler := NewScheduler(taskChan)
+	scheduler := NewScheduler(10, 2, 1)
 	defer scheduler.Stop()
 
 	mockTasks := []MockTask{
@@ -142,14 +162,7 @@ func TestRemoveJob(t *testing.T) {
 }
 
 func TestTaskExecution(t *testing.T) {
-	taskChan := make(chan Task, 1)
-	resultChan := make(chan Result, 1)
-
-	workerPool := NewWorkerPool(resultChan, taskChan, 10)
-	workerPool.Start()
-	defer workerPool.Stop()
-	scheduler := NewScheduler(taskChan)
-	scheduler.Start()
+	scheduler := NewScheduler(10, 1, 1)
 	defer scheduler.Stop()
 
 	var wg sync.WaitGroup
@@ -181,14 +194,9 @@ func TestTaskExecution(t *testing.T) {
 }
 
 func TestTaskRescheduling(t *testing.T) {
-	taskChan := make(chan Task, 1)
-	resultChan := make(chan Result, 4) // Make room in buffered channel for multiple results, since we're not receiving them in this test
-
-	workerPool := NewWorkerPool(resultChan, taskChan, 10)
-	workerPool.Start()
-	defer workerPool.Stop()
-	scheduler := NewScheduler(taskChan)
-	scheduler.Start()
+	// Make room in buffered channel for multiple results, since we're not consuming them in this test
+	// and the results channel otherwise blocks the workers from executing tasks
+	scheduler := NewScheduler(10, 1, 4)
 	defer scheduler.Stop()
 
 	var executionTimes []time.Time
@@ -230,19 +238,12 @@ func TestTaskRescheduling(t *testing.T) {
 
 // TODO: clean test up, removing some logs
 func TestAddTaskDuringExecution(t *testing.T) {
-	taskChan := make(chan Task, 1)
-	resultChan := make(chan Result, 1)
-
-	workerPool := NewWorkerPool(resultChan, taskChan, 10)
-	workerPool.Start()
-	defer workerPool.Stop()
-	scheduler := NewScheduler(taskChan)
-	scheduler.Start()
+	scheduler := NewScheduler(10, 1, 1)
 	defer scheduler.Stop()
 
 	// Consume resultChan to prevent workers from blocking
 	go func() {
-		for range resultChan {
+		for range scheduler.Results() {
 			// Do nothing
 		}
 	}()
@@ -342,9 +343,7 @@ func TestConcurrentAddTask(t *testing.T) {
 	// Deactivate debug logs for this test
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05.999"}).Level(zerolog.InfoLevel)
 
-	taskChan := make(chan Task)
-	scheduler := NewScheduler(taskChan)
-	scheduler.Start()
+	scheduler := NewScheduler(10, 1, 1)
 	defer scheduler.Stop()
 
 	var wg sync.WaitGroup
@@ -373,18 +372,19 @@ func TestConcurrentAddTask(t *testing.T) {
 // TODO: add test for concurrently running tasks
 
 func TestZeroCadenceTask(t *testing.T) {
-	taskChan := make(chan Task)
-	scheduler := NewScheduler(taskChan)
-	scheduler.Start()
+	scheduler := NewScheduler(10, 1, 1)
 	defer scheduler.Stop()
 
-	testTask := MockTask{ID: "zero-cadence-task", cadence: 0}
+	testChan := make(chan bool)
+	testTask := MockTask{ID: "zero-cadence-task", cadence: 0, executeFunc: func() {
+		testChan <- true
+	}}
 	scheduler.AddTask(testTask, testTask.ID)
 
 	// Expect the task to not execute
 	select {
-	case <-taskChan:
-		// Success
+	case <-testChan:
+		// Task executed, which is unexpected
 		t.Fatal("Task with zero cadence should not execute")
 	case <-time.After(50 * time.Millisecond):
 		// After 50ms, the task would have executed if it was scheduled

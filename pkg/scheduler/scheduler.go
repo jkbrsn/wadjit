@@ -16,11 +16,14 @@ type Scheduler struct {
 
 	newTaskChannel chan bool   // Channel to signal that new tasks have entered the queue
 	stopChannel    chan bool   // Channel to signal stopping the scheduler
-	taskChan       chan<- Task // Send-only channel to send tasks to the worker pool
+	taskChan       chan Task   // Channel to send tasks to the worker pool
+	resultChan     chan Result // Channel to receive results from the worker pool
 
 	jobQueue PriorityQueue // A priority queue to hold the scheduled jobs
 
 	stopOnce sync.Once
+
+	workerPool *WorkerPool
 }
 
 // ScheduledJob represents a group of tasks that are scheduled for execution.
@@ -28,6 +31,7 @@ type Scheduler struct {
 // TODO: consider adding support for one-hit jobs, either with immediate or delayed execution, and with automatic removal after execution
 // TODO: consider adding an option to stop an individual task
 // TODO: would we for any reason need a cancellation flag here?
+// TODO: consider adding a broadcast function with a fan-out pattern to send resuts to multiple channels
 type ScheduledJob struct {
 	Tasks []Task
 
@@ -67,17 +71,33 @@ func (s *Scheduler) AddJob(tasks []Task, cadence time.Duration, jobID string) {
 		NextExec: time.Now().Add(cadence),
 	}
 
+	// Check if the scheduler is stopped
+	select {
+	case <-s.stopChannel:
+		// If the scheduler is stopped, do not continue adding the job
+		log.Debug().Msg("Scheduler is stopped, not adding job")
+		return
+	default:
+		// Do nothing if the scheduler isn't stopped
+	}
+
 	// Push the job to the queue
 	s.Lock()
 	heap.Push(&s.jobQueue, job)
 	s.Unlock()
 
 	// Signal the scheduler to check for new tasks
-	log.Trace().Msg("Signaling new job added")
 	select {
-	case s.newTaskChannel <- true:
+	case <-s.stopChannel:
+		// Do nothing if the scheduler is stopped
+		log.Debug().Msg("Scheduler is stopped, not signaling new task")
 	default:
-		// Do nothing if no one is listening
+		select {
+		case s.newTaskChannel <- true:
+			log.Trace().Msg("Signaled new job added")
+		default:
+			// Do nothing if no one is listening
+		}
 	}
 }
 
@@ -114,6 +134,7 @@ func (s *Scheduler) run() {
 				log.Trace().Msg("New task added, checking for next job")
 				continue
 			case <-s.stopChannel:
+				log.Info().Msg("Scheduler received stop signal, exiting run loop")
 				return
 			}
 		} else {
@@ -145,10 +166,16 @@ func (s *Scheduler) run() {
 				// Time to execute the next job
 				continue
 			case <-s.stopChannel:
+				log.Info().Msg("Scheduler received stop signal during wait, exiting run loop")
 				return
 			}
 		}
 	}
+}
+
+// Results returns a read-only channel for consuming results.
+func (s *Scheduler) Results() <-chan Result {
+	return s.resultChan
 }
 
 // Stop signals the Scheduler to stop processing tasks and exit.
@@ -158,24 +185,43 @@ func (s *Scheduler) Stop() {
 		s.Lock()
 		defer s.Unlock()
 
+		// Signal the scheduler to stop if not already stopped
 		select {
 		case <-s.stopChannel:
 			// Already closed
 		default:
 			close(s.stopChannel)
 		}
+
+		// Stop the worker pool
+		s.workerPool.Stop()
+
+		// Close the remaining channels
+		close(s.taskChan)
+		close(s.newTaskChannel)
+		// resultChan is closed by WorkerPool.Stop()
 	})
 }
 
+// TODO: consider adding an internal constructor where we can use dependency injection for the worker pool and channels
 // NewScheduler creates and returns a new Scheduler.
-func NewScheduler(taskChan chan<- Task) *Scheduler {
+func NewScheduler(workerCount, taskBufferSize, resultBufferSize int) *Scheduler {
 	log.Debug().Msg("Creating new scheduler")
 	s := &Scheduler{
-		newTaskChannel: make(chan bool),
+		newTaskChannel: make(chan bool, 1),
+		resultChan:     make(chan Result, resultBufferSize),
 		stopChannel:    make(chan bool),
-		taskChan:       taskChan,
+		taskChan:       make(chan Task, taskBufferSize),
 		jobQueue:       make(PriorityQueue, 0),
 	}
+
 	heap.Init(&s.jobQueue)
+
+	s.workerPool = NewWorkerPool(s.resultChan, s.taskChan, workerCount)
+	s.workerPool.Start()
+
+	log.Info().Msg("Starting scheduler")
+	go s.run()
+
 	return s
 }

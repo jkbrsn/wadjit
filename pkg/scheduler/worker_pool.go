@@ -15,6 +15,7 @@ type WorkerPool struct {
 	workerCount   int          // Total number of workers in the pool
 	activeWorkers atomic.Int32 // Number of active workers
 
+	// TODO: do a lookover for channel directions
 	resultChan chan<- Result // Send-only channel for results
 	stopChan   chan struct{} // Channel to signal stopping the worker pool
 	taskChan   <-chan Task   // Receive-only channel for tasks
@@ -29,7 +30,11 @@ func (wp *WorkerPool) worker(id int) {
 
 	for {
 		select {
-		case task := <-wp.taskChan:
+		case task, ok := <-wp.taskChan:
+			if !ok {
+				log.Debug().Msgf("Worker %d: task channel closed, exiting", id)
+				return
+			}
 			log.Debug().Msgf("Worker %d executing task", id)
 			wp.activeWorkers.Add(1) // Increment active workers
 			// TODO: consider processing the task in a separate goroutine, e.g. async task execution within a single worker
@@ -38,13 +43,13 @@ func (wp *WorkerPool) worker(id int) {
 			if result.Error != nil {
 				// No retry policy is implemented, we just log the error for now
 				// TODO: consider leaving all error handling to the caller
-				log.Error().Err(result.Error).Msg("Task execution failed")
+				log.Error().Err(result.Error).Msgf("Worker %d: task execution failed", id)
 			}
 			wp.resultChan <- result
 			wp.activeWorkers.Add(-1) // Decrement active workers
-			log.Debug().Msgf("Worker %d finished task", id)
+			log.Debug().Msgf("Worker %d: finished task", id)
 		case <-wp.stopChan:
-			log.Debug().Msgf("Worker %d received stop signal", id)
+			log.Debug().Msgf("Worker %d: received stop signal, exiting", id)
 			return
 		}
 	}
@@ -57,6 +62,7 @@ func (wp *WorkerPool) ActiveWorkers() int32 {
 
 // Start starts the worker pool, creating workers according to wp.WorkerCount.
 func (wp *WorkerPool) Start() {
+	log.Info().Msgf("Starting worker pool with %d workers", wp.workerCount)
 	for i := 0; i < wp.workerCount; i++ {
 		go wp.worker(i)
 	}

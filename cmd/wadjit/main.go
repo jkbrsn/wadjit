@@ -36,21 +36,13 @@ func NewExampleTask(id string, cadence time.Duration) *ExampleTask {
 }
 
 func main() {
-	// TODO: evaluate and adjust buffer sizes
-	taskChannel := make(chan scheduler.Task, 1000)    // Buffered channel to hold tasks
+	// TODO: set from scheduler function, e.g. 'for result := range scheduler.Results() {' from within a goroutine
 	resultChannel := make(chan scheduler.Result, 100) // Buffered channel to hold results
 
 	// TODO: add flags for configuring the worker pool size and refresh rate etc.
 
-	// TODO: should the scheduler set up the worker pool inside itself?
-	// TODO: should channels also be created inside the scheduler?
-	workerPool := scheduler.NewWorkerPool(resultChannel, taskChannel, 10)
-	taskScheduler := scheduler.NewScheduler(taskChannel)
-
-	// TODO: add waitgroup/shutdown procedure to ensure all goroutines are stopped before exiting, and to gracefully handle shutdown
-	// TODO: these doesn't need to run in separate goroutines any more
-	go taskScheduler.Start()
-	go workerPool.Start()
+	// TODO: evaluate and adjust buffer sizes
+	taskScheduler := scheduler.NewScheduler(10, 8, 8)
 
 	// TODO: add endpoint DB client and fetch tasks from the DB, add these as tasks in scheduler
 	// DEV: add tasks with varying cadences
