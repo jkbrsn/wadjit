@@ -60,7 +60,7 @@ func TestSchedulerStop(t *testing.T) {
 	scheduler.Stop()
 
 	// Attempt to add a task after stopping
-	testTask := NewDefaultTask("test-task", 100*time.Millisecond)
+	testTask := MockTask{ID: "test-task", cadence: 100 * time.Millisecond}
 	scheduler.AddTask(testTask, testTask.ID)
 
 	// Since the scheduler is stopped, the task should not be scheduled
@@ -357,7 +357,7 @@ func TestConcurrentAddTask(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < numTasksPerGoroutine; j++ {
 				taskID := fmt.Sprintf("task-%d-%d", id, j)
-				task := NewDefaultTask(taskID, 100*time.Millisecond)
+				task := MockTask{ID: "test-task", cadence: 100 * time.Millisecond}
 				scheduler.AddTask(task, taskID)
 			}
 		}(i)
@@ -378,7 +378,7 @@ func TestZeroCadenceTask(t *testing.T) {
 	scheduler.Start()
 	defer scheduler.Stop()
 
-	testTask := NewDefaultTask("zero-cadence-task", 0)
+	testTask := MockTask{ID: "zero-cadence-task", cadence: 0}
 	scheduler.AddTask(testTask, testTask.ID)
 
 	// Expect the task to not execute
