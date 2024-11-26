@@ -339,6 +339,9 @@ func TestAddTaskDuringExecution(t *testing.T) {
 }
 
 func TestConcurrentAddTask(t *testing.T) {
+	// Deactivate debug logs for this test
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05.999"}).Level(zerolog.InfoLevel)
+
 	taskChan := make(chan Task)
 	scheduler := NewScheduler(taskChan)
 	scheduler.Start()
