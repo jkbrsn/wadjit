@@ -7,7 +7,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// ExampleTask is an example task implementation, used in tests and development.
+// ExampleTask is an example task implementation.
 type ExampleTask struct {
 	// TODO: consider creating a unique TaskID type
 	ID string // Unique identifier for the task
@@ -22,7 +22,7 @@ func (dt ExampleTask) Cadence() time.Duration {
 
 // Execute executes the ExampleTask.
 func (dt ExampleTask) Execute() scheduler.Result {
-	log.Trace().Msgf("Executing task %s", dt.ID)
+	log.Info().Msgf("Executing task %s", dt.ID)
 	// Placeholder: Implement task execution logic
 	return scheduler.Result{}
 }
@@ -36,23 +36,17 @@ func NewExampleTask(id string, cadence time.Duration) *ExampleTask {
 }
 
 func main() {
-	// TODO: set from scheduler function, e.g. 'for result := range scheduler.Results() {' from within a goroutine
-	resultChannel := make(chan scheduler.Result, 100) // Buffered channel to hold results
-
-	// TODO: add flags for configuring the worker pool size and refresh rate etc.
-
-	// TODO: evaluate and adjust buffer sizes
+	// TODO: move this example implementation into the scheduler package
 	taskScheduler := scheduler.NewScheduler(10, 8, 8)
+	results := taskScheduler.Results()
 
-	// TODO: add endpoint DB client and fetch tasks from the DB, add these as tasks in scheduler
-	// DEV: add tasks with varying cadences
-	taskScheduler.AddTask(NewExampleTask("http://example.com/2", 2*time.Second), "")
-	taskScheduler.AddTask(NewExampleTask("http://example.com/3", 3*time.Second), "")
-	taskScheduler.AddTask(NewExampleTask("http://example.com/5", 5*time.Second), "")
+	taskScheduler.AddTask(NewExampleTask("CADENCE 2s", 2*time.Second), "")
+	taskScheduler.AddTask(NewExampleTask("CADENCE 3s", 3*time.Second), "")
+	taskScheduler.AddTask(NewExampleTask("CADENCE 5s", 5*time.Second), "")
 
-	// Process results and write to the external database
-	// TODO: implement actual processing logic
-	for result := range resultChannel {
+	// Process results
+	// TODO: implement some actual processing logic
+	for result := range results {
 		if result.Error != nil {
 			log.Printf("Task failed: %v", result.Error)
 		} else {
