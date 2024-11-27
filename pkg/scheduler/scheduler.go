@@ -196,9 +196,6 @@ func (s *Scheduler) Results() <-chan Result {
 func (s *Scheduler) Stop() {
 	log.Debug().Msg("Attempting scheduler stop")
 	s.stopOnce.Do(func() {
-		/* s.Lock()
-		defer s.Unlock() */
-
 		// Signal the scheduler to stop
 		s.cancel()
 
@@ -217,29 +214,48 @@ func (s *Scheduler) Stop() {
 	})
 }
 
-// TODO: consider adding an internal constructor where we can use dependency injection for the worker pool and channels
-// NewScheduler creates and returns a new Scheduler.
+// NewScheduler creates, starts and returns a new Scheduler.
 func NewScheduler(workerCount, taskBufferSize, resultBufferSize int) *Scheduler {
+	resultChan := make(chan Result, resultBufferSize)
+	taskChan := make(chan Task, taskBufferSize)
+	workerPool := NewWorkerPool(resultChan, taskChan, workerCount)
+	s := newScheduler(workerPool, taskChan, resultChan)
+	return s
+}
+
+// newScheduler creates a new Scheduler.
+// The internal constructor pattern allows for dependency injection of internal components.
+func newScheduler(workerPool *WorkerPool, taskChan chan Task, resultChan chan Result) *Scheduler {
 	log.Debug().Msg("Creating new scheduler")
+
+	// Input validation
+	if workerPool == nil {
+		panic("workerPool cannot be nil")
+	}
+	if taskChan == nil {
+		panic("taskChan cannot be nil")
+	}
+	if resultChan == nil {
+		panic("resultChan cannot be nil")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	s := &Scheduler{
 		ctx:         ctx,
 		cancel:      cancel,
-		newTaskChan: make(chan bool, 1),
-		resultChan:  make(chan Result, resultBufferSize),
-		runDone:     make(chan struct{}),
-		taskChan:    make(chan Task, taskBufferSize),
 		jobQueue:    make(PriorityQueue, 0),
+		newTaskChan: make(chan bool, 1),
+		resultChan:  resultChan,
+		runDone:     make(chan struct{}),
+		taskChan:    taskChan,
+		workerPool:  workerPool,
 	}
 
 	heap.Init(&s.jobQueue)
 
-	s.workerPool = NewWorkerPool(s.resultChan, s.taskChan, workerCount)
+	log.Debug().Msg("Starting scheduler")
 	s.workerPool.Start()
-
-	log.Info().Msg("Starting scheduler")
 	go s.run()
 
 	return s

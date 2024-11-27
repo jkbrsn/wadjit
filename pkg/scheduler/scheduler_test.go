@@ -45,7 +45,6 @@ func getChannelBufferSize(ch interface{}) int {
 }
 
 // TODO: write test comparing what happens when different channel types are used for taskChan
-// TODO: write test where tasks are added mid-run
 
 func TestMain(m *testing.M) {
 	zerolog.TimeFieldFormat = time.RFC3339Nano
@@ -269,15 +268,12 @@ func TestAddTaskDuringExecution(t *testing.T) {
 		executeFunc: func() {
 			select {
 			case <-ctx.Done():
-				t.Log("Task 1 cancelled")
 				return
 			default:
-				t.Log("Executing task 1")
 				task1Executed <- struct{}{}
 				mu.Lock()
 				trackTasks["task1"] = true
 				mu.Unlock()
-				t.Logf("Executed task 1, %v", time.Now())
 			}
 		},
 	}
@@ -287,27 +283,22 @@ func TestAddTaskDuringExecution(t *testing.T) {
 		executeFunc: func() {
 			select {
 			case <-ctx.Done():
-				t.Log("Task 2 cancelled")
 				return
 			default:
-				t.Log("Executing task 2")
 				mu.Lock()
 				trackTasks["task2"] = true
 				mu.Unlock()
-				t.Logf("Executed task 2, %v", time.Now())
 			}
 		},
 	}
 
 	// Schedule first task
-	t.Log("Scheduling task 1")
 	scheduler.AddTask(testTask1, testTask1.ID)
 	start := time.Now()
 
 	select {
 	case <-task1Executed:
 		// Task executed as expected
-		t.Logf("Task 1 executed after %v", time.Since(start))
 	case <-time.After(20 * time.Millisecond):
 		t.Fatalf("Task 1 did not execute within the expected time frame (40ms), %v", time.Since(start))
 	}
@@ -320,7 +311,6 @@ func TestAddTaskDuringExecution(t *testing.T) {
 	}()
 
 	// Schedule second task after we've had at least one execution of the first task
-	t.Logf("Scheduling task 2, %v", time.Since(start))
 	scheduler.AddTask(testTask2, testTask2.ID)
 
 	// Sleep enough time to make sure both tasks have executed at least once
@@ -368,8 +358,6 @@ func TestConcurrentAddTask(t *testing.T) {
 	expectedTasks := numGoroutines * numTasksPerGoroutine
 	assert.Equal(t, expectedTasks, scheduler.jobQueue.Len(), "Expected job queue length to be %d, got %d", expectedTasks, scheduler.jobQueue.Len())
 }
-
-// TODO: add test for concurrently running tasks
 
 func TestZeroCadenceTask(t *testing.T) {
 	scheduler := NewScheduler(10, 1, 1)
