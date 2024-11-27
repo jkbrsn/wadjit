@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"container/heap"
+	"context"
 	"strings"
 	"sync"
 	"time"
@@ -14,10 +15,13 @@ import (
 type Scheduler struct {
 	sync.RWMutex
 
-	newTaskChan chan bool   // Channel to signal that new tasks have entered the queue
-	stopChan    chan bool   // Channel to signal stopping the scheduler
-	taskChan    chan Task   // Channel to send tasks to the worker pool
-	resultChan  chan Result // Channel to receive results from the worker pool
+	ctx    context.Context    // Context for the scheduler
+	cancel context.CancelFunc // Cancel function for the scheduler
+
+	newTaskChan chan bool     // Channel to signal that new tasks have entered the queue
+	resultChan  chan Result   // Channel to receive results from the worker pool
+	runDone     chan struct{} // Channel to signal run has stopped
+	taskChan    chan Task     // Channel to send tasks to the worker pool
 
 	jobQueue PriorityQueue // A priority queue to hold the scheduled jobs
 
@@ -73,7 +77,7 @@ func (s *Scheduler) AddJob(tasks []Task, cadence time.Duration, jobID string) {
 
 	// Check if the scheduler is stopped
 	select {
-	case <-s.stopChan:
+	case <-s.ctx.Done():
 		// If the scheduler is stopped, do not continue adding the job
 		log.Debug().Msg("Scheduler is stopped, not adding job")
 		return
@@ -88,7 +92,7 @@ func (s *Scheduler) AddJob(tasks []Task, cadence time.Duration, jobID string) {
 
 	// Signal the scheduler to check for new tasks
 	select {
-	case <-s.stopChan:
+	case <-s.ctx.Done():
 		// Do nothing if the scheduler is stopped
 		log.Debug().Msg("Scheduler is stopped, not signaling new task")
 	default:
@@ -125,8 +129,10 @@ func (s *Scheduler) Start() {
 // run runs the Scheduler.
 // This function is intended to be run as a goroutine.
 func (s *Scheduler) run() {
-	// TODO: consider adding deferred signal to signal run has stopped
-
+	defer func() {
+		log.Debug().Msg("Scheduler run loop exiting")
+		close(s.runDone)
+	}()
 	for {
 		s.Lock()
 		if s.jobQueue.Len() == 0 {
@@ -135,7 +141,7 @@ func (s *Scheduler) run() {
 			case <-s.newTaskChan:
 				log.Trace().Msg("New task added, checking for next job")
 				continue
-			case <-s.stopChan:
+			case <-s.ctx.Done():
 				log.Info().Msg("Scheduler received stop signal, exiting run loop")
 				return
 			}
@@ -150,8 +156,13 @@ func (s *Scheduler) run() {
 
 				// Execute all tasks in the job
 				for _, task := range nextJob.Tasks {
-					// TODO: check stopChan here too?
-					s.taskChan <- task
+					select {
+					case <-s.ctx.Done():
+						log.Info().Msg("Scheduler received stop signal during task dispatch, exiting run loop")
+						return
+					case s.taskChan <- task:
+						// Successfully sent the task
+					}
 				}
 
 				// Reschedule the job
@@ -168,7 +179,7 @@ func (s *Scheduler) run() {
 			case <-time.After(delay):
 				// Time to execute the next job
 				continue
-			case <-s.stopChan:
+			case <-s.ctx.Done():
 				log.Info().Msg("Scheduler received stop signal during wait, exiting run loop")
 				return
 			}
@@ -185,26 +196,24 @@ func (s *Scheduler) Results() <-chan Result {
 func (s *Scheduler) Stop() {
 	log.Debug().Msg("Attempting scheduler stop")
 	s.stopOnce.Do(func() {
-		s.Lock()
-		defer s.Unlock()
+		/* s.Lock()
+		defer s.Unlock() */
 
-		// Signal the scheduler to stop if not already stopped
-		select {
-		case <-s.stopChan:
-			// Already closed
-		default:
-			close(s.stopChan)
-		}
+		// Signal the scheduler to stop
+		s.cancel()
 
 		// Stop the worker pool
 		s.workerPool.Stop()
-		// resultChan is closed by WorkerPool.Stop()
+		// Note: resultChan is closed by workerPool.Stop()
 
-		// TODO: consider adding a wait for run() to stop before closing taskChan
+		// Wait for the run loop to exit
+		<-s.runDone
 
 		// Close the remaining channels
 		close(s.taskChan)
 		close(s.newTaskChan)
+
+		log.Debug().Msg("Scheduler stopped")
 	})
 }
 
@@ -212,10 +221,15 @@ func (s *Scheduler) Stop() {
 // NewScheduler creates and returns a new Scheduler.
 func NewScheduler(workerCount, taskBufferSize, resultBufferSize int) *Scheduler {
 	log.Debug().Msg("Creating new scheduler")
+
+	ctx, cancel := context.WithCancel(context.Background())
+
 	s := &Scheduler{
+		ctx:         ctx,
+		cancel:      cancel,
 		newTaskChan: make(chan bool, 1),
 		resultChan:  make(chan Result, resultBufferSize),
-		stopChan:    make(chan bool),
+		runDone:     make(chan struct{}),
 		taskChan:    make(chan Task, taskBufferSize),
 		jobQueue:    make(PriorityQueue, 0),
 	}
