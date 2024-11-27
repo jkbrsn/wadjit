@@ -193,6 +193,7 @@ func (s *Scheduler) Results() <-chan Result {
 }
 
 // Stop signals the Scheduler to stop processing tasks and exit.
+// Note: blocks until the Scheduler, including all workers, has completely stopped.
 func (s *Scheduler) Stop() {
 	log.Debug().Msg("Attempting scheduler stop")
 	s.stopOnce.Do(func() {
