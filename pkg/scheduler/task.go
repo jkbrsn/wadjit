@@ -1,9 +1,5 @@
 package scheduler
 
-import (
-	"time"
-)
-
 // Result represents the result of a task execution.
 // TODO: interfacify this too?
 type Result struct {
@@ -15,6 +11,5 @@ type Result struct {
 // Task is an interface for tasks that can be executed.
 // TODO: consider adding a context.Context parameter to Execute, to handle timeouts and cancellation (can also be forcefully added in the worker)
 type Task interface {
-	Cadence() time.Duration
 	Execute() Result
 }

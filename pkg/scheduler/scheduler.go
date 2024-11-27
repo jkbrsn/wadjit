@@ -48,8 +48,8 @@ type ScheduledJob struct {
 
 // AddTask adds a Task to the Scheduler.
 // Note: wrapper for AddJob to simplify adding single tasks.
-func (s *Scheduler) AddTask(task Task, jobID string) {
-	s.AddJob([]Task{task}, task.Cadence(), jobID)
+func (s *Scheduler) AddTask(task Task, cadence time.Duration, jobID string) {
+	s.AddJob([]Task{task}, cadence, jobID)
 }
 
 // AddJob adds a job of N tasks to the Scheduler.
