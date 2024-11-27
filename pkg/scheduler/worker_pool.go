@@ -25,7 +25,6 @@ type WorkerPool struct {
 
 // worker executes tasks from the task channel.
 func (wp *WorkerPool) worker(id int) {
-	wp.wg.Add(1)
 	defer wp.wg.Done()
 
 	for {
@@ -63,6 +62,7 @@ func (wp *WorkerPool) ActiveWorkers() int32 {
 // Start starts the worker pool, creating workers according to wp.WorkerCount.
 func (wp *WorkerPool) Start() {
 	log.Info().Msgf("Starting worker pool with %d workers", wp.workerCount)
+	wp.wg.Add(wp.workerCount)
 	for i := 0; i < wp.workerCount; i++ {
 		go wp.worker(i)
 	}
@@ -74,6 +74,8 @@ func (wp *WorkerPool) Stop() {
 	close(wp.stopChan) // Signal workers to stop
 	log.Debug().Msg("Waiting for workers to finish")
 	wp.wg.Wait() // Wait for all workers to finish
+	log.Debug().Msg("Worker pool stopped")
+	// TODO: move this to the scheduler, but add a signal from the worker pool to let the scheduler know it's done closing workers
 	close(wp.resultChan)
 }
 
