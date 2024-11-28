@@ -31,11 +31,6 @@ type Scheduler struct {
 }
 
 // ScheduledJob represents a group of tasks that are scheduled for execution.
-// TODO: consider adding an option to execute when inserted
-// TODO: consider adding support for one-hit jobs, either with immediate or delayed execution, and with automatic removal after execution
-// TODO: consider adding an option to stop an individual task
-// TODO: would we for any reason need a cancellation flag here?
-// TODO: consider adding a broadcast function with a fan-out pattern to send resuts to multiple channels
 type ScheduledJob struct {
 	Tasks []Task
 

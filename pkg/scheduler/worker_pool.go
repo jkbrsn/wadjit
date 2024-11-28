@@ -7,9 +7,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// TODO: scaleup and scaledown functions for dynamic worker pool resizing
-// TODO: tests for worker pool
-
 // WorkerPool manages a pool of workers that execute tasks.
 type WorkerPool struct {
 	workerCount   int          // Total number of workers in the pool
@@ -41,7 +38,7 @@ func (wp *WorkerPool) worker(id int) {
 			result := task.Execute()
 			if result.Error != nil {
 				// No retry policy is implemented, we just log the error for now
-				// TODO: consider leaving all error handling to the caller
+				// TODO: consider leaving all error handling to the caller, even logging
 				log.Error().Err(result.Error).Msgf("Worker %d: task execution failed", id)
 			}
 			wp.resultChan <- result
@@ -75,7 +72,6 @@ func (wp *WorkerPool) Stop() {
 	log.Debug().Msg("Waiting for workers to finish")
 	wp.wg.Wait() // Wait for all workers to finish
 	log.Debug().Msg("Worker pool stopped")
-	// TODO: move this to the scheduler, but add a signal from the worker pool to let the scheduler know it's done closing workers
 	close(wp.resultChan)
 }
 
