@@ -44,3 +44,18 @@ func (pq *PriorityQueue) Update(job *ScheduledJob, nextExec time.Time) {
 	job.NextExec = nextExec
 	heap.Fix(pq, job.index)
 }
+
+// Peek returns the job with the earliest NextExec time.
+// TODO: test
+func (pq *PriorityQueue) Peek() *ScheduledJob {
+	if len(*pq) == 0 {
+		return nil
+	}
+	return (*pq)[0]
+}
+
+// Remove removes a job from the heap.
+// TODO: test
+func (pq *PriorityQueue) Remove(job *ScheduledJob) {
+	heap.Remove(pq, job.index)
+}
