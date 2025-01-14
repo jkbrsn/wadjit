@@ -1,5 +1,12 @@
 package wadjit
 
+import (
+	"net/url"
+
+	"github.com/rs/xid"
+)
+
 type Endpoint struct {
-	URL string
+	ID  xid.ID
+	URL url.URL
 }
