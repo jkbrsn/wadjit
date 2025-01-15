@@ -3,12 +3,15 @@ module github.com/jakobilobi/wadjit
 go 1.23.2
 
 require (
+	github.com/gorilla/websocket v1.5.3
+	github.com/hashicorp/go-multierror v1.1.1
 	github.com/jakobilobi/go-taskman v0.2.1
 	github.com/rs/xid v1.6.0
 )
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rs/zerolog v1.33.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect

@@ -7,15 +7,15 @@ import (
 )
 
 type Wadjit struct {
-	endpoints   sync.Map // Key xid.ID to value Endpoint
+	watchers    sync.Map // Key xid.ID to value Watcher
 	taskManager *taskman.TaskManager
 
-	endpointChan chan Endpoint
-	doneChan     chan struct{}
+	watcherChan chan Watcher
+	doneChan    chan struct{}
 }
 
-func (w *Wadjit) AddEndpoint(e Endpoint) {
-	w.endpointChan <- e
+func (w *Wadjit) AddWatcher(watcher Watcher) {
+	w.watcherChan <- watcher
 }
 
 func (w *Wadjit) Stop() {
@@ -25,8 +25,8 @@ func (w *Wadjit) Stop() {
 func (w *Wadjit) run() {
 	for {
 		select {
-		case e := <-w.endpointChan:
-			w.endpoints.Store(e.ID, e)
+		case watcher := <-w.watcherChan:
+			w.watchers.Store(watcher.ID(), watcher)
 		case <-w.doneChan:
 			return
 		}
@@ -35,10 +35,10 @@ func (w *Wadjit) run() {
 
 func New() *Wadjit {
 	w := &Wadjit{
-		endpoints:    sync.Map{},
-		taskManager:  taskman.New(),
-		endpointChan: make(chan Endpoint),
-		doneChan:     make(chan struct{}),
+		watchers:    sync.Map{},
+		taskManager: taskman.New(),
+		watcherChan: make(chan Watcher),
+		doneChan:    make(chan struct{}),
 	}
 	go w.run()
 	return w

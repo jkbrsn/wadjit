@@ -1,7 +1,6 @@
 package wadjit
 
 import (
-	"net/url"
 	"sync"
 	"testing"
 
@@ -26,21 +25,19 @@ func TestNewWadjit(t *testing.T) {
 	assert.NotNil(t, w.taskManager)
 }
 
-func TestAddEndpoint(t *testing.T) {
+func TestAddWatcher(t *testing.T) {
 	w := New()
 	defer w.Stop()
 
-	url, _ := url.Parse("http://localhost:8080")
 	id := xid.New()
-	e := Endpoint{
-		ID:  id,
-		URL: *url,
+	watcher := &HTTPWatcher{
+		id: id,
 	}
-	w.AddEndpoint(e)
+	w.AddWatcher(watcher)
 
-	assert.Equal(t, 1, syncMapLen(&w.endpoints))
-	loaded, _ := w.endpoints.Load(id)
+	assert.Equal(t, 1, syncMapLen(&w.watchers))
+	loaded, _ := w.watchers.Load(id)
 	assert.NotNil(t, loaded)
-	loaded = loaded.(Endpoint)
-	assert.Equal(t, e, loaded)
+	loaded = loaded.(Watcher)
+	assert.Equal(t, watcher, loaded)
 }
