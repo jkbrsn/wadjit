@@ -1,8 +1,10 @@
 package wadjit
 
 import (
+	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
@@ -31,9 +33,12 @@ func TestAddWatcher(t *testing.T) {
 
 	id := xid.New()
 	watcher := &HTTPWatcher{
-		id: id,
+		id:        id,
+		cadence:   1 * time.Second,
+		endpoints: []Endpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}},
 	}
 	w.AddWatcher(watcher)
+	time.Sleep(5 * time.Millisecond) // wait for watcher to be added
 
 	assert.Equal(t, 1, syncMapLen(&w.watchers))
 	loaded, _ := w.watchers.Load(id)

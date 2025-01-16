@@ -14,13 +14,22 @@ import (
 	"github.com/rs/xid"
 )
 
+// Watcher is an interface that represents a watcher.
 type Watcher interface {
+	// Close closes the watcher and releases any resources associated with it.
 	Close() error
+
+	// ID returns the unique identifier of the watcher.
 	ID() xid.ID
+
+	// Job returns the job which defines the tasks that the watcher will use.
 	Job() taskman.Job
+
+	// SetUp initializes the watcher and prepares it for use.
 	SetUp() error
 }
 
+// HTTPWatcher is a watcher that sends HTTP requests to endpoints.
 type HTTPWatcher struct {
 	id      xid.ID
 	cadence time.Duration
@@ -31,14 +40,17 @@ type HTTPWatcher struct {
 	payload []byte
 }
 
+// Close does nothing, but is needed to implement the Watcher interface.
 func (w *HTTPWatcher) Close() error {
 	return nil
 }
 
+// ID returns the ID of the HTTPWatcher.
 func (w *HTTPWatcher) ID() xid.ID {
 	return w.id
 }
 
+// Job returns a taskman.Job that sends HTTP requests to the endpoints of the HTTPWatcher.
 func (w *HTTPWatcher) Job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.endpoints))
 	for _, endpoint := range w.endpoints {
@@ -50,17 +62,24 @@ func (w *HTTPWatcher) Job() taskman.Job {
 		})
 	}
 	job := taskman.Job{
-		ID:      w.id.String(),
-		Cadence: w.cadence,
-		Tasks:   tasks,
+		ID:       w.id.String(),
+		Cadence:  w.cadence,
+		NextExec: time.Now().Add(w.cadence),
+		Tasks:    tasks,
 	}
 	return job
 }
 
+// SetUp does nothing, but is needed to implement the Watcher interface.
 func (w *HTTPWatcher) SetUp() error {
 	return nil
 }
 
+// WSWatcher is a watcher that sends messages to WebSocket endpoints, and reads the responses.
+// TODO: implement a read pump
+// TODO: implement a write pump
+// TODO: implement a channel to send back responses
+// TODO: consider if it's feasible to implement subscriptions, or if a WSSubscriptionWatcher should be created
 type WSWatcher struct {
 	id      xid.ID
 	cadence time.Duration
@@ -71,6 +90,7 @@ type WSWatcher struct {
 	msg []byte
 }
 
+// Close closes all WebSocket connections.
 func (w *WSWatcher) Close() error {
 	var result *multierror.Error
 	for _, conn := range w.connections {
@@ -82,10 +102,12 @@ func (w *WSWatcher) Close() error {
 	return result.ErrorOrNil()
 }
 
+// ID returns the ID of the watcher.
 func (w *WSWatcher) ID() xid.ID {
 	return w.id
 }
 
+// Job returns a taskman.Job that sends messages to WebSocket endpoints.
 func (w *WSWatcher) Job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.connections))
 	for endpoint, conn := range w.connections {
@@ -103,6 +125,7 @@ func (w *WSWatcher) Job() taskman.Job {
 	return job
 }
 
+// SetUp establishes WebSocket connections to the endpoints of the WSWatcher.
 func (w *WSWatcher) SetUp() error {
 	var result *multierror.Error
 	for endpoint := range w.connections {
@@ -115,6 +138,7 @@ func (w *WSWatcher) SetUp() error {
 	return result.ErrorOrNil()
 }
 
+// HTTPRequest is an implementation of taskman.Task that sends an HTTP request to an endpoint.
 type HTTPRequest struct {
 	Header http.Header
 	Method string
@@ -122,6 +146,7 @@ type HTTPRequest struct {
 	Data   []byte
 }
 
+// Execute sends an HTTP request to the endpoint.
 func (r HTTPRequest) Execute() error {
 	request, err := http.NewRequest(r.Method, r.URL.String(), bytes.NewReader(r.Data))
 	if err != nil {
@@ -154,6 +179,7 @@ func (r HTTPRequest) Execute() error {
 	return nil
 }
 
+// WSSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
 type WSSend struct {
 	Connection *websocket.Conn
 	Message    []byte
@@ -163,6 +189,7 @@ type WSSend struct {
 	writeChan chan []byte
 }
 
+// Execute sends a message to the WebSocket endpoint.
 func (w WSSend) Execute() error {
 	err := w.Connection.WriteMessage(websocket.TextMessage, w.Message)
 	if err != nil {
