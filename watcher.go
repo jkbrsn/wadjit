@@ -1,7 +1,9 @@
 package wadjit
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -87,7 +89,7 @@ func (w *WSWatcher) ID() xid.ID {
 func (w *WSWatcher) Job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.connections))
 	for endpoint, conn := range w.connections {
-		tasks = append(tasks, WSWrite{
+		tasks = append(tasks, WSSend{
 			URL:        endpoint.URL,
 			Message:    w.msg,
 			Connection: conn,
@@ -121,29 +123,54 @@ type HTTPRequest struct {
 }
 
 func (r HTTPRequest) Execute() error {
-	response, err := http.DefaultClient.Do(&http.Request{
-		Method: r.Method,
-		URL:    r.URL,
-	})
+	request, err := http.NewRequest(r.Method, r.URL.String(), bytes.NewReader(r.Data))
+	if err != nil {
+		return err
+	}
+
+	for key, values := range r.Header {
+		for _, value := range values {
+			request.Header.Add(key, value)
+		}
+	}
+
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		return err
 	}
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", response.StatusCode)
 	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	// TODO: exchange this with a channel send
+	fmt.Printf("response: %s\n", body)
+
 	return nil
 }
 
-type WSWrite struct {
+type WSSend struct {
 	Connection *websocket.Conn
 	Message    []byte
 	URL        *url.URL
+
+	// TODO: flesh out this channel, e.q. create a write pump, to work around any concurrency issues
+	writeChan chan []byte
 }
 
-func (w WSWrite) Execute() error {
+func (w WSSend) Execute() error {
 	err := w.Connection.WriteMessage(websocket.TextMessage, w.Message)
 	if err != nil {
 		return err
 	}
+
+	msg := make([]byte, 512)
+	w.writeChan <- msg
+
 	return nil
 }
