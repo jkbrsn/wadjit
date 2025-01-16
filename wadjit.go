@@ -12,8 +12,9 @@ type Wadjit struct {
 	watchers    sync.Map // Key xid.ID to value Watcher
 	taskManager *taskman.TaskManager
 
-	watcherChan chan Watcher
-	doneChan    chan struct{}
+	watcherChan  chan Watcher
+	responseChan chan []byte
+	doneChan     chan struct{}
 }
 
 // AddWatcher adds a watcher to the Wadjit.
@@ -30,7 +31,20 @@ func (w *Wadjit) Stop() {
 	// TODO: stop all watchers
 }
 
-func (w *Wadjit) run() {
+func (w *Wadjit) listenForResponses() {
+	for {
+		select {
+		case response := <-w.responseChan:
+			// TODO: this is a placeholder; implement response handling that can be
+			//       handed over to the owner of the Wadjit
+			fmt.Printf("response: %s\n", response)
+		case <-w.doneChan:
+			return
+		}
+	}
+}
+
+func (w *Wadjit) listenForWatchers() {
 	for {
 		select {
 		case watcher := <-w.watcherChan:
@@ -56,6 +70,9 @@ func New() *Wadjit {
 		watcherChan: make(chan Watcher),
 		doneChan:    make(chan struct{}),
 	}
-	go w.run()
+
+	go w.listenForResponses()
+	go w.listenForWatchers()
+
 	return w
 }

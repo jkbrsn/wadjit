@@ -26,6 +26,8 @@ type Watcher interface {
 	Job() taskman.Job
 
 	// SetUp initializes the watcher and prepares it for use.
+	// TODO: rename init?
+	// TODO: add response channel to argument list?
 	SetUp() error
 }
 
@@ -118,9 +120,10 @@ func (w *WSWatcher) Job() taskman.Job {
 		})
 	}
 	job := taskman.Job{
-		ID:      w.id.String(),
-		Cadence: w.cadence,
-		Tasks:   tasks,
+		ID:       w.id.String(),
+		Cadence:  w.cadence,
+		NextExec: time.Now().Add(w.cadence),
+		Tasks:    tasks,
 	}
 	return job
 }
