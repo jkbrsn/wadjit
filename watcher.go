@@ -184,7 +184,6 @@ func (w *WSWatcher) Initialize(responseChan chan WatcherResponse) error {
 		w.connections[i].writeChan = make(chan []byte)
 		w.connections[i].readChan = w.readChan
 
-		go w.connections[i].writePump()
 		go w.connections[i].read()
 	}
 
@@ -223,39 +222,6 @@ type WSConnection struct {
 	ctx context.Context
 
 	// TODO: add proper synchronization to close both pumps when done
-}
-
-// writePump sends messages to the WebSocket connection.
-// Note: the write pump has exclusive permission to write to the connection.
-func (c *WSConnection) writePump() {
-	defer c.ctx.Done()
-
-	for {
-		select {
-		case msg, ok := <-c.writeChan:
-			if !ok {
-				// Channel closed, exit write pump
-				return
-			}
-			// TODO: set write deadline ???
-			if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					// This is an expected situation, handle gracefully
-				} else if strings.Contains(err.Error(), "websocket: close sent") {
-					// This is an expected situation, handle gracefully
-				} else {
-					// This is unexpected
-				}
-
-				// If there was an error, close the connection
-				return
-			}
-
-			// TODO: reset the read deadline after successfully writing
-		case <-c.ctx.Done():
-			return
-		}
-	}
 }
 
 // read reads messages from the WebSocket connection.
