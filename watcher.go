@@ -2,9 +2,11 @@ package wadjit
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -53,8 +55,9 @@ type HTTPWatcher struct {
 	doneChan chan struct{}
 }
 
-// Close does nothing, but is needed to implement the Watcher interface.
+// Close closes the HTTP watcher.
 func (w *HTTPWatcher) Close() error {
+	close(w.doneChan)
 	return nil
 }
 
@@ -116,18 +119,22 @@ func (w *HTTPWatcher) forwardResponses(responseChan chan WatcherResponse) {
 // TODO: consider if it's feasible to implement subscriptions, or if a WSSubscriptionWatcher should be created
 type WSWatcher struct {
 	id          xid.ID
-	connections map[Endpoint]*websocket.Conn // TODO: make sync.Map?
+	connections []WSConnection
 
 	cadence time.Duration
 	header  http.Header
 	msg     []byte
 
-	respChan chan wsRead
+	readChan chan wsRead
 	doneChan chan struct{}
 }
 
-// Close closes all WebSocket connections.
+// Close closes the WebSocket watcher.
 func (w *WSWatcher) Close() error {
+	// Signal that the watcher is done
+	close(w.doneChan)
+
+	// Close all connections
 	var result *multierror.Error
 	for _, conn := range w.connections {
 		err := conn.Close()
@@ -146,11 +153,11 @@ func (w *WSWatcher) ID() xid.ID {
 // Job returns a taskman.Job that sends messages to WebSocket endpoints.
 func (w *WSWatcher) Job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.connections))
-	for endpoint, conn := range w.connections {
+	for _, conn := range w.connections {
 		tasks = append(tasks, WSSend{
-			URL:        endpoint.URL,
-			Message:    w.msg,
-			Connection: conn,
+			URL:     conn.url,
+			Message: w.msg,
+			Conn:    conn,
 		})
 	}
 	job := taskman.Job{
@@ -167,17 +174,19 @@ func (w *WSWatcher) Job() taskman.Job {
 func (w *WSWatcher) Initialize(responseChan chan WatcherResponse) error {
 	var result *multierror.Error
 
-	// Establish connections to the endpoints
-	for endpoint := range w.connections {
-		newConn, _, err := websocket.DefaultDialer.Dial(endpoint.URL.Host, w.header)
+	// Establish connections to the endpoints, initialize the channels and goroutines
+	for i, conn := range w.connections {
+		newConn, _, err := websocket.DefaultDialer.Dial(conn.url.Host, w.header)
 		if err != nil {
 			result = multierror.Append(result, err)
 		}
-		w.connections[endpoint] = newConn
-	}
+		w.connections[i].Conn = newConn
+		w.connections[i].writeChan = make(chan []byte)
+		w.connections[i].readChan = w.readChan
 
-	// TODO: start write pump
-	// TODO: start read pump
+		go w.connections[i].writePump()
+		go w.connections[i].read()
+	}
 
 	go w.forwardReads(responseChan)
 
@@ -188,17 +197,100 @@ func (w *WSWatcher) Initialize(responseChan chan WatcherResponse) error {
 func (w *WSWatcher) forwardReads(responseChan chan WatcherResponse) {
 	for {
 		select {
-		case resp := <-w.respChan:
+		case wsRead := <-w.readChan:
 			response := WatcherResponse{
 				WatcherID: w.id,
-				Endpoint:  resp.url,
+				Endpoint:  wsRead.url,
 				Err:       nil,
-				Data:      resp.data,
+				Data:      wsRead.data,
 				Body:      nil,
 			}
 			responseChan <- response
 		case <-w.doneChan:
 			return
+		}
+	}
+}
+
+type WSConnection struct {
+	*websocket.Conn
+
+	url *url.URL
+
+	writeChan chan []byte
+	readChan  chan<- wsRead
+
+	ctx context.Context
+
+	// TODO: add proper synchronization to close both pumps when done
+}
+
+// writePump sends messages to the WebSocket connection.
+// Note: the write pump has exclusive permission to write to the connection.
+func (c *WSConnection) writePump() {
+	defer c.ctx.Done()
+
+	for {
+		select {
+		case msg, ok := <-c.writeChan:
+			if !ok {
+				// Channel closed, exit write pump
+				return
+			}
+			// TODO: set write deadline ???
+			if err := c.WriteMessage(websocket.TextMessage, msg); err != nil {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+					// This is an expected situation, handle gracefully
+				} else if strings.Contains(err.Error(), "websocket: close sent") {
+					// This is an expected situation, handle gracefully
+				} else {
+					// This is unexpected
+				}
+
+				// If there was an error, close the connection
+				return
+			}
+
+			// TODO: reset the read deadline after successfully writing
+		case <-c.ctx.Done():
+			return
+		}
+	}
+}
+
+// read reads messages from the WebSocket connection.
+// Note: the read pump has exclusive permission to read from the connection.
+func (c *WSConnection) read() {
+	defer c.ctx.Done()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		default:
+			// TODO: reset read deadlines before reading ???
+
+			// Read message from connection
+			_, p, err := c.ReadMessage()
+			if err != nil {
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseServiceRestart) {
+					// This is an expected situation, handle gracefully
+				} else if strings.Contains(err.Error(), "connection closed") {
+					// This is not an unknown situation, handle gracefully
+				} else {
+					// This is unexpected
+				}
+
+				// If there was an error, close the connection
+				return
+			}
+
+			// Send the message to the read channel
+			resp := wsRead{
+				data: p,
+				url:  c.url,
+			}
+			c.readChan <- resp
 		}
 	}
 }
@@ -253,12 +345,9 @@ func (r HTTPRequest) Execute() error {
 
 // WSSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
 type WSSend struct {
-	Connection *websocket.Conn
-	Message    []byte
-	URL        *url.URL
-
-	// TODO: flesh out this channel, e.q. create a write pump, to work around any concurrency issues
-	writeChan chan []byte
+	Conn    WSConnection
+	Message []byte
+	URL     *url.URL
 }
 
 type wsRead struct {
@@ -267,14 +356,24 @@ type wsRead struct {
 }
 
 // Execute sends a message to the WebSocket endpoint.
-func (w WSSend) Execute() error {
-	err := w.Connection.WriteMessage(websocket.TextMessage, w.Message)
-	if err != nil {
+// Note: for concurrency safety, the connection's WriteMessage method is used exclusively here.
+// TODO: consider protecting the connection with a mutex
+func (ws WSSend) Execute() error {
+	// TODO: use/set a write deadline ???
+	if err := ws.Conn.WriteMessage(websocket.TextMessage, ws.Message); err != nil {
+		if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+			// This is an expected situation, handle gracefully
+		} else if strings.Contains(err.Error(), "websocket: close sent") {
+			// This is an expected situation, handle gracefully
+		} else {
+			// This is unexpected
+		}
+
+		// TODO: if there was an error, close the connection?
+
+		// TODO: unless handled, this error will be caught in the task manager
 		return err
 	}
-
-	msg := make([]byte, 512)
-	w.writeChan <- msg
 
 	return nil
 }
