@@ -2,9 +2,11 @@ package wadjit
 
 import (
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/jakobilobi/go-taskman"
+	"github.com/rs/xid"
 )
 
 // Wadjit is a struct that manages a collection of endpoint watchers.
@@ -13,7 +15,7 @@ type Wadjit struct {
 	taskManager *taskman.TaskManager
 
 	watcherChan  chan Watcher
-	responseChan chan []byte
+	responseChan chan []io.ReadCloser
 	doneChan     chan struct{}
 }
 
@@ -23,12 +25,30 @@ func (w *Wadjit) AddWatcher(watcher Watcher) {
 	w.watcherChan <- watcher
 }
 
-// TODO: implement RemoveWatcher
+// RemoveWatcher removes a watcher from the Wadjit.
+func (w *Wadjit) RemoveWatcher(id xid.ID) error {
+	watcher, ok := w.watchers.LoadAndDelete(id)
+	if !ok {
+		return fmt.Errorf("watcher with ID %s not found", id)
+	}
 
-// Stop stops the Wadjit.
-func (w *Wadjit) Stop() {
+	err := watcher.(Watcher).Close()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Close stops all Wadjit processes and closes the Wadjit.
+func (w *Wadjit) Close() {
 	close(w.doneChan)
-	// TODO: stop all watchers
+
+	w.watchers.Range(func(key, value interface{}) bool {
+		watcher := value.(Watcher)
+		watcher.Close()
+		return true
+	})
 }
 
 func (w *Wadjit) listenForResponses() {
@@ -65,10 +85,11 @@ func (w *Wadjit) listenForWatchers() {
 // New creates, starts, and returns a new Wadjit.
 func New() *Wadjit {
 	w := &Wadjit{
-		watchers:    sync.Map{},
-		taskManager: taskman.New(),
-		watcherChan: make(chan Watcher),
-		doneChan:    make(chan struct{}),
+		watchers:     sync.Map{},
+		taskManager:  taskman.New(),
+		watcherChan:  make(chan Watcher),         // TODO: currently blocks, make buffered?
+		responseChan: make(chan []io.ReadCloser), // TODO: currently blocks, make buffered?
+		doneChan:     make(chan struct{}),
 	}
 
 	go w.listenForResponses()

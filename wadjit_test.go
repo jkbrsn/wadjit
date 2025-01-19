@@ -10,6 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TODO: create a MockHTTPWatcher struct that implements the Watcher interface
+// TODO: create a MockWSWatcher struct that implements the Watcher interface
+// TODO: set up a small test server that can be used to test the Wadjit
+
 func syncMapLen(m *sync.Map) int {
 	var length int
 	m.Range(func(key, value interface{}) bool {
@@ -21,7 +25,7 @@ func syncMapLen(m *sync.Map) int {
 
 func TestNewWadjit(t *testing.T) {
 	w := New()
-	defer w.Stop()
+	defer w.Close()
 
 	assert.NotNil(t, w)
 	assert.NotNil(t, w.taskManager)
@@ -29,7 +33,7 @@ func TestNewWadjit(t *testing.T) {
 
 func TestAddWatcher(t *testing.T) {
 	w := New()
-	defer w.Stop()
+	defer w.Close()
 
 	id := xid.New()
 	watcher := &HTTPWatcher{
@@ -45,4 +49,28 @@ func TestAddWatcher(t *testing.T) {
 	assert.NotNil(t, loaded)
 	loaded = loaded.(Watcher)
 	assert.Equal(t, watcher, loaded)
+}
+
+func TestRemoveWatcher(t *testing.T) {
+	w := New()
+	defer w.Close()
+
+	id := xid.New()
+	watcher := &HTTPWatcher{
+		id:        id,
+		cadence:   1 * time.Second,
+		endpoints: []Endpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}},
+	}
+	w.AddWatcher(watcher)
+	time.Sleep(5 * time.Millisecond) // wait for watcher to be added
+
+	assert.Equal(t, 1, syncMapLen(&w.watchers))
+
+	err := w.RemoveWatcher(id)
+	assert.NoError(t, err)
+	assert.Equal(t, 0, syncMapLen(&w.watchers))
+
+	loaded, ok := w.watchers.Load(id)
+	assert.Nil(t, loaded)
+	assert.False(t, ok)
 }
