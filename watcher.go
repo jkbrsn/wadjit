@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -113,9 +114,6 @@ func (w *HTTPWatcher) forwardResponses(responseChan chan WatcherResponse) {
 }
 
 // WSWatcher is a watcher that sends messages to WebSocket endpoints, and reads the responses.
-// TODO: implement a read pump
-// TODO: implement a write pump
-// TODO: implement a channel to send back responses
 // TODO: consider if it's feasible to implement subscriptions, or if a WSSubscriptionWatcher should be created
 type WSWatcher struct {
 	id          xid.ID
@@ -136,8 +134,8 @@ func (w *WSWatcher) Close() error {
 
 	// Close all connections
 	var result *multierror.Error
-	for _, conn := range w.connections {
-		err := conn.Close()
+	for i := range w.connections {
+		err := w.connections[i].Close()
 		if err != nil {
 			result = multierror.Append(result, err)
 		}
@@ -153,11 +151,10 @@ func (w *WSWatcher) ID() xid.ID {
 // Job returns a taskman.Job that sends messages to WebSocket endpoints.
 func (w *WSWatcher) Job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.connections))
-	for _, conn := range w.connections {
-		tasks = append(tasks, WSSend{
-			URL:     conn.url,
+	for i := range w.connections {
+		tasks = append(tasks, &wsSend{
+			Conn:    &w.connections[i],
 			Message: w.msg,
-			Conn:    conn,
 		})
 	}
 	job := taskman.Job{
@@ -175,14 +172,16 @@ func (w *WSWatcher) Initialize(responseChan chan WatcherResponse) error {
 	var result *multierror.Error
 
 	// Establish connections to the endpoints, initialize the channels and goroutines
-	for i, conn := range w.connections {
-		newConn, _, err := websocket.DefaultDialer.Dial(conn.url.Host, w.header)
+	for i := range w.connections {
+		w.connections[i].Lock()
+		newConn, _, err := websocket.DefaultDialer.Dial(w.connections[i].url.Host, w.header)
 		if err != nil {
 			result = multierror.Append(result, err)
 		}
 		w.connections[i].Conn = newConn
 		w.connections[i].writeChan = make(chan []byte)
 		w.connections[i].readChan = w.readChan
+		w.connections[i].Unlock()
 
 		go w.connections[i].read()
 	}
@@ -213,6 +212,7 @@ func (w *WSWatcher) forwardReads(responseChan chan WatcherResponse) {
 
 type WSConnection struct {
 	*websocket.Conn
+	sync.Mutex
 
 	url *url.URL
 
@@ -220,8 +220,6 @@ type WSConnection struct {
 	readChan  chan<- wsRead
 
 	ctx context.Context
-
-	// TODO: add proper synchronization to close both pumps when done
 }
 
 // read reads messages from the WebSocket connection.
@@ -309,13 +307,13 @@ func (r HTTPRequest) Execute() error {
 // WEBSOCKETS
 // TODO: move to a separate file
 
-// WSSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
-type WSSend struct {
-	Conn    WSConnection
+// wsSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
+type wsSend struct {
+	Conn    *WSConnection
 	Message []byte
-	URL     *url.URL
 }
 
+// wsRead represents a message read from a WebSocket connection to a specific URL.
 type wsRead struct {
 	data []byte
 	url  *url.URL
@@ -323,8 +321,10 @@ type wsRead struct {
 
 // Execute sends a message to the WebSocket endpoint.
 // Note: for concurrency safety, the connection's WriteMessage method is used exclusively here.
-// TODO: consider protecting the connection with a mutex
-func (ws WSSend) Execute() error {
+func (ws *wsSend) Execute() error {
+	ws.Conn.Lock()
+	defer ws.Conn.Unlock()
+
 	// TODO: use/set a write deadline ???
 	if err := ws.Conn.WriteMessage(websocket.TextMessage, ws.Message); err != nil {
 		if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
