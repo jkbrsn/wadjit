@@ -31,7 +31,8 @@ type WatcherResponse struct {
 	// TOOD: possibly add a "Protocol" or "Type" field to distinguish between HTTP and WS
 }
 
-// HTTPWatcher is a watcher that sends HTTP requests to endpoints.
+// Watcher is a watcher that sends HTTP requests and WS messages to endpoints, and then
+// forwards the responses to a response channel.
 type Watcher struct {
 	id            xid.ID
 	cadence       time.Duration
@@ -54,6 +55,8 @@ func (w *Watcher) Close() error {
 	// Close all WS connections
 	var result *multierror.Error
 	for i := range w.wsConns {
+		w.wsConns[i].cancel()
+		// TODO: implement and wait for graceful close?
 		err := w.wsConns[i].Close()
 		if err != nil {
 			result = multierror.Append(result, err)
@@ -62,12 +65,12 @@ func (w *Watcher) Close() error {
 	return result.ErrorOrNil()
 }
 
-// ID returns the ID of the HTTPWatcher.
+// ID returns the ID of the Watcher.
 func (w *Watcher) ID() xid.ID {
 	return w.id
 }
 
-// Job returns a taskman.Job that sends HTTP requests to the endpoints of the HTTPWatcher.
+// Job returns a taskman.Job that sends requests and messages to the endpoints of the Watcher.
 func (w *Watcher) Job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.http)+len(w.wsConns))
 	// Create HTTP requests
@@ -96,7 +99,7 @@ func (w *Watcher) Job() taskman.Job {
 	return job
 }
 
-// Initialize sets up the HTTPWatcher to start listening for responses.
+// Initialize sets up the Watcher to start listening for responses.
 func (w *Watcher) Initialize(responseChan chan WatcherResponse) error {
 	var result *multierror.Error
 	// If the response channel is nil, the watcher cannot function
@@ -119,6 +122,7 @@ func (w *Watcher) Initialize(responseChan chan WatcherResponse) error {
 		w.wsConns[i].Conn = newConn
 		w.wsConns[i].writeChan = make(chan []byte)
 		w.wsConns[i].readChan = w.wsReadChan
+		w.wsConns[i].ctx, w.wsConns[i].cancel = context.WithCancel(context.Background())
 		w.wsConns[i].Unlock()
 
 		go w.wsConns[i].read()
@@ -161,6 +165,7 @@ func (w *Watcher) forwardResponses(responseChan chan WatcherResponse) {
 }
 
 // WSConnection represents and handles a WebSocket connection.
+// TODO: unembed the websocket.Conn and use it as a field instead, to enable custom Close handling
 type WSConnection struct {
 	*websocket.Conn
 	sync.Mutex
@@ -170,13 +175,14 @@ type WSConnection struct {
 	writeChan chan []byte
 	readChan  chan<- wsRead
 
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // read reads messages from the WebSocket connection.
 // Note: the read pump has exclusive permission to read from the connection.
 func (c *WSConnection) read() {
-	defer c.ctx.Done()
+	defer c.cancel()
 
 	for {
 		select {
@@ -276,20 +282,26 @@ func (ws *wsSend) Execute() error {
 	ws.Conn.Lock()
 	defer ws.Conn.Unlock()
 
-	// TODO: use/set a write deadline ???
-	if err := ws.Conn.WriteMessage(websocket.TextMessage, ws.Message); err != nil {
-		if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-			// This is an expected situation, handle gracefully
-		} else if strings.Contains(err.Error(), "websocket: close sent") {
-			// This is an expected situation, handle gracefully
-		} else {
-			// This is unexpected
+	select {
+	case <-ws.Conn.ctx.Done():
+		// The connection has been closed
+		return nil
+	default:
+		// TODO: use/set a write deadline ???
+		if err := ws.Conn.WriteMessage(websocket.TextMessage, ws.Message); err != nil {
+			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				// This is an expected situation, handle gracefully
+			} else if strings.Contains(err.Error(), "websocket: close sent") {
+				// This is an expected situation, handle gracefully
+			} else {
+				// This is unexpected
+			}
+
+			// TODO: if there was an error, close the connection?
+
+			// TODO: unless handled, this error will be caught in the task manager
+			return err
 		}
-
-		// TODO: if there was an error, close the connection?
-
-		// TODO: unless handled, this error will be caught in the task manager
-		return err
 	}
 
 	return nil
