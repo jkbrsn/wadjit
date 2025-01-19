@@ -2,7 +2,6 @@ package wadjit
 
 import (
 	"fmt"
-	"io"
 	"sync"
 
 	"github.com/jakobilobi/go-taskman"
@@ -15,7 +14,7 @@ type Wadjit struct {
 	taskManager *taskman.TaskManager
 
 	watcherChan  chan Watcher
-	responseChan chan []io.ReadCloser
+	responseChan chan WatcherResponse
 	doneChan     chan struct{}
 }
 
@@ -57,7 +56,7 @@ func (w *Wadjit) listenForResponses() {
 		case response := <-w.responseChan:
 			// TODO: this is a placeholder; implement response handling that can be
 			//       handed over to the owner of the Wadjit
-			fmt.Printf("response: %s\n", response)
+			fmt.Printf("response: %v\n", response)
 		case <-w.doneChan:
 			return
 		}
@@ -68,7 +67,7 @@ func (w *Wadjit) listenForWatchers() {
 	for {
 		select {
 		case watcher := <-w.watcherChan:
-			watcher.SetUp()
+			watcher.SetUp(w.responseChan)
 			job := watcher.Job()
 			err := w.taskManager.ScheduleJob(job)
 			if err != nil {
@@ -88,7 +87,7 @@ func New() *Wadjit {
 		watchers:     sync.Map{},
 		taskManager:  taskman.New(),
 		watcherChan:  make(chan Watcher),         // TODO: currently blocks, make buffered?
-		responseChan: make(chan []io.ReadCloser), // TODO: currently blocks, make buffered?
+		responseChan: make(chan WatcherResponse), // TODO: currently blocks, make buffered?
 		doneChan:     make(chan struct{}),
 	}
 

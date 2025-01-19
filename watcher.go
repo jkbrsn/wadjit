@@ -2,7 +2,6 @@ package wadjit
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -27,19 +26,32 @@ type Watcher interface {
 
 	// SetUp initializes the watcher and prepares it for use.
 	// TODO: rename init?
-	// TODO: add response channel to argument list?
-	SetUp() error
+	SetUp(responseChan chan WatcherResponse) error
+}
+
+// WatcherResponse represents a response from a watcher.
+// TODO: evaluate if this is the cleanest way of merging HTTP and WS responses under the same struct
+type WatcherResponse struct {
+	WatcherID xid.ID
+	Endpoint  *url.URL
+	Err       error
+	Data      []byte        // For WS or if HTTP is pre-read
+	Body      io.ReadCloser // For streaming HTTP, may be nil for WS
+
+	// TOOD: possibly add a "Protocol" or "Type" field to distinguish between HTTP and WS
 }
 
 // HTTPWatcher is a watcher that sends HTTP requests to endpoints.
 type HTTPWatcher struct {
-	id      xid.ID
-	cadence time.Duration
-
+	id        xid.ID
 	endpoints []Endpoint
-	header    http.Header
 
+	cadence time.Duration
+	header  http.Header
 	payload []byte
+
+	respChan chan httpResponse
+	doneChan chan struct{}
 }
 
 // Close does nothing, but is needed to implement the Watcher interface.
@@ -72,9 +84,29 @@ func (w *HTTPWatcher) Job() taskman.Job {
 	return job
 }
 
-// SetUp does nothing, but is needed to implement the Watcher interface.
-func (w *HTTPWatcher) SetUp() error {
+// SetUp sets up a listener-forwarder for responses from the HTTPWatcher's HTTP requests.
+func (w *HTTPWatcher) SetUp(responseChan chan WatcherResponse) error {
+	go w.forwardResponses(responseChan)
 	return nil
+}
+
+// collectResponses listens for responses from the HTTPWatcher's HTTP requests.
+func (w *HTTPWatcher) forwardResponses(responseChan chan WatcherResponse) {
+	for {
+		select {
+		case resp := <-w.respChan:
+			response := WatcherResponse{
+				WatcherID: w.id,
+				Endpoint:  resp.url,
+				Err:       nil,
+				Data:      nil,
+				Body:      resp.resp.Body,
+			}
+			responseChan <- response
+		case <-w.doneChan:
+			return
+		}
+	}
 }
 
 // WSWatcher is a watcher that sends messages to WebSocket endpoints, and reads the responses.
@@ -83,13 +115,15 @@ func (w *HTTPWatcher) SetUp() error {
 // TODO: implement a channel to send back responses
 // TODO: consider if it's feasible to implement subscriptions, or if a WSSubscriptionWatcher should be created
 type WSWatcher struct {
-	id      xid.ID
-	cadence time.Duration
-
+	id          xid.ID
 	connections map[Endpoint]*websocket.Conn // TODO: make sync.Map?
-	header      http.Header
 
-	msg []byte
+	cadence time.Duration
+	header  http.Header
+	msg     []byte
+
+	respChan chan wsRead
+	doneChan chan struct{}
 }
 
 // Close closes all WebSocket connections.
@@ -129,8 +163,10 @@ func (w *WSWatcher) Job() taskman.Job {
 }
 
 // SetUp establishes WebSocket connections to the endpoints of the WSWatcher.
-func (w *WSWatcher) SetUp() error {
+func (w *WSWatcher) SetUp(responseChan chan WatcherResponse) error {
 	var result *multierror.Error
+
+	// Establish connections to the endpoints
 	for endpoint := range w.connections {
 		newConn, _, err := websocket.DefaultDialer.Dial(endpoint.URL.Host, w.header)
 		if err != nil {
@@ -138,8 +174,36 @@ func (w *WSWatcher) SetUp() error {
 		}
 		w.connections[endpoint] = newConn
 	}
+
+	// TODO: start write pump
+	// TODO: start read pump
+
+	go w.forwardReads(responseChan)
+
 	return result.ErrorOrNil()
 }
+
+// forwardReads listens for responses from the HTTPWatcher's HTTP requests.
+func (w *WSWatcher) forwardReads(responseChan chan WatcherResponse) {
+	for {
+		select {
+		case resp := <-w.respChan:
+			response := WatcherResponse{
+				WatcherID: w.id,
+				Endpoint:  resp.url,
+				Err:       nil,
+				Data:      resp.data,
+				Body:      nil,
+			}
+			responseChan <- response
+		case <-w.doneChan:
+			return
+		}
+	}
+}
+
+// HTTP REQUESTS
+// TODO: move to a separate file
 
 // HTTPRequest is an implementation of taskman.Task that sends an HTTP request to an endpoint.
 type HTTPRequest struct {
@@ -147,6 +211,13 @@ type HTTPRequest struct {
 	Method string
 	URL    *url.URL
 	Data   []byte
+
+	respChan chan httpResponse
+}
+
+type httpResponse struct {
+	resp *http.Response
+	url  *url.URL
 }
 
 // Execute sends an HTTP request to the endpoint.
@@ -166,21 +237,18 @@ func (r HTTPRequest) Execute() error {
 	if err != nil {
 		return err
 	}
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", response.StatusCode)
-	}
 
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return err
+	// Send the response without reading it, leaving that to the Watcher's owner
+	r.respChan <- httpResponse{
+		resp: response,
+		url:  r.URL,
 	}
-	defer response.Body.Close()
-
-	// TODO: exchange this with a channel send
-	fmt.Printf("response: %s\n", body)
 
 	return nil
 }
+
+// WEBSOCKETS
+// TODO: move to a separate file
 
 // WSSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
 type WSSend struct {
@@ -190,6 +258,11 @@ type WSSend struct {
 
 	// TODO: flesh out this channel, e.q. create a write pump, to work around any concurrency issues
 	writeChan chan []byte
+}
+
+type wsRead struct {
+	data []byte
+	url  *url.URL
 }
 
 // Execute sends a message to the WebSocket endpoint.
