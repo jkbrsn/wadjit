@@ -3,6 +3,7 @@ package wadjit
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -87,9 +88,20 @@ func (w *HTTPWatcher) Job() taskman.Job {
 	return job
 }
 
-// Initialize sets up a forwarder for responses from the watcher's HTTP requests.
+// Initialize sets up the HTTPWatcher to start listening for responses.
 func (w *HTTPWatcher) Initialize(responseChan chan WatcherResponse) error {
+	// Only initialize the doneChan if it's nil
+	if w.doneChan == nil {
+		w.doneChan = make(chan struct{})
+	}
+	// If the response channel is nil, the watcher cannot function
+	if w.respChan == nil {
+		return fmt.Errorf("HTTPWatcher %s: respChan is nil", w.id)
+	}
+
+	// Start the goroutine that forwards responses to the response channel
 	go w.forwardResponses(responseChan)
+
 	return nil
 }
 
@@ -186,6 +198,12 @@ func (w *WSWatcher) Initialize(responseChan chan WatcherResponse) error {
 		go w.connections[i].read()
 	}
 
+	// Only initialize the doneChan if it's nil
+	if w.doneChan == nil {
+		w.doneChan = make(chan struct{})
+	}
+
+	// Start the goroutine that forwards WS reads to the response channel
 	go w.forwardReads(responseChan)
 
 	return result.ErrorOrNil()
