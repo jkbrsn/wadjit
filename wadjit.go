@@ -13,13 +13,13 @@ type Wadjit struct {
 	watchers    sync.Map // Key xid.ID to value Watcher
 	taskManager *taskman.TaskManager
 
-	watcherChan  chan Watcher
+	watcherChan  chan *Watcher
 	responseChan chan WatcherResponse
 	doneChan     chan struct{}
 }
 
 // AddWatcher adds a watcher to the Wadjit.
-func (w *Wadjit) AddWatcher(watcher Watcher) {
+func (w *Wadjit) AddWatcher(watcher *Watcher) {
 	// TODO: add validation; e.g. check unique ID, validate Job() etc.
 	w.watcherChan <- watcher
 }
@@ -31,7 +31,7 @@ func (w *Wadjit) RemoveWatcher(id xid.ID) error {
 		return fmt.Errorf("watcher with ID %s not found", id)
 	}
 
-	err := watcher.(Watcher).Close()
+	err := watcher.(*Watcher).Close()
 	if err != nil {
 		return err
 	}
@@ -44,7 +44,7 @@ func (w *Wadjit) Close() {
 	close(w.doneChan)
 
 	w.watchers.Range(func(key, value interface{}) bool {
-		watcher := value.(Watcher)
+		watcher := value.(*Watcher)
 		watcher.Close()
 		return true
 	})
@@ -86,7 +86,7 @@ func New() *Wadjit {
 	w := &Wadjit{
 		watchers:     sync.Map{},
 		taskManager:  taskman.New(),
-		watcherChan:  make(chan Watcher),         // TODO: currently blocks, make buffered?
+		watcherChan:  make(chan *Watcher),        // TODO: currently blocks, make buffered?
 		responseChan: make(chan WatcherResponse), // TODO: currently blocks, make buffered?
 		doneChan:     make(chan struct{}),
 	}

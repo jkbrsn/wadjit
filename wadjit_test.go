@@ -36,10 +36,10 @@ func TestAddWatcher(t *testing.T) {
 	defer w.Close()
 
 	id := xid.New()
-	watcher := &HTTPWatcher{
-		id:        id,
-		cadence:   1 * time.Second,
-		endpoints: []Endpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}},
+	watcher := &Watcher{
+		id:      id,
+		cadence: 1 * time.Second,
+		http:    []Endpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}},
 	}
 	w.AddWatcher(watcher)
 	time.Sleep(5 * time.Millisecond) // wait for watcher to be added
@@ -47,7 +47,7 @@ func TestAddWatcher(t *testing.T) {
 	assert.Equal(t, 1, syncMapLen(&w.watchers))
 	loaded, _ := w.watchers.Load(id)
 	assert.NotNil(t, loaded)
-	loaded = loaded.(Watcher)
+	loaded = loaded.(*Watcher)
 	assert.Equal(t, watcher, loaded)
 }
 
@@ -56,10 +56,10 @@ func TestRemoveWatcher(t *testing.T) {
 	defer w.Close()
 
 	id := xid.New()
-	watcher := &HTTPWatcher{
-		id:        id,
-		cadence:   1 * time.Second,
-		endpoints: []Endpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}},
+	watcher := &Watcher{
+		id:      id,
+		cadence: 1 * time.Second,
+		http:    []Endpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}},
 	}
 	w.AddWatcher(watcher)
 	time.Sleep(5 * time.Millisecond) // wait for watcher to be added

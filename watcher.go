@@ -3,7 +3,7 @@ package wadjit
 import (
 	"bytes"
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,20 +17,7 @@ import (
 	"github.com/rs/xid"
 )
 
-// Watcher is an interface that represents a watcher.
-type Watcher interface {
-	// Close closes the watcher and releases any resources associated with it.
-	Close() error
-
-	// ID returns the unique identifier of the watcher.
-	ID() xid.ID
-
-	// Job returns the job which defines the tasks that the watcher will use.
-	Job() taskman.Job
-
-	// Initialize sets up the watcher to listen for responses, which are sent to responseChan.
-	Initialize(responseChan chan WatcherResponse) error
-}
+// TODO: consider if it's feasible to implement subscriptions, e.g. as another "task type"
 
 // WatcherResponse represents a response from a watcher.
 // TODO: evaluate if this is the cleanest way of merging HTTP and WS responses under the same struct
@@ -45,40 +32,61 @@ type WatcherResponse struct {
 }
 
 // HTTPWatcher is a watcher that sends HTTP requests to endpoints.
-type HTTPWatcher struct {
-	id        xid.ID
-	endpoints []Endpoint
+type Watcher struct {
+	id            xid.ID
+	cadence       time.Duration
+	commonHeader  http.Header
+	commonPayload []byte
 
-	cadence time.Duration
-	header  http.Header
-	payload []byte
+	http    []Endpoint
+	wsConns []WSConnection
 
-	respChan chan httpResponse
-	doneChan chan struct{}
+	httpRespChan chan httpResponse
+	wsReadChan   chan wsRead
+	doneChan     chan struct{}
 }
 
 // Close closes the HTTP watcher.
-func (w *HTTPWatcher) Close() error {
+func (w *Watcher) Close() error {
+	// Signal that the watcher is done
 	close(w.doneChan)
-	return nil
+
+	// Close all WS connections
+	var result *multierror.Error
+	for i := range w.wsConns {
+		err := w.wsConns[i].Close()
+		if err != nil {
+			result = multierror.Append(result, err)
+		}
+	}
+	return result.ErrorOrNil()
 }
 
 // ID returns the ID of the HTTPWatcher.
-func (w *HTTPWatcher) ID() xid.ID {
+func (w *Watcher) ID() xid.ID {
 	return w.id
 }
 
 // Job returns a taskman.Job that sends HTTP requests to the endpoints of the HTTPWatcher.
-func (w *HTTPWatcher) Job() taskman.Job {
-	tasks := make([]taskman.Task, 0, len(w.endpoints))
-	for _, endpoint := range w.endpoints {
-		tasks = append(tasks, HTTPRequest{
+func (w *Watcher) Job() taskman.Job {
+	tasks := make([]taskman.Task, 0, len(w.http)+len(w.wsConns))
+	// Create HTTP requests
+	for _, httpTarget := range w.http {
+		tasks = append(tasks, httpRequest{
 			Method: http.MethodGet,
-			URL:    endpoint.URL,
-			Header: w.header,
-			Data:   w.payload,
+			URL:    httpTarget.URL,
+			Header: w.commonHeader,
+			Data:   w.commonPayload,
 		})
 	}
+	// Create WS requests
+	for i := range w.wsConns {
+		tasks = append(tasks, &wsSend{
+			Conn:    &w.wsConns[i],
+			Message: w.commonPayload,
+		})
+	}
+	// Create the job
 	job := taskman.Job{
 		ID:       w.id.String(),
 		Cadence:  w.cadence,
@@ -89,28 +97,46 @@ func (w *HTTPWatcher) Job() taskman.Job {
 }
 
 // Initialize sets up the HTTPWatcher to start listening for responses.
-func (w *HTTPWatcher) Initialize(responseChan chan WatcherResponse) error {
-	// Only initialize the doneChan if it's nil
-	if w.doneChan == nil {
-		w.doneChan = make(chan struct{})
-	}
+func (w *Watcher) Initialize(responseChan chan WatcherResponse) error {
+	var result *multierror.Error
 	// If the response channel is nil, the watcher cannot function
-	if w.respChan == nil {
-		return fmt.Errorf("HTTPWatcher %s: respChan is nil", w.id)
+	if responseChan == nil {
+		result = multierror.Append(result, errors.New("response channel is nil"))
+	}
+
+	// Initialize the internal channels
+	w.doneChan = make(chan struct{})
+	w.httpRespChan = make(chan httpResponse)
+	w.wsReadChan = make(chan wsRead)
+
+	// Establish connections to the WS endpoints
+	for i := range w.wsConns {
+		w.wsConns[i].Lock()
+		newConn, _, err := websocket.DefaultDialer.Dial(w.wsConns[i].url.Host, w.commonHeader)
+		if err != nil {
+			result = multierror.Append(result, err)
+		}
+		w.wsConns[i].Conn = newConn
+		w.wsConns[i].writeChan = make(chan []byte)
+		w.wsConns[i].readChan = w.wsReadChan
+		w.wsConns[i].Unlock()
+
+		go w.wsConns[i].read()
 	}
 
 	// Start the goroutine that forwards responses to the response channel
 	go w.forwardResponses(responseChan)
 
-	return nil
+	return result.ErrorOrNil()
 }
 
-// forwardResponses listens for responses from the HTTPWatcher's requests, and forwards them to
+// forwardResponses listens for responses from the Watcher's requests, and forwards them to
 // the responseChan.
-func (w *HTTPWatcher) forwardResponses(responseChan chan WatcherResponse) {
+func (w *Watcher) forwardResponses(responseChan chan WatcherResponse) {
 	for {
 		select {
-		case resp := <-w.respChan:
+		// TODO: how to handle Err?
+		case resp := <-w.httpRespChan:
 			response := WatcherResponse{
 				WatcherID: w.id,
 				Endpoint:  resp.url,
@@ -119,101 +145,7 @@ func (w *HTTPWatcher) forwardResponses(responseChan chan WatcherResponse) {
 				Body:      resp.resp.Body,
 			}
 			responseChan <- response
-		case <-w.doneChan:
-			return
-		}
-	}
-}
-
-// WSWatcher is a watcher that sends messages to WebSocket endpoints, and reads the responses.
-// TODO: consider if it's feasible to implement subscriptions, or if a WSSubscriptionWatcher should be created
-type WSWatcher struct {
-	id          xid.ID
-	connections []WSConnection
-
-	cadence time.Duration
-	header  http.Header
-	msg     []byte
-
-	readChan chan wsRead
-	doneChan chan struct{}
-}
-
-// Close closes the WebSocket watcher.
-func (w *WSWatcher) Close() error {
-	// Signal that the watcher is done
-	close(w.doneChan)
-
-	// Close all connections
-	var result *multierror.Error
-	for i := range w.connections {
-		err := w.connections[i].Close()
-		if err != nil {
-			result = multierror.Append(result, err)
-		}
-	}
-	return result.ErrorOrNil()
-}
-
-// ID returns the ID of the watcher.
-func (w *WSWatcher) ID() xid.ID {
-	return w.id
-}
-
-// Job returns a taskman.Job that sends messages to WebSocket endpoints.
-func (w *WSWatcher) Job() taskman.Job {
-	tasks := make([]taskman.Task, 0, len(w.connections))
-	for i := range w.connections {
-		tasks = append(tasks, &wsSend{
-			Conn:    &w.connections[i],
-			Message: w.msg,
-		})
-	}
-	job := taskman.Job{
-		ID:       w.id.String(),
-		Cadence:  w.cadence,
-		NextExec: time.Now().Add(w.cadence),
-		Tasks:    tasks,
-	}
-	return job
-}
-
-// Initialize establishes WebSocket connections to the endpoints of the WSWatcher, starts the
-// goroutines that read and write to the connections, and sets up a forwarder for responses.
-func (w *WSWatcher) Initialize(responseChan chan WatcherResponse) error {
-	var result *multierror.Error
-
-	// Establish connections to the endpoints, initialize the channels and goroutines
-	for i := range w.connections {
-		w.connections[i].Lock()
-		newConn, _, err := websocket.DefaultDialer.Dial(w.connections[i].url.Host, w.header)
-		if err != nil {
-			result = multierror.Append(result, err)
-		}
-		w.connections[i].Conn = newConn
-		w.connections[i].writeChan = make(chan []byte)
-		w.connections[i].readChan = w.readChan
-		w.connections[i].Unlock()
-
-		go w.connections[i].read()
-	}
-
-	// Only initialize the doneChan if it's nil
-	if w.doneChan == nil {
-		w.doneChan = make(chan struct{})
-	}
-
-	// Start the goroutine that forwards WS reads to the response channel
-	go w.forwardReads(responseChan)
-
-	return result.ErrorOrNil()
-}
-
-// forwardReads listens for responses from the HTTPWatcher's HTTP requests.
-func (w *WSWatcher) forwardReads(responseChan chan WatcherResponse) {
-	for {
-		select {
-		case wsRead := <-w.readChan:
+		case wsRead := <-w.wsReadChan:
 			response := WatcherResponse{
 				WatcherID: w.id,
 				Endpoint:  wsRead.url,
@@ -228,6 +160,7 @@ func (w *WSWatcher) forwardReads(responseChan chan WatcherResponse) {
 	}
 }
 
+// WSConnection represents and handles a WebSocket connection.
 type WSConnection struct {
 	*websocket.Conn
 	sync.Mutex
@@ -280,8 +213,13 @@ func (c *WSConnection) read() {
 // HTTP REQUESTS
 // TODO: move to a separate file
 
-// HTTPRequest is an implementation of taskman.Task that sends an HTTP request to an endpoint.
-type HTTPRequest struct {
+type httpResponse struct {
+	resp *http.Response
+	url  *url.URL
+}
+
+// httpRequest is an implementation of taskman.Task that sends an HTTP request to an endpoint.
+type httpRequest struct {
 	Header http.Header
 	Method string
 	URL    *url.URL
@@ -290,13 +228,8 @@ type HTTPRequest struct {
 	respChan chan httpResponse
 }
 
-type httpResponse struct {
-	resp *http.Response
-	url  *url.URL
-}
-
 // Execute sends an HTTP request to the endpoint.
-func (r HTTPRequest) Execute() error {
+func (r httpRequest) Execute() error {
 	request, err := http.NewRequest(r.Method, r.URL.String(), bytes.NewReader(r.Data))
 	if err != nil {
 		return err
@@ -325,16 +258,16 @@ func (r HTTPRequest) Execute() error {
 // WEBSOCKETS
 // TODO: move to a separate file
 
-// wsSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
-type wsSend struct {
-	Conn    *WSConnection
-	Message []byte
-}
-
 // wsRead represents a message read from a WebSocket connection to a specific URL.
 type wsRead struct {
 	data []byte
 	url  *url.URL
+}
+
+// wsSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
+type wsSend struct {
+	Conn    *WSConnection
+	Message []byte
 }
 
 // Execute sends a message to the WebSocket endpoint.
