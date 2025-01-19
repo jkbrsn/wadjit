@@ -24,9 +24,8 @@ type Watcher interface {
 	// Job returns the job which defines the tasks that the watcher will use.
 	Job() taskman.Job
 
-	// SetUp initializes the watcher and prepares it for use.
-	// TODO: rename init?
-	SetUp(responseChan chan WatcherResponse) error
+	// Initialize sets up the watcher to listen for responses, which are sent to responseChan.
+	Initialize(responseChan chan WatcherResponse) error
 }
 
 // WatcherResponse represents a response from a watcher.
@@ -84,13 +83,14 @@ func (w *HTTPWatcher) Job() taskman.Job {
 	return job
 }
 
-// SetUp sets up a listener-forwarder for responses from the HTTPWatcher's HTTP requests.
-func (w *HTTPWatcher) SetUp(responseChan chan WatcherResponse) error {
+// Initialize sets up a forwarder for responses from the watcher's HTTP requests.
+func (w *HTTPWatcher) Initialize(responseChan chan WatcherResponse) error {
 	go w.forwardResponses(responseChan)
 	return nil
 }
 
-// collectResponses listens for responses from the HTTPWatcher's HTTP requests.
+// forwardResponses listens for responses from the HTTPWatcher's requests, and forwards them to
+// the responseChan.
 func (w *HTTPWatcher) forwardResponses(responseChan chan WatcherResponse) {
 	for {
 		select {
@@ -162,8 +162,9 @@ func (w *WSWatcher) Job() taskman.Job {
 	return job
 }
 
-// SetUp establishes WebSocket connections to the endpoints of the WSWatcher.
-func (w *WSWatcher) SetUp(responseChan chan WatcherResponse) error {
+// Initialize establishes WebSocket connections to the endpoints of the WSWatcher, starts the
+// goroutines that read and write to the connections, and sets up a forwarder for responses.
+func (w *WSWatcher) Initialize(responseChan chan WatcherResponse) error {
 	var result *multierror.Error
 
 	// Establish connections to the endpoints
