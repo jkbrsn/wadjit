@@ -51,6 +51,8 @@ func TestAddWatcher(t *testing.T) {
 	assert.Equal(t, watcher, loaded)
 }
 
+// TODO: test adding/removing multiple watchers
+
 func TestRemoveWatcher(t *testing.T) {
 	w := New()
 	defer w.Close()
@@ -74,3 +76,7 @@ func TestRemoveWatcher(t *testing.T) {
 	assert.Nil(t, loaded)
 	assert.False(t, ok)
 }
+
+// TODO: test watcher initialization
+// TODO: test watcher execution for HTTP
+// TODO: test watcher execution for WS
