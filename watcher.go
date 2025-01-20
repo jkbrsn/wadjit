@@ -16,6 +16,8 @@ import (
 	"github.com/rs/xid"
 )
 
+// TODO: consider if it's feasible to implement subscriptions, e.g. as another "task type" or even another watcher type
+
 // Watcher is a watcher that sends HTTP requests and WS messages to endpoints, and then
 // forwards the responses to a response channel.
 type Watcher struct {
@@ -30,8 +32,6 @@ type Watcher struct {
 }
 
 // WatcherResponse represents a response from a watcher.
-// TODO: evaluate if this is the cleanest way of merging HTTP and WS responses under the same struct
-// TODO: could be an interface where Data() returns []byte for WS and reads Body + returns []byte for HTTP?
 type WatcherResponse struct {
 	WatcherID    xid.ID
 	URL          *url.URL
@@ -40,7 +40,41 @@ type WatcherResponse struct {
 	HTTPResponse *http.Response // For HTTP
 }
 
-// TODO: consider if it's feasible to implement subscriptions, e.g. as another "task type" or even another watcher type
+// Data returns the data from the response.
+func (r WatcherResponse) Data() ([]byte, error) {
+	// Check for errors
+	if r.Err != nil {
+		return nil, r.Err
+	}
+	// Check for duplicate data, which is undefined behavior
+	if r.WSData != nil && r.HTTPResponse != nil {
+		return nil, errors.New("both WS and HTTP data available")
+	}
+	// Check for WS data
+	if r.WSData != nil {
+		return r.WSData, nil
+	}
+	// Check for HTTP data
+	if r.HTTPResponse != nil {
+		// Read the body
+		defer r.HTTPResponse.Body.Close()
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(r.HTTPResponse.Body)
+		return buf.Bytes(), nil
+	}
+	return nil, errors.New("no data available")
+}
+
+// errorResponse is a helper to create a WatcherResponse with an error.
+func errorResponse(err error, url *url.URL) WatcherResponse {
+	return WatcherResponse{
+		WatcherID:    xid.NilID(),
+		URL:          url,
+		Err:          err,
+		WSData:       nil,
+		HTTPResponse: nil,
+	}
+}
 
 // WatcherTask is a task that the Watcher can execute to interact with a target endpoint.
 type WatcherTask interface {
@@ -123,7 +157,6 @@ func (w *Watcher) Initialize(responseChan chan WatcherResponse) error {
 func (w *Watcher) forwardResponses(responseChan chan WatcherResponse) {
 	for {
 		select {
-		// TODO: how to handle Err?
 		case resp := <-w.taskResponses:
 			// Attach Watcher ID to the response
 			// TODO: is there some better way to attach the ID than intercepting the response?
@@ -166,12 +199,13 @@ func (e *HTTPEndpoint) Task(payload []byte) taskman.Task {
 }
 
 // WSConnection represents and handles a WebSocket connection.
+// TODO: add a reconnect mechanism?
 type WSConnection struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
 
-	url    *url.URL
-	header http.Header
+	URL    *url.URL
+	Header http.Header
 
 	writeChan chan []byte
 	respChan  chan<- WatcherResponse
@@ -180,16 +214,18 @@ type WSConnection struct {
 	cancel context.CancelFunc
 }
 
+// Close closes the WebSocket connection, and cancels its context.
 func (c *WSConnection) Close() error {
 	c.cancel()
 	return c.conn.Close()
 }
 
+// Initialize sets up the WebSocket connection.
 func (c *WSConnection) Initialize(responseChannel chan WatcherResponse) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	newConn, _, err := websocket.DefaultDialer.Dial(c.url.Host, c.header)
+	newConn, _, err := websocket.DefaultDialer.Dial(c.URL.Host, c.Header)
 	if err != nil {
 		return err
 	}
@@ -203,6 +239,7 @@ func (c *WSConnection) Initialize(responseChannel chan WatcherResponse) error {
 	return nil
 }
 
+// Task returns a taskman.Task that sends a message to the WebSocket endpoint.
 func (c *WSConnection) Task(payload []byte) taskman.Task {
 	return &wsSend{
 		conn: c,
@@ -210,6 +247,7 @@ func (c *WSConnection) Task(payload []byte) taskman.Task {
 	}
 }
 
+// lock and unlock provide exclusive access to the connection's mutex.
 func (c *WSConnection) lock() {
 	c.mu.Lock()
 }
@@ -248,7 +286,7 @@ func (c *WSConnection) read() {
 			// Send the message to the read channel
 			response := WatcherResponse{
 				WatcherID:    xid.NilID(),
-				URL:          c.url,
+				URL:          c.URL,
 				Err:          nil,
 				WSData:       p,
 				HTTPResponse: nil,
@@ -257,9 +295,6 @@ func (c *WSConnection) read() {
 		}
 	}
 }
-
-// HTTP REQUESTS
-// TODO: move to a separate file
 
 // httpRequest is an implementation of taskman.Task that sends an HTTP request to an endpoint.
 type httpRequest struct {
@@ -275,6 +310,7 @@ type httpRequest struct {
 func (r httpRequest) Execute() error {
 	request, err := http.NewRequest(r.Method, r.URL.String(), bytes.NewReader(r.Data))
 	if err != nil {
+		r.respChan <- errorResponse(err, r.URL)
 		return err
 	}
 
@@ -286,6 +322,7 @@ func (r httpRequest) Execute() error {
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
+		r.respChan <- errorResponse(err, r.URL)
 		return err
 	}
 
@@ -300,9 +337,6 @@ func (r httpRequest) Execute() error {
 
 	return nil
 }
-
-// WEBSOCKETS
-// TODO: move to a separate file
 
 // wsSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
 type wsSend struct {
@@ -331,9 +365,10 @@ func (ws *wsSend) Execute() error {
 				// This is unexpected
 			}
 
-			// TODO: if there was an error, close the connection?
+			// TODO: if there was an error, close the connection? reconnect?
 
-			// TODO: unless handled, this error will be caught in the task manager
+			ws.conn.respChan <- errorResponse(err, ws.conn.URL)
+
 			return err
 		}
 	}
