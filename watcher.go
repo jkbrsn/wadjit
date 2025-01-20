@@ -39,6 +39,7 @@ type Watcher struct {
 	commonHeader  http.Header
 	commonPayload []byte
 
+	// TODO: let these implement a common interface
 	http    []Endpoint
 	wsConns []WSConnection
 
@@ -219,6 +220,8 @@ func (c *WSConnection) read() {
 // HTTP REQUESTS
 // TODO: move to a separate file
 
+// httpResponse represents a response from an HTTP request to a specific URL.
+// TODO: replace with WatcherResponse?
 type httpResponse struct {
 	resp *http.Response
 	url  *url.URL
@@ -265,6 +268,7 @@ func (r httpRequest) Execute() error {
 // TODO: move to a separate file
 
 // wsRead represents a message read from a WebSocket connection to a specific URL.
+// TODO: replace with WatcherResponse?
 type wsRead struct {
 	data []byte
 	url  *url.URL
