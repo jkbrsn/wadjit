@@ -36,10 +36,15 @@ func TestAddWatcher(t *testing.T) {
 	defer w.Close()
 
 	id := xid.New()
+	tasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}}
+	var watcherTasks []WatcherTask
+	for _, task := range tasks {
+		watcherTasks = append(watcherTasks, &task)
+	}
 	watcher := &Watcher{
-		id:      id,
-		cadence: 1 * time.Second,
-		http:    []Endpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}},
+		id:           id,
+		cadence:      1 * time.Second,
+		watcherTasks: watcherTasks,
 	}
 	w.AddWatcher(watcher)
 	time.Sleep(5 * time.Millisecond) // wait for watcher to be added
@@ -58,10 +63,15 @@ func TestRemoveWatcher(t *testing.T) {
 	defer w.Close()
 
 	id := xid.New()
+	tasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}}
+	var watcherTasks []WatcherTask
+	for _, task := range tasks {
+		watcherTasks = append(watcherTasks, &task)
+	}
 	watcher := &Watcher{
-		id:      id,
-		cadence: 1 * time.Second,
-		http:    []Endpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}},
+		id:           id,
+		cadence:      1 * time.Second,
+		watcherTasks: watcherTasks,
 	}
 	w.AddWatcher(watcher)
 	time.Sleep(5 * time.Millisecond) // wait for watcher to be added
