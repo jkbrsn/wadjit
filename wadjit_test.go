@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TODO: create a MockHTTPWatcher struct that implements the Watcher interface
-// TODO: create a MockWSWatcher struct that implements the Watcher interface
 // TODO: set up a small test server that can be used to test the Wadjit
 
 func syncMapLen(m *sync.Map) int {
@@ -35,20 +33,25 @@ func TestAddWatcher(t *testing.T) {
 	w := New()
 	defer w.Close()
 
+	// Create a watcher
 	id := xid.New()
-	tasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}}
-	var watcherTasks []WatcherTask
-	for _, task := range tasks {
-		watcherTasks = append(watcherTasks, &task)
+	cadence := 1 * time.Second
+	payload := []byte("test payload")
+	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}}
+	var tasks []WatcherTask
+	for _, task := range httpTasks {
+		tasks = append(tasks, &task)
 	}
-	watcher := &Watcher{
-		id:           id,
-		cadence:      1 * time.Second,
-		watcherTasks: watcherTasks,
-	}
-	w.AddWatcher(watcher)
+	respChannel := make(chan WatcherResponse)
+	watcher, err := NewWatcher(id, cadence, payload, tasks, respChannel)
+	assert.NoError(t, err, "error creating watcher")
+
+	// Add the watcher
+	err = w.AddWatcher(watcher)
+	assert.NoError(t, err, "error adding watcher")
 	time.Sleep(5 * time.Millisecond) // wait for watcher to be added
 
+	// Check that the watcher was added correctly
 	assert.Equal(t, 1, syncMapLen(&w.watchers))
 	loaded, _ := w.watchers.Load(id)
 	assert.NotNil(t, loaded)
@@ -56,29 +59,30 @@ func TestAddWatcher(t *testing.T) {
 	assert.Equal(t, watcher, loaded)
 }
 
-// TODO: test adding/removing multiple watchers
-
 func TestRemoveWatcher(t *testing.T) {
 	w := New()
 	defer w.Close()
 
+	// Create a watcher
 	id := xid.New()
-	tasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}}
-	var watcherTasks []WatcherTask
-	for _, task := range tasks {
-		watcherTasks = append(watcherTasks, &task)
+	cadence := 1 * time.Second
+	payload := []byte("test payload")
+	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}}
+	var tasks []WatcherTask
+	for _, task := range httpTasks {
+		tasks = append(tasks, &task)
 	}
-	watcher := &Watcher{
-		id:           id,
-		cadence:      1 * time.Second,
-		watcherTasks: watcherTasks,
-	}
-	w.AddWatcher(watcher)
-	time.Sleep(5 * time.Millisecond) // wait for watcher to be added
+	respChannel := make(chan WatcherResponse)
+	watcher, err := NewWatcher(id, cadence, payload, tasks, respChannel)
+	assert.NoError(t, err, "error creating watcher")
+
+	err = w.AddWatcher(watcher)
+	assert.NoError(t, err, "error adding watcher")
+	time.Sleep(5 * time.Millisecond) // Wait for watcher to be added
 
 	assert.Equal(t, 1, syncMapLen(&w.watchers))
 
-	err := w.RemoveWatcher(id)
+	err = w.RemoveWatcher(id)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, syncMapLen(&w.watchers))
 
@@ -87,6 +91,6 @@ func TestRemoveWatcher(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// TODO: test watcher initialization
-// TODO: test watcher execution for HTTP
-// TODO: test watcher execution for WS
+// TODO: test adding/removing multiple watchers
+// TODO: test Wadjit execution for HTTP
+// TODO: test Wadjit execution for WS

@@ -100,3 +100,6 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	assert.NotNil(t, conn.ctx)
 	assert.NotNil(t, conn.cancel)
 } */
+
+// TODO: test watcher execution for HTTP
+// TODO: test watcher execution for WS
