@@ -16,8 +16,6 @@ import (
 	"github.com/rs/xid"
 )
 
-// TODO: consider if it's feasible to implement subscriptions, e.g. as another "task type" or even another watcher type
-
 // Watcher is a watcher that sends HTTP requests and WS messages to endpoints, and then
 // forwards the responses to a response channel.
 type Watcher struct {
@@ -200,6 +198,8 @@ func (e *HTTPEndpoint) Task(payload []byte) taskman.Task {
 
 // WSConnection represents and handles a WebSocket connection.
 // TODO: add a reconnect mechanism?
+// TODO: use read and write deadlines?
+// TODO: implement reconnect mechanism
 type WSConnection struct {
 	conn *websocket.Conn
 	mu   sync.Mutex
@@ -266,8 +266,6 @@ func (c *WSConnection) read() {
 		case <-c.ctx.Done():
 			return
 		default:
-			// TODO: reset read deadlines before reading ???
-
 			// Read message from connection
 			_, p, err := c.conn.ReadMessage()
 			if err != nil {
@@ -355,7 +353,7 @@ func (ws *wsSend) Execute() error {
 		// The connection has been closed
 		return nil
 	default:
-		// TODO: use/set a write deadline ???
+		// Write message to connection
 		if err := ws.conn.conn.WriteMessage(websocket.TextMessage, ws.msg); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				// This is an expected situation, handle gracefully
@@ -365,7 +363,7 @@ func (ws *wsSend) Execute() error {
 				// This is unexpected
 			}
 
-			// TODO: if there was an error, close the connection? reconnect?
+			// TODO: if there was an error, try to reconnect
 
 			ws.conn.respChan <- errorResponse(err, ws.conn.URL)
 
