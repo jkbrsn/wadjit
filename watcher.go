@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -38,42 +39,6 @@ type WatcherResponse struct {
 	HTTPResponse *http.Response // For HTTP
 }
 
-// Data returns the data from the response.
-func (r WatcherResponse) Data() ([]byte, error) {
-	// Check for errors
-	if r.Err != nil {
-		return nil, r.Err
-	}
-	// Check for duplicate data, which is undefined behavior
-	if r.WSData != nil && r.HTTPResponse != nil {
-		return nil, errors.New("both WS and HTTP data available")
-	}
-	// Check for WS data
-	if r.WSData != nil {
-		return r.WSData, nil
-	}
-	// Check for HTTP data
-	if r.HTTPResponse != nil {
-		// Read the body
-		defer r.HTTPResponse.Body.Close()
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(r.HTTPResponse.Body)
-		return buf.Bytes(), nil
-	}
-	return nil, errors.New("no data available")
-}
-
-// errorResponse is a helper to create a WatcherResponse with an error.
-func errorResponse(err error, url *url.URL) WatcherResponse {
-	return WatcherResponse{
-		WatcherID:    xid.NilID(),
-		URL:          url,
-		Err:          err,
-		WSData:       nil,
-		HTTPResponse: nil,
-	}
-}
-
 // WatcherTask is a task that the Watcher can execute to interact with a target endpoint.
 type WatcherTask interface {
 	// Close closes the WatcherTask, cleaning up and releasing resources.
@@ -81,10 +46,13 @@ type WatcherTask interface {
 	Close() error
 
 	// Initialize sets up the WatcherTask to be ready to watch an endpoint.
-	Initialize(respChan chan WatcherResponse) error
+	Initialize(respChan chan<- WatcherResponse) error
 
 	// Task returns a taskman.Task that sends requests and messages to the endpoint.
 	Task(payload []byte) taskman.Task
+
+	// Validate checks that the WatcherTask is ready for initialization.
+	Validate() error
 }
 
 // Close closes the HTTP watcher.
@@ -124,17 +92,22 @@ func (w *Watcher) Job() taskman.Job {
 	return job
 }
 
-// Initialize sets up the Watcher to start listening for responses, and initializes its tasks.
-func (w *Watcher) Initialize(responseChan chan WatcherResponse) error {
+// Start sets up the Watcher to start listening for responses, and initializes its tasks.
+func (w *Watcher) Start(responseChan chan WatcherResponse) error {
 	var result *multierror.Error
+
 	// If the response channel is nil, the watcher cannot function
 	if responseChan == nil {
 		result = multierror.Append(result, errors.New("response channel is nil"))
 	}
 
-	// Initialize the internal channels
-	w.doneChan = make(chan struct{})
-	w.taskResponses = make(chan WatcherResponse)
+	// Set up the Watcher's channels if they are nil
+	if w.doneChan == nil {
+		w.doneChan = make(chan struct{})
+	}
+	if w.taskResponses == nil {
+		w.taskResponses = make(chan WatcherResponse) // TODO: make buffered?
+	}
 
 	// Initialize the watcher tasks
 	for i := range w.watcherTasks {
@@ -146,6 +119,39 @@ func (w *Watcher) Initialize(responseChan chan WatcherResponse) error {
 
 	// Start the goroutine that forwards responses to the response channel
 	go w.forwardResponses(responseChan)
+
+	return result.ErrorOrNil()
+}
+
+// Validate checks that the Watcher is valid for use in the Wadjit.
+func (w *Watcher) Validate() error {
+	if w == nil {
+		return errors.New("watcher is nil")
+	}
+
+	var result *multierror.Error
+	if w.id == xid.NilID() {
+		result = multierror.Append(result, errors.New("id must not be nil"))
+	}
+	if w.cadence <= 0 {
+		result = multierror.Append(result, errors.New("cadence must be greater than 0"))
+	}
+	if len(w.watcherTasks) == 0 {
+		result = multierror.Append(result, errors.New("watcherTasks must not be nil or empty"))
+	}
+	if w.taskResponses == nil {
+		result = multierror.Append(result, errors.New("gatherResponses must not be nil"))
+	}
+	if w.doneChan == nil {
+		result = multierror.Append(result, errors.New("doneChan must not be nil"))
+	}
+
+	for i := range w.watcherTasks {
+		err := w.watcherTasks[i].Validate()
+		if err != nil {
+			result = multierror.Append(result, err)
+		}
+	}
 
 	return result.ErrorOrNil()
 }
@@ -166,6 +172,66 @@ func (w *Watcher) forwardResponses(responseChan chan WatcherResponse) {
 	}
 }
 
+// NewWatcher creates and validates a new Watcher.
+func NewWatcher(
+	id xid.ID,
+	cadence time.Duration,
+	payload []byte,
+	tasks []WatcherTask,
+	responseChannel chan WatcherResponse,
+) (*Watcher, error) {
+	w := &Watcher{
+		id:            id,
+		cadence:       cadence,
+		payload:       payload,
+		watcherTasks:  tasks,
+		taskResponses: make(chan WatcherResponse), // TODO: make buffered?
+		doneChan:      make(chan struct{}),
+	}
+
+	if err := w.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid watcher initialization: %w", err)
+	}
+
+	return w, nil
+}
+
+// Data returns the data from the response.
+func (r WatcherResponse) Data() ([]byte, error) {
+	// Check for errors
+	if r.Err != nil {
+		return nil, r.Err
+	}
+	// Check for duplicate data, which is undefined behavior
+	if r.WSData != nil && r.HTTPResponse != nil {
+		return nil, errors.New("both WS and HTTP data available")
+	}
+	// Check for WS data
+	if r.WSData != nil {
+		return r.WSData, nil
+	}
+	// Check for HTTP data
+	if r.HTTPResponse != nil {
+		// Read the body
+		defer r.HTTPResponse.Body.Close()
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(r.HTTPResponse.Body)
+		return buf.Bytes(), nil
+	}
+	return nil, errors.New("no data available")
+}
+
+// errorResponse is a helper to create a WatcherResponse with an error.
+func errorResponse(err error, url *url.URL) WatcherResponse {
+	return WatcherResponse{
+		WatcherID:    xid.NilID(),
+		URL:          url,
+		Err:          err,
+		WSData:       nil,
+		HTTPResponse: nil,
+	}
+}
+
 // HTTPEndpoint represents an HTTP endpoint that the Watcher can interact with.
 type HTTPEndpoint struct {
 	URL    *url.URL
@@ -180,7 +246,7 @@ func (e *HTTPEndpoint) Close() error {
 }
 
 // Initialize sets up the HTTP endpoint to be able to send on its responses.
-func (e *HTTPEndpoint) Initialize(responseChannel chan WatcherResponse) error {
+func (e *HTTPEndpoint) Initialize(responseChannel chan<- WatcherResponse) error {
 	e.respChan = responseChannel
 	return nil
 }
@@ -196,22 +262,35 @@ func (e *HTTPEndpoint) Task(payload []byte) taskman.Task {
 	}
 }
 
+// Validate checks that the HTTPEndpoint is ready to be initialized.
+func (e *HTTPEndpoint) Validate() error {
+	if e.URL == nil {
+		return errors.New("URL is nil")
+	}
+	if e.Header == nil {
+		// Set empty header if nil
+		e.Header = make(http.Header)
+	}
+	return nil
+}
+
 // WSConnection represents and handles a WebSocket connection.
 // TODO: add a reconnect mechanism?
 // TODO: use read and write deadlines?
 // TODO: implement reconnect mechanism
 type WSConnection struct {
-	conn *websocket.Conn
-	mu   sync.Mutex
+	mu sync.Mutex
 
-	URL    *url.URL
-	Header http.Header
-
+	// Set in initialization
+	conn      *websocket.Conn
+	ctx       context.Context
+	cancel    context.CancelFunc
 	writeChan chan []byte
 	respChan  chan<- WatcherResponse
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	// Set before initialization
+	URL    *url.URL
+	Header http.Header
 }
 
 // Close closes the WebSocket connection, and cancels its context.
@@ -221,7 +300,7 @@ func (c *WSConnection) Close() error {
 }
 
 // Initialize sets up the WebSocket connection.
-func (c *WSConnection) Initialize(responseChannel chan WatcherResponse) error {
+func (c *WSConnection) Initialize(responseChannel chan<- WatcherResponse) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -245,6 +324,18 @@ func (c *WSConnection) Task(payload []byte) taskman.Task {
 		conn: c,
 		msg:  payload,
 	}
+}
+
+// Validate checks that the WSConnection is ready to be initialized.
+func (c *WSConnection) Validate() error {
+	if c.URL == nil {
+		return errors.New("URL is nil")
+	}
+	if c.Header == nil {
+		// Set empty header if nil
+		c.Header = make(http.Header)
+	}
+	return nil
 }
 
 // lock and unlock provide exclusive access to the connection's mutex.

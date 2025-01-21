@@ -19,9 +19,12 @@ type Wadjit struct {
 }
 
 // AddWatcher adds a watcher to the Wadjit.
-func (w *Wadjit) AddWatcher(watcher *Watcher) {
-	// TODO: add validation; e.g. check unique ID, validate Job() etc.
+func (w *Wadjit) AddWatcher(watcher *Watcher) error {
+	if err := watcher.Validate(); err != nil {
+		return fmt.Errorf("error validating watcher: %v", err)
+	}
 	w.watcherChan <- watcher
+	return nil
 }
 
 // RemoveWatcher removes a watcher from the Wadjit.
@@ -67,7 +70,7 @@ func (w *Wadjit) listenForWatchers() {
 	for {
 		select {
 		case watcher := <-w.watcherChan:
-			watcher.Initialize(w.responseChan)
+			watcher.Start(w.responseChan)
 			job := watcher.Job()
 			err := w.taskManager.ScheduleJob(job)
 			if err != nil {
