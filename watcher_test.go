@@ -1,6 +1,7 @@
 package wadjit
 
 import (
+	"io"
 	"net/http"
 	"net/url"
 	"testing"
@@ -58,6 +59,56 @@ func TestWatcherStart(t *testing.T) {
 	assert.NotNil(t, watcher.taskResponses)
 }
 
+func TestWatcherExecution(t *testing.T) {
+	server := echoServer()
+	defer server.Close()
+
+	// Set up URLs
+	httpURL, err := url.Parse(server.URL)
+	assert.NoError(t, err, "failed to parse HTTP URL")
+	wsURL, err := url.Parse("ws" + server.URL[4:] + "/ws")
+	assert.NoError(t, err, "failed to parse WS URL")
+	header := make(http.Header)
+
+	// Set up watcher
+	id := xid.New()
+	cadence := 1 * time.Second
+	payload := []byte("test payload")
+	var tasks []WatcherTask
+	tasks = append(tasks, &HTTPEndpoint{URL: httpURL, Header: header})
+	tasks = append(tasks, &WSConnection{URL: wsURL, Header: header})
+	taskResponses := make(chan WatcherResponse)
+	watcher, err := NewWatcher(id, cadence, payload, tasks, taskResponses)
+	assert.NoError(t, err)
+
+	// Start the watcher and execute the tasks
+	watcherResponses := make(chan WatcherResponse)
+	err = watcher.Start(watcherResponses)
+	assert.NoError(t, err)
+	for _, task := range watcher.watcherTasks {
+		task.Task(payload).Execute()
+	}
+
+	// Listen for responses on the watcherResponses channel
+	for i := 0; i < len(watcher.watcherTasks); i++ {
+		response := <-watcherResponses
+		assert.NotNil(t, response)
+		assert.NotNil(t, response.URL)
+		assert.Nil(t, response.Err)
+		assert.Equal(t, id, response.WatcherID)
+		if response.URL.Scheme == "http" {
+			assert.NotNil(t, response.HTTPResponse)
+			responsePayload, err := io.ReadAll(response.HTTPResponse.Body)
+			assert.NoError(t, err)
+			assert.Equal(t, payload, responsePayload)
+		} else if response.URL.Scheme == "ws" {
+			assert.Equal(t, payload, response.WSData)
+		} else {
+			t.Fail()
+		}
+	}
+}
+
 func TestHTTPEndpointInitialize(t *testing.T) {
 	url, _ := url.Parse("http://example.com")
 	header := make(http.Header)
@@ -77,9 +128,13 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	assert.NotNil(t, endpoint.respChan)
 }
 
-// TODO: uncomment when a WS test server is available
-/* func TestWSConnectionInitialize(t *testing.T) {
-	url, _ := url.Parse("ws://example.com/socket")
+func TestWSConnectionInitialize(t *testing.T) {
+	server := echoServer()
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[4:] + "/ws"
+	url, err := url.Parse(wsURL)
+	assert.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
@@ -92,14 +147,11 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	assert.Equal(t, header, conn.Header)
 	assert.Nil(t, conn.respChan)
 
-	err := conn.Initialize(responseChan)
+	err = conn.Initialize(responseChan)
 	assert.NoError(t, err)
 	assert.NotNil(t, conn.respChan)
 	assert.NotNil(t, conn.conn)
 	assert.NotNil(t, conn.writeChan)
 	assert.NotNil(t, conn.ctx)
 	assert.NotNil(t, conn.cancel)
-} */
-
-// TODO: test watcher execution for HTTP
-// TODO: test watcher execution for WS
+}

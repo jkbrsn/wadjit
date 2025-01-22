@@ -304,7 +304,7 @@ func (c *WSConnection) Initialize(responseChannel chan<- WatcherResponse) error 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	newConn, _, err := websocket.DefaultDialer.Dial(c.URL.Host, c.Header)
+	newConn, _, err := websocket.DefaultDialer.Dial(c.URL.String(), c.Header)
 	if err != nil {
 		return err
 	}
