@@ -2,8 +2,6 @@
 
 ## near term
 
-- Add tests for `Watcher`
-- Add more tests for `Wadjit`
 - Clear in-code TODOs
 
 ## ideas

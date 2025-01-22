@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
@@ -59,4 +60,13 @@ func echoServer() *httptest.Server {
 	}))
 
 	return server
+}
+
+func syncMapLen(m *sync.Map) int {
+	var length int
+	m.Range(func(key, value interface{}) bool {
+		length++
+		return true
+	})
+	return length
 }

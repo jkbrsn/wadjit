@@ -13,17 +13,21 @@ type Wadjit struct {
 	watchers    sync.Map // Key xid.ID to value Watcher
 	taskManager *taskman.TaskManager
 
-	watcherChan  chan *Watcher
-	responseChan chan WatcherResponse
-	doneChan     chan struct{}
+	newWatcherChan chan *Watcher
+	wRespChan      chan WatcherResponse // TODO: pass pointer?
+	userChan       chan WatcherResponse // TODO: pass pointer?
+	doneChan       chan struct{}
+
+	consumeStarted chan struct{}
 }
 
 // AddWatcher adds a watcher to the Wadjit.
+// Note: unless the ResponseChannel is consumed, added Watchers will not be started.
 func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	if err := watcher.Validate(); err != nil {
 		return fmt.Errorf("error validating watcher: %v", err)
 	}
-	w.watcherChan <- watcher
+	w.newWatcherChan <- watcher
 	return nil
 }
 
@@ -39,6 +43,8 @@ func (w *Wadjit) RemoveWatcher(id xid.ID) error {
 		return err
 	}
 
+	w.taskManager.RemoveJob(id.String())
+
 	return nil
 }
 
@@ -53,13 +59,20 @@ func (w *Wadjit) Close() {
 	})
 }
 
+// ResponsesChannel returns the channel where responses from the internal Watcher instances
+// are sent.
+// Note: this method unblocks Watchers being added to the Wadjit.
+func (w *Wadjit) ResponsesChannel() <-chan WatcherResponse {
+	w.consumeStarted <- struct{}{}
+	return w.userChan
+}
+
 func (w *Wadjit) listenForResponses() {
 	for {
 		select {
-		case response := <-w.responseChan:
-			// TODO: this is a placeholder; implement response handling that can be
-			//       handed over to the owner of the Wadjit
-			fmt.Printf("response: %v\n", response)
+		case response := <-w.wRespChan:
+			// Send the response to the external facing channel
+			w.userChan <- response
 		case <-w.doneChan:
 			return
 		}
@@ -67,10 +80,12 @@ func (w *Wadjit) listenForResponses() {
 }
 
 func (w *Wadjit) listenForWatchers() {
+	// Block until the caller starts consuming responses
+	<-w.consumeStarted
 	for {
 		select {
-		case watcher := <-w.watcherChan:
-			watcher.Start(w.responseChan)
+		case watcher := <-w.newWatcherChan:
+			watcher.Start(w.wRespChan)
 			job := watcher.Job()
 			err := w.taskManager.ScheduleJob(job)
 			if err != nil {
@@ -87,11 +102,13 @@ func (w *Wadjit) listenForWatchers() {
 // New creates, starts, and returns a new Wadjit.
 func New() *Wadjit {
 	w := &Wadjit{
-		watchers:     sync.Map{},
-		taskManager:  taskman.New(),
-		watcherChan:  make(chan *Watcher),        // TODO: currently blocks, make buffered?
-		responseChan: make(chan WatcherResponse), // TODO: currently blocks, make buffered?
-		doneChan:     make(chan struct{}),
+		watchers:       sync.Map{},
+		taskManager:    taskman.New(),
+		newWatcherChan: make(chan *Watcher, 16),
+		wRespChan:      make(chan WatcherResponse, 512),
+		userChan:       make(chan WatcherResponse, 512),
+		consumeStarted: make(chan struct{}),
+		doneChan:       make(chan struct{}),
 	}
 
 	go w.listenForResponses()

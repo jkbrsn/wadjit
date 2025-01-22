@@ -106,7 +106,7 @@ func (w *Watcher) Start(responseChan chan WatcherResponse) error {
 		w.doneChan = make(chan struct{})
 	}
 	if w.taskResponses == nil {
-		w.taskResponses = make(chan WatcherResponse) // TODO: make buffered?
+		w.taskResponses = make(chan WatcherResponse, 512)
 	}
 
 	// Initialize the watcher tasks
@@ -144,6 +144,13 @@ func (w *Watcher) Validate() error {
 	}
 	if w.doneChan == nil {
 		result = multierror.Append(result, errors.New("doneChan must not be nil"))
+	} else {
+		select {
+		case <-w.doneChan:
+			result = multierror.Append(result, errors.New("doneChan must not be closed"))
+		default:
+			// doneChan is not closed
+		}
 	}
 
 	for i := range w.watcherTasks {
@@ -178,14 +185,13 @@ func NewWatcher(
 	cadence time.Duration,
 	payload []byte,
 	tasks []WatcherTask,
-	responseChannel chan WatcherResponse,
 ) (*Watcher, error) {
 	w := &Watcher{
 		id:            id,
 		cadence:       cadence,
 		payload:       payload,
 		watcherTasks:  tasks,
-		taskResponses: make(chan WatcherResponse), // TODO: make buffered?
+		taskResponses: make(chan WatcherResponse, 512),
 		doneChan:      make(chan struct{}),
 	}
 
@@ -275,7 +281,6 @@ func (e *HTTPEndpoint) Validate() error {
 }
 
 // WSConnection represents and handles a WebSocket connection.
-// TODO: add a reconnect mechanism?
 // TODO: use read and write deadlines?
 // TODO: implement reconnect mechanism
 type WSConnection struct {

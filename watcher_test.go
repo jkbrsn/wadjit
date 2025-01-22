@@ -20,8 +20,7 @@ func TestWatcherInitialization(t *testing.T) {
 	for _, task := range httpTasks {
 		tasks = append(tasks, &task)
 	}
-	responses := make(chan WatcherResponse)
-	watcher, err := NewWatcher(id, cadence, payload, tasks, responses)
+	watcher, err := NewWatcher(id, cadence, payload, tasks)
 	assert.NoError(t, err)
 
 	assert.Equal(t, id, watcher.ID())
@@ -77,8 +76,7 @@ func TestWatcherExecution(t *testing.T) {
 	var tasks []WatcherTask
 	tasks = append(tasks, &HTTPEndpoint{URL: httpURL, Header: header})
 	tasks = append(tasks, &WSConnection{URL: wsURL, Header: header})
-	taskResponses := make(chan WatcherResponse)
-	watcher, err := NewWatcher(id, cadence, payload, tasks, taskResponses)
+	watcher, err := NewWatcher(id, cadence, payload, tasks)
 	assert.NoError(t, err)
 
 	// Start the watcher and execute the tasks
