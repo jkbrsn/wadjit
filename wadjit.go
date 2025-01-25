@@ -56,6 +56,8 @@ func (w *Wadjit) Close() {
 		watcher.Close()
 		return true
 	})
+
+	w.taskManager.Stop()
 }
 
 // ResponsesChannel returns the channel where responses from the internal Watcher instances

@@ -5,8 +5,17 @@ import (
 	"net/url"
 	"testing"
 
+	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestHTTPEndpointImplementsWatcherTask(t *testing.T) {
+	var _ WatcherTask = &HTTPEndpoint{}
+}
+
+func TestWSConnectionImplementsWatcherTask(t *testing.T) {
+	var _ WatcherTask = &WSConnection{}
+}
 
 func TestHTTPEndpointInitialize(t *testing.T) {
 	url, _ := url.Parse("http://example.com")
@@ -22,7 +31,7 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	assert.Equal(t, header, endpoint.Header)
 	assert.Nil(t, endpoint.respChan)
 
-	err := endpoint.Initialize(responseChan)
+	err := endpoint.Initialize(xid.NilID(), responseChan)
 	assert.NoError(t, err)
 	assert.NotNil(t, endpoint.respChan)
 }
@@ -46,7 +55,7 @@ func TestWSConnectionInitialize(t *testing.T) {
 	assert.Equal(t, header, conn.Header)
 	assert.Nil(t, conn.respChan)
 
-	err = conn.Initialize(responseChan)
+	err = conn.Initialize(xid.NilID(), responseChan)
 	assert.NoError(t, err)
 	assert.NotNil(t, conn.respChan)
 	assert.NotNil(t, conn.conn)

@@ -26,7 +26,6 @@ func TestWatcherInitialization(t *testing.T) {
 	assert.Equal(t, cadence, watcher.cadence)
 	assert.Equal(t, payload, watcher.payload)
 	assert.NotNil(t, watcher.doneChan)
-	assert.NotNil(t, watcher.taskResponses)
 	assert.NotNil(t, watcher.watcherTasks)
 }
 
@@ -54,7 +53,6 @@ func TestWatcherStart(t *testing.T) {
 
 	// These are not nil, even though uninitialized, since Start initializes them if found nil
 	assert.NotNil(t, watcher.doneChan)
-	assert.NotNil(t, watcher.taskResponses)
 }
 
 func TestWatcherExecution(t *testing.T) {
@@ -79,7 +77,7 @@ func TestWatcherExecution(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Start the watcher and execute the tasks
-	watcherResponses := make(chan WatcherResponse)
+	watcherResponses := make(chan WatcherResponse, 2)
 	err = watcher.Start(watcherResponses)
 	assert.NoError(t, err)
 	for _, task := range watcher.watcherTasks {

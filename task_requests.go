@@ -14,6 +14,22 @@ import (
 	"github.com/rs/xid"
 )
 
+// WatcherTask is a task that the Watcher can execute to interact with a target endpoint.
+type WatcherTask interface {
+	// Close closes the WatcherTask, cleaning up and releasing resources.
+	// Note: will block until the task is closed. (?)
+	Close() error
+
+	// Initialize sets up the WatcherTask to be ready to watch an endpoint.
+	Initialize(id xid.ID, respChan chan<- WatcherResponse) error
+
+	// Task returns a taskman.Task that sends requests and messages to the endpoint.
+	Task(payload []byte) taskman.Task
+
+	// Validate checks that the WatcherTask is ready for initialization.
+	Validate() error
+}
+
 //
 // HTTP
 //
@@ -23,6 +39,7 @@ type HTTPEndpoint struct {
 	URL    *url.URL
 	Header http.Header
 
+	id       xid.ID
 	respChan chan<- WatcherResponse
 }
 
@@ -32,7 +49,8 @@ func (e *HTTPEndpoint) Close() error {
 }
 
 // Initialize sets up the HTTP endpoint to be able to send on its responses.
-func (e *HTTPEndpoint) Initialize(responseChannel chan<- WatcherResponse) error {
+func (e *HTTPEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) error {
+	e.id = id
 	e.respChan = responseChannel
 	return nil
 }
@@ -40,11 +58,10 @@ func (e *HTTPEndpoint) Initialize(responseChannel chan<- WatcherResponse) error 
 // Task returns a taskman.Task that sends an HTTP request to the endpoint.
 func (e *HTTPEndpoint) Task(payload []byte) taskman.Task {
 	return &httpRequest{
-		Header:   e.Header,
-		Method:   http.MethodGet,
-		URL:      e.URL,
-		Data:     payload,
+		endpoint: e,
 		respChan: e.respChan,
+		data:     payload,
+		method:   http.MethodGet,
 	}
 }
 
@@ -62,23 +79,22 @@ func (e *HTTPEndpoint) Validate() error {
 
 // httpRequest is an implementation of taskman.Task that sends an HTTP request to an endpoint.
 type httpRequest struct {
-	Header http.Header
-	Method string
-	URL    *url.URL
-	Data   []byte
-
+	endpoint *HTTPEndpoint
 	respChan chan<- WatcherResponse
+
+	data   []byte
+	method string
 }
 
 // Execute sends an HTTP request to the endpoint.
 func (r httpRequest) Execute() error {
-	request, err := http.NewRequest(r.Method, r.URL.String(), bytes.NewReader(r.Data))
+	request, err := http.NewRequest(r.method, r.endpoint.URL.String(), bytes.NewReader(r.data))
 	if err != nil {
-		r.respChan <- errorResponse(err, r.URL)
+		r.respChan <- errorResponse(err, r.endpoint.URL)
 		return err
 	}
 
-	for key, values := range r.Header {
+	for key, values := range r.endpoint.Header {
 		for _, value := range values {
 			request.Header.Add(key, value)
 		}
@@ -86,7 +102,7 @@ func (r httpRequest) Execute() error {
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		r.respChan <- errorResponse(err, r.URL)
+		r.respChan <- errorResponse(err, r.endpoint.URL)
 		return err
 	}
 
@@ -94,8 +110,8 @@ func (r httpRequest) Execute() error {
 
 	// Send the response without reading it, leaving that to the Watcher's owner
 	r.respChan <- WatcherResponse{
-		WatcherID: xid.NilID(),
-		URL:       r.URL,
+		WatcherID: r.endpoint.id,
+		URL:       r.endpoint.URL,
 		Err:       nil,
 		Payload:   taskResp,
 	}
@@ -121,7 +137,9 @@ type WSConnection struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	writeChan chan []byte
-	respChan  chan<- WatcherResponse
+
+	id       xid.ID
+	respChan chan<- WatcherResponse
 }
 
 // Close closes the WebSocket connection, and cancels its context.
@@ -131,9 +149,11 @@ func (c *WSConnection) Close() error {
 }
 
 // Initialize sets up the WebSocket connection.
-func (c *WSConnection) Initialize(responseChannel chan<- WatcherResponse) error {
+func (c *WSConnection) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	c.id = id
 
 	newConn, _, err := websocket.DefaultDialer.Dial(c.URL.String(), c.Header)
 	if err != nil {
@@ -207,7 +227,7 @@ func (c *WSConnection) read() {
 
 			// Send the message to the read channel
 			response := WatcherResponse{
-				WatcherID: xid.NilID(),
+				WatcherID: c.id,
 				URL:       c.URL,
 				Err:       nil,
 				Payload:   wsResp,
@@ -220,7 +240,8 @@ func (c *WSConnection) read() {
 // wsSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
 type wsSend struct {
 	conn *WSConnection
-	msg  []byte
+
+	msg []byte
 }
 
 // Execute sends a message to the WebSocket endpoint.

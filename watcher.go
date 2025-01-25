@@ -21,24 +21,7 @@ type Watcher struct {
 
 	watcherTasks []WatcherTask
 
-	taskResponses chan WatcherResponse
-	doneChan      chan struct{}
-}
-
-// WatcherTask is a task that the Watcher can execute to interact with a target endpoint.
-type WatcherTask interface {
-	// Close closes the WatcherTask, cleaning up and releasing resources.
-	// Note: will block until the task is closed. (?)
-	Close() error
-
-	// Initialize sets up the WatcherTask to be ready to watch an endpoint.
-	Initialize(respChan chan<- WatcherResponse) error
-
-	// Task returns a taskman.Task that sends requests and messages to the endpoint.
-	Task(payload []byte) taskman.Task
-
-	// Validate checks that the WatcherTask is ready for initialization.
-	Validate() error
+	doneChan chan struct{}
 }
 
 // Close closes the HTTP watcher.
@@ -91,20 +74,17 @@ func (w *Watcher) Start(responseChan chan WatcherResponse) error {
 	if w.doneChan == nil {
 		w.doneChan = make(chan struct{})
 	}
-	if w.taskResponses == nil {
-		w.taskResponses = make(chan WatcherResponse, 512)
-	}
 
 	// Initialize the watcher tasks
 	for i := range w.watcherTasks {
-		err := w.watcherTasks[i].Initialize(w.taskResponses)
+		err := w.watcherTasks[i].Initialize(w.id, responseChan)
 		if err != nil {
 			result = multierror.Append(result, err)
 		}
 	}
 
 	// Start the goroutine that forwards responses to the response channel
-	go w.forwardResponses(responseChan)
+	//go w.forwardResponses(responseChan)
 
 	return result.ErrorOrNil()
 }
@@ -124,9 +104,6 @@ func (w *Watcher) Validate() error {
 	}
 	if len(w.watcherTasks) == 0 {
 		result = multierror.Append(result, errors.New("watcherTasks must not be nil or empty"))
-	}
-	if w.taskResponses == nil {
-		result = multierror.Append(result, errors.New("gatherResponses must not be nil"))
 	}
 	if w.doneChan == nil {
 		result = multierror.Append(result, errors.New("doneChan must not be nil"))
@@ -149,22 +126,6 @@ func (w *Watcher) Validate() error {
 	return result.ErrorOrNil()
 }
 
-// forwardResponses listens for responses from the Watcher's requests, and forwards them to
-// the responseChan.
-func (w *Watcher) forwardResponses(responseChan chan WatcherResponse) {
-	for {
-		select {
-		case resp := <-w.taskResponses:
-			// Attach Watcher ID to the response
-			// TODO: is there some better way to attach the ID than intercepting the response?
-			resp.WatcherID = w.id
-			responseChan <- resp
-		case <-w.doneChan:
-			return
-		}
-	}
-}
-
 // NewWatcher creates and validates a new Watcher.
 func NewWatcher(
 	id xid.ID,
@@ -173,12 +134,11 @@ func NewWatcher(
 	tasks []WatcherTask,
 ) (*Watcher, error) {
 	w := &Watcher{
-		id:            id,
-		cadence:       cadence,
-		payload:       payload,
-		watcherTasks:  tasks,
-		taskResponses: make(chan WatcherResponse, 512),
-		doneChan:      make(chan struct{}),
+		id:           id,
+		cadence:      cadence,
+		payload:      payload,
+		watcherTasks: tasks,
+		doneChan:     make(chan struct{}),
 	}
 
 	if err := w.Validate(); err != nil {
@@ -215,6 +175,14 @@ func (wr WatcherResponse) Data() ([]byte, error) {
 	return wr.Payload.Data()
 }
 
+// Metadata returns the metadata of the response.
+func (wr WatcherResponse) Metadata() TaskResponseMetadata {
+	if wr.Payload == nil {
+		return TaskResponseMetadata{}
+	}
+	return wr.Payload.Metadata()
+}
+
 // Reader returns a reader for the response data. This is the preferred method to read the response
 // if large responses are expected.
 func (wr WatcherResponse) Reader() (io.ReadCloser, error) {
@@ -235,12 +203,4 @@ func errorResponse(err error, url *url.URL) WatcherResponse {
 		Err:       err,
 		Payload:   nil,
 	}
-}
-
-// Metadata returns the metadata of the response.
-func (wr WatcherResponse) Metadata() TaskResponseMetadata {
-	if wr.Payload == nil {
-		return TaskResponseMetadata{}
-	}
-	return wr.Payload.Metadata()
 }
