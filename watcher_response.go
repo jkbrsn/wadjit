@@ -59,16 +59,6 @@ func (wr WatcherResponse) Reader() (io.ReadCloser, error) {
 	return wr.Payload.Reader()
 }
 
-// errorResponse is a helper to create a WatcherResponse with an error.
-func errorResponse(err error, url *url.URL) WatcherResponse {
-	return WatcherResponse{
-		WatcherID: xid.NilID(),
-		URL:       url,
-		Err:       err,
-		Payload:   nil,
-	}
-}
-
 //
 // TaskResponse
 //

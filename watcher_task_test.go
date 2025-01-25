@@ -13,8 +13,8 @@ func TestHTTPEndpointImplementsWatcherTask(t *testing.T) {
 	var _ WatcherTask = &HTTPEndpoint{}
 }
 
-func TestWSConnectionImplementsWatcherTask(t *testing.T) {
-	var _ WatcherTask = &WSConnection{}
+func TestWSConnnImplementsWatcherTask(t *testing.T) {
+	var _ WatcherTask = &wsConn{}
 }
 
 func TestHTTPEndpointInitialize(t *testing.T) {
@@ -36,7 +36,7 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	assert.NotNil(t, endpoint.respChan)
 }
 
-func TestWSConnectionInitialize(t *testing.T) {
+func TestWSConnInitialize(t *testing.T) {
 	server := echoServer()
 	defer server.Close()
 
@@ -46,7 +46,7 @@ func TestWSConnectionInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	conn := &WSConnection{
+	conn := &wsConn{
 		URL:    url,
 		Header: header,
 	}
@@ -62,4 +62,29 @@ func TestWSConnectionInitialize(t *testing.T) {
 	assert.NotNil(t, conn.writeChan)
 	assert.NotNil(t, conn.ctx)
 	assert.NotNil(t, conn.cancel)
+}
+
+func TestWSConnReconnect(t *testing.T) {
+	server := echoServer()
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[4:] + "/ws"
+	url, err := url.Parse(wsURL)
+	assert.NoError(t, err, "failed to parse URL")
+	header := make(http.Header)
+	responseChan := make(chan WatcherResponse)
+
+	conn := &wsConn{
+		URL:    url,
+		Header: header,
+	}
+
+	err = conn.Initialize(xid.NilID(), responseChan)
+	assert.NoError(t, err)
+
+	err = conn.connect()
+	assert.Error(t, err)
+
+	err = conn.reconnect()
+	assert.NoError(t, err)
 }

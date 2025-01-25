@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/jakobilobi/go-taskman"
@@ -123,11 +125,10 @@ func (r httpRequest) Execute() error {
 // WebSocket
 //
 
-// WSConnection represents a WebSocket connection to a target URL, and can spawn tasks to send
+// wsConn represents a WebSocket connection to a target URL, and can spawn tasks to send
 // messages to that endpoint.
 // TODO: use read and write deadlines?
-// TODO: implement reconnect mechanism
-type WSConnection struct {
+type wsConn struct {
 	mu sync.Mutex
 
 	URL    *url.URL
@@ -136,6 +137,7 @@ type WSConnection struct {
 	conn      *websocket.Conn
 	ctx       context.Context
 	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 	writeChan chan []byte
 
 	id       xid.ID
@@ -143,42 +145,57 @@ type WSConnection struct {
 }
 
 // Close closes the WebSocket connection, and cancels its context.
-func (c *WSConnection) Close() error {
-	c.cancel()
-	return c.conn.Close()
-}
+func (c *wsConn) Close() error {
+	c.lock()
+	defer c.unlock()
 
-// Initialize sets up the WebSocket connection.
-func (c *WSConnection) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// If the connection is already closed, do nothing
+	if c.conn == nil {
+		return nil
+	}
 
-	c.id = id
-
-	newConn, _, err := websocket.DefaultDialer.Dial(c.URL.String(), c.Header)
+	// Close the connection
+	formattedCloseMessage := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
+	deadline := time.Now().Add(3 * time.Second)
+	err := c.conn.WriteControl(websocket.CloseMessage, formattedCloseMessage, deadline)
 	if err != nil {
 		return err
 	}
-	c.conn = newConn
+	err = c.conn.Close()
+	if err != nil {
+		return err
+	}
+	c.conn = nil
+
+	// Cancel the context
+	c.cancel()
+
+	return nil
+}
+
+// Initialize sets up the WebSocket connection.
+func (c *wsConn) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) error {
+	c.mu.Lock()
+	c.id = id
 	c.writeChan = make(chan []byte)
 	c.respChan = responseChannel
-	c.ctx, c.cancel = context.WithCancel(context.Background())
+	c.mu.Unlock()
 
-	go c.read()
+	c.connect()
 
 	return nil
 }
 
 // Task returns a taskman.Task that sends a message to the WebSocket endpoint.
-func (c *WSConnection) Task(payload []byte) taskman.Task {
+func (c *wsConn) Task(payload []byte) taskman.Task {
 	return &wsSend{
 		conn: c,
 		msg:  payload,
 	}
 }
 
-// Validate checks that the WSConnection is ready to be initialized.
-func (c *WSConnection) Validate() error {
+// Validate checks that the wsConn is ready to be initialized.
+func (c *wsConn) Validate() error {
 	if c.URL == nil {
 		return errors.New("URL is nil")
 	}
@@ -189,19 +206,86 @@ func (c *WSConnection) Validate() error {
 	return nil
 }
 
+// connect establishes a connection to the WebSocket endpoint. If already connected,
+// this function does nothing.
+func (c *wsConn) connect() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Only connect if the connection is not already established
+	if c.conn != nil || c.ctx != nil {
+		return fmt.Errorf("connection already established")
+	}
+
+	// Establish the connection
+	conn, _, err := websocket.DefaultDialer.Dial(c.URL.String(), c.Header)
+	if err != nil {
+		return err
+	}
+	c.conn = conn
+
+	// Set up the context and read pump
+	c.ctx, c.cancel = context.WithCancel(context.Background())
+
+	// Start the read pump for incoming messages
+	c.wg.Add(1)
+	go c.readPump(&c.wg)
+
+	return nil
+}
+
+// reconnect closes the current connection and establishes a new one.
+func (c *wsConn) reconnect() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Cancel the current context
+	if c.cancel != nil {
+		c.cancel()
+	}
+
+	// Close the current connection, if it exists
+	if c.conn != nil {
+		if err := c.conn.Close(); err != nil {
+			return fmt.Errorf("failed to close connection: %w", err)
+		}
+	}
+
+	// Wait for the read pump to finish
+	c.wg.Wait()
+
+	// Establish a new connection
+	conn, _, err := websocket.DefaultDialer.Dial(c.URL.String(), c.Header)
+	if err != nil {
+		return fmt.Errorf("failed to dial when reconnecting: %w", err)
+	}
+	c.conn = conn
+
+	// Set up a new context and read pump
+	c.ctx, c.cancel = context.WithCancel(context.Background())
+
+	// Restart the read pump for incoming messages
+	c.wg.Add(1)
+	go c.readPump(&c.wg)
+
+	return nil
+}
+
 // lock and unlock provide exclusive access to the connection's mutex.
-func (c *WSConnection) lock() {
+func (c *wsConn) lock() {
 	c.mu.Lock()
 }
 
-func (c *WSConnection) unlock() {
+func (c *wsConn) unlock() {
 	c.mu.Unlock()
 }
 
 // read reads messages from the WebSocket connection.
 // Note: the read pump has exclusive permission to read from the connection.
-func (c *WSConnection) read() {
-	defer c.cancel()
+func (c *wsConn) readPump(wg *sync.WaitGroup) {
+	defer func() {
+		wg.Done()
+	}()
 
 	for {
 		select {
@@ -217,6 +301,7 @@ func (c *WSConnection) read() {
 					// This is not an unknown situation, handle gracefully
 				} else {
 					// This is unexpected
+					// TODO: add custom handling here?
 				}
 
 				// If there was an error, close the connection
@@ -239,7 +324,7 @@ func (c *WSConnection) read() {
 
 // wsSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
 type wsSend struct {
-	conn *WSConnection
+	conn *wsConn
 
 	msg []byte
 }
@@ -247,6 +332,14 @@ type wsSend struct {
 // Execute sends a message to the WebSocket endpoint.
 // Note: for concurrency safety, the connection's WriteMessage method is used exclusively here.
 func (ws *wsSend) Execute() error {
+	// If the connection is closed, try to reconnect
+	// TODO: exchange this for an active reconnect, with exponential backoff
+	if ws.conn.conn == nil {
+		if err := ws.conn.reconnect(); err != nil {
+			return err
+		}
+	}
+
 	ws.conn.lock()
 	defer ws.conn.unlock()
 
@@ -263,15 +356,27 @@ func (ws *wsSend) Execute() error {
 				// This is an expected situation, handle gracefully
 			} else {
 				// This is unexpected
+				// TODO: add custom handling here?
 			}
 
-			// TODO: if there was an error, try to reconnect
+			// If there was an error, close the connection
+			ws.conn.Close()
 
+			// Send an error response
 			ws.conn.respChan <- errorResponse(err, ws.conn.URL)
-
 			return err
 		}
 	}
 
 	return nil
+}
+
+// errorResponse is a helper to create a WatcherResponse with an error.
+func errorResponse(err error, url *url.URL) WatcherResponse {
+	return WatcherResponse{
+		WatcherID: xid.NilID(),
+		URL:       url,
+		Err:       err,
+		Payload:   nil,
+	}
 }
