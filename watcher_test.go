@@ -1,7 +1,6 @@
 package wadjit
 
 import (
-	"io"
 	"net/http"
 	"net/url"
 	"testing"
@@ -94,13 +93,16 @@ func TestWatcherExecution(t *testing.T) {
 		assert.NotNil(t, response.URL)
 		assert.Nil(t, response.Err)
 		assert.Equal(t, id, response.WatcherID)
+		assert.NotNil(t, response.Payload)
+		responsePayload, err := response.Payload.Data()
+		assert.NoError(t, err)
+		assert.Equal(t, payload, responsePayload)
 		if response.URL.Scheme == "http" {
-			assert.NotNil(t, response.HTTPResponse)
-			responsePayload, err := io.ReadAll(response.HTTPResponse.Body)
-			assert.NoError(t, err)
-			assert.Equal(t, payload, responsePayload)
+			_, ok := response.Payload.(*HTTPTaskResponse)
+			assert.True(t, ok, "response.Payload is not of type HTTPTaskResponse")
 		} else if response.URL.Scheme == "ws" {
-			assert.Equal(t, payload, response.WSData)
+			_, ok := response.Payload.(*WSTaskResponse)
+			assert.True(t, ok, "response.Payload is not of type WSTaskResponse")
 		} else {
 			t.Fail()
 		}

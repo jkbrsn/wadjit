@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,11 +33,12 @@ type Watcher struct {
 
 // WatcherResponse represents a response from a watcher.
 type WatcherResponse struct {
-	WatcherID    xid.ID
-	URL          *url.URL
-	Err          error
-	WSData       []byte         // For WS
-	HTTPResponse *http.Response // For HTTP
+	WatcherID xid.ID
+	URL       *url.URL
+	Err       error
+
+	// Payload stores the response data from the endpoint, regardless of protocol.
+	Payload TaskResponse
 }
 
 // WatcherTask is a task that the Watcher can execute to interact with a target endpoint.
@@ -202,40 +204,47 @@ func NewWatcher(
 	return w, nil
 }
 
-// Data returns the data from the response.
-func (r WatcherResponse) Data() ([]byte, error) {
+// Data reads and returns the data from the response.
+func (wr WatcherResponse) Data() ([]byte, error) {
 	// Check for errors
-	if r.Err != nil {
-		return nil, r.Err
+	if wr.Err != nil {
+		return nil, wr.Err
 	}
-	// Check for duplicate data, which is undefined behavior
-	if r.WSData != nil && r.HTTPResponse != nil {
-		return nil, errors.New("both WS and HTTP data available")
+	// Check for missing payload
+	if wr.Payload == nil {
+		return nil, errors.New("no payload")
 	}
-	// Check for WS data
-	if r.WSData != nil {
-		return r.WSData, nil
+	return wr.Payload.Data()
+}
+
+// Reader returns a reader for the response data. This is the preferred method to read the response
+// if large responses are expected.
+func (wr WatcherResponse) Reader() (io.ReadCloser, error) {
+	if wr.Err != nil {
+		return nil, wr.Err
 	}
-	// Check for HTTP data
-	if r.HTTPResponse != nil {
-		// Read the body
-		defer r.HTTPResponse.Body.Close()
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(r.HTTPResponse.Body)
-		return buf.Bytes(), nil
+	if wr.Payload == nil {
+		return nil, errors.New("no payload")
 	}
-	return nil, errors.New("no data available")
+	return wr.Payload.Reader()
 }
 
 // errorResponse is a helper to create a WatcherResponse with an error.
 func errorResponse(err error, url *url.URL) WatcherResponse {
 	return WatcherResponse{
-		WatcherID:    xid.NilID(),
-		URL:          url,
-		Err:          err,
-		WSData:       nil,
-		HTTPResponse: nil,
+		WatcherID: xid.NilID(),
+		URL:       url,
+		Err:       err,
+		Payload:   nil,
 	}
+}
+
+// Metadata returns the metadata of the response.
+func (wr WatcherResponse) Metadata() TaskResponseMetadata {
+	if wr.Payload == nil {
+		return TaskResponseMetadata{}
+	}
+	return wr.Payload.Metadata()
 }
 
 // HTTPEndpoint represents an HTTP endpoint that the Watcher can interact with.
@@ -377,13 +386,14 @@ func (c *WSConnection) read() {
 				return
 			}
 
+			wsResp := NewWSTaskResponse(p)
+
 			// Send the message to the read channel
 			response := WatcherResponse{
-				WatcherID:    xid.NilID(),
-				URL:          c.URL,
-				Err:          nil,
-				WSData:       p,
-				HTTPResponse: nil,
+				WatcherID: xid.NilID(),
+				URL:       c.URL,
+				Err:       nil,
+				Payload:   wsResp,
 			}
 			c.respChan <- response
 		}
@@ -420,13 +430,14 @@ func (r httpRequest) Execute() error {
 		return err
 	}
 
+	taskResp := NewHTTPTaskResponse(response)
+
 	// Send the response without reading it, leaving that to the Watcher's owner
 	r.respChan <- WatcherResponse{
-		WatcherID:    xid.NilID(),
-		URL:          r.URL,
-		Err:          nil,
-		WSData:       nil,
-		HTTPResponse: response,
+		WatcherID: xid.NilID(),
+		URL:       r.URL,
+		Err:       nil,
+		Payload:   taskResp,
 	}
 
 	return nil

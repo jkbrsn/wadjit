@@ -1,7 +1,6 @@
 package wadjit
 
 import (
-	"io"
 	"net/url"
 	"sync/atomic"
 	"testing"
@@ -120,8 +119,8 @@ func TestWadjitLifecycle(t *testing.T) {
 		for {
 			select {
 			case response := <-responses:
-				assert.NotNil(t, response.HTTPResponse)
-				data, err := io.ReadAll(response.HTTPResponse.Body)
+				assert.NotNil(t, response.Payload)
+				data, err := response.Payload.Data()
 				assert.NoError(t, err)
 				if string(data) == "first" {
 					firstCount.Add(1)

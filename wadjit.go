@@ -17,8 +17,7 @@ type Wadjit struct {
 	wRespChan      chan WatcherResponse // TODO: pass pointer?
 	userChan       chan WatcherResponse // TODO: pass pointer?
 	doneChan       chan struct{}
-
-	consumeStarted chan struct{}
+	consumeStarted chan struct{} // Blocks until the caller starts consuming responses
 }
 
 // AddWatcher adds a watcher to the Wadjit.
