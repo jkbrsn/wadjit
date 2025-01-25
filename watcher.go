@@ -3,8 +3,6 @@ package wadjit
 import (
 	"errors"
 	"fmt"
-	"io"
-	"net/url"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
@@ -146,61 +144,4 @@ func NewWatcher(
 	}
 
 	return w, nil
-}
-
-//
-// WatcherResponse
-//
-
-// WatcherResponse represents a response from a watcher.
-type WatcherResponse struct {
-	WatcherID xid.ID
-	URL       *url.URL
-	Err       error
-
-	// Payload stores the response data from the endpoint, regardless of protocol.
-	Payload TaskResponse
-}
-
-// Data reads and returns the data from the response.
-func (wr WatcherResponse) Data() ([]byte, error) {
-	// Check for errors
-	if wr.Err != nil {
-		return nil, wr.Err
-	}
-	// Check for missing payload
-	if wr.Payload == nil {
-		return nil, errors.New("no payload")
-	}
-	return wr.Payload.Data()
-}
-
-// Metadata returns the metadata of the response.
-func (wr WatcherResponse) Metadata() TaskResponseMetadata {
-	if wr.Payload == nil {
-		return TaskResponseMetadata{}
-	}
-	return wr.Payload.Metadata()
-}
-
-// Reader returns a reader for the response data. This is the preferred method to read the response
-// if large responses are expected.
-func (wr WatcherResponse) Reader() (io.ReadCloser, error) {
-	if wr.Err != nil {
-		return nil, wr.Err
-	}
-	if wr.Payload == nil {
-		return nil, errors.New("no payload")
-	}
-	return wr.Payload.Reader()
-}
-
-// errorResponse is a helper to create a WatcherResponse with an error.
-func errorResponse(err error, url *url.URL) WatcherResponse {
-	return WatcherResponse{
-		WatcherID: xid.NilID(),
-		URL:       url,
-		Err:       err,
-		Payload:   nil,
-	}
 }
