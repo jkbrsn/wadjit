@@ -14,8 +14,8 @@ type Wadjit struct {
 	taskManager *taskman.TaskManager
 
 	newWatcherChan chan *Watcher
-	wRespChan      chan WatcherResponse // TODO: pass pointer?
-	userChan       chan WatcherResponse // TODO: pass pointer?
+	wRespChan      chan WatcherResponse
+	userChan       chan WatcherResponse
 	doneChan       chan struct{}
 	consumeStarted chan struct{} // Blocks until the caller starts consuming responses
 }
@@ -73,6 +73,7 @@ func (w *Wadjit) listenForResponses() {
 		select {
 		case response := <-w.wRespChan:
 			// Send the response to the external facing channel
+			// LATER: consider adding Watcher response metrics here
 			w.userChan <- response
 		case <-w.doneChan:
 			return

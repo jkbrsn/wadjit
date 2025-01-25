@@ -1,10 +1,13 @@
 # todo
 
-## near term
+## v0.2.0
 
-- Clear in-code TODOs
+- Add timings to requests and WS sends, to be able to track latency of requests and WS messages
+- Improve readme
 
-## ideas
+## various ideas
 
 - Create a new type of `Watcher`, to watch WS subscriptions
   - WS subscriptions do not fit into the current `Watcher` model, which is based on polling
+- Add metrics for stats like `Watcher` timing accuracy, and `Watcher` error rates
+- Add configuration options, e.g. for buffer sizes, timeouts, metrics on/off etc.
