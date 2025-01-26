@@ -1,6 +1,7 @@
 package wadjit
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"testing"
@@ -107,7 +108,41 @@ func TestWatcherExecution(t *testing.T) {
 	}
 }
 
-// TODO: implement
-/*
 func TestWatcherExecution_Error(t *testing.T) {
-} */
+	server := echoServer()
+	defer server.Close()
+
+	// Set up URLs
+	httpURL, err := url.Parse(server.URL)
+	assert.NoError(t, err, "failed to parse HTTP URL")
+	header := make(http.Header)
+
+	// Set up watcher
+	id := xid.New()
+	cadence := 1 * time.Second
+	var tasks []WatcherTask
+	tasks = append(tasks, &MockWatcherTask{
+		URL:             httpURL,
+		Header:          header,
+		ErrTaskResponse: fmt.Errorf("mock error"),
+	})
+	watcher, err := NewWatcher(id, cadence, []byte{}, tasks)
+	assert.NoError(t, err)
+
+	// Start the watcher and execute the task1
+	watcherResponses := make(chan WatcherResponse, 2)
+	err = watcher.Start(watcherResponses)
+	assert.NoError(t, err)
+	for _, task := range watcher.watcherTasks {
+		task.Task([]byte{}).Execute()
+	}
+
+	// Listen for responses on the watcherResponses channel
+	response := <-watcherResponses
+	assert.NotNil(t, response)
+	assert.NotNil(t, response.URL)
+	assert.NotNil(t, response.Err)
+	assert.Contains(t, response.Err.Error(), "mock error")
+	assert.Equal(t, id, response.WatcherID)
+	assert.Nil(t, response.Payload)
+}

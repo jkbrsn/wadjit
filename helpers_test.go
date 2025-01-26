@@ -1,13 +1,99 @@
 package wadjit
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
+	"testing"
 
 	"github.com/gorilla/websocket"
+	"github.com/jakobilobi/go-taskman"
+	"github.com/rs/xid"
 )
+
+//
+// Mocks
+//
+
+type MockTask struct {
+	mwt     *MockWatcherTask
+	Payload []byte
+
+	respChan chan<- WatcherResponse
+}
+
+func (t *MockTask) Execute() error {
+	if t.mwt.ErrTaskResponse != nil {
+		t.respChan <- errorResponse(t.mwt.ErrTaskResponse, t.mwt.id, t.mwt.URL)
+	} else {
+		t.respChan <- WatcherResponse{
+			WatcherID: t.mwt.id,
+			URL:       t.mwt.URL,
+			Err:       nil,
+			Payload:   &MockTaskResponse{data: t.Payload},
+		}
+	}
+	return t.mwt.ErrTaskResponse
+}
+
+type MockTaskResponse struct {
+	data []byte
+}
+
+func (m *MockTaskResponse) Data() ([]byte, error) {
+	return m.data, nil
+}
+
+func (m *MockTaskResponse) Metadata() TaskResponseMetadata {
+	return TaskResponseMetadata{}
+}
+
+func (m *MockTaskResponse) Reader() (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(m.data)), nil
+}
+
+type MockWatcherTask struct {
+	URL    *url.URL
+	Header http.Header
+
+	ErrTaskResponse error // Set to return a task that errors
+
+	id       xid.ID
+	respChan chan<- WatcherResponse
+}
+
+func (m *MockWatcherTask) Close() error {
+	return nil
+}
+
+func (m *MockWatcherTask) Initialize(id xid.ID, responseChan chan<- WatcherResponse) error {
+	m.id = id
+	m.respChan = responseChan
+	return nil
+}
+
+func (m *MockWatcherTask) Task(payload []byte) taskman.Task {
+	return &MockTask{
+		mwt:      m,
+		Payload:  payload,
+		respChan: m.respChan,
+	}
+}
+
+func (m *MockWatcherTask) Validate() error {
+	return nil
+}
+
+func TestMockWatcherTaskImplementsWatcherTask(t *testing.T) {
+	var _ WatcherTask = &MockWatcherTask{}
+}
+
+//
+// Helper functions
+//
 
 // upgrader is used to upgrade the connection to a WebSocket.
 var upgrader = websocket.Upgrader{
@@ -19,6 +105,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// echoServer creates a test server that echos back the payload sent to it.
 func echoServer() *httptest.Server {
 	// Create a test server with a custom handler.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

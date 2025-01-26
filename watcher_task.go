@@ -92,7 +92,7 @@ type httpRequest struct {
 func (r httpRequest) Execute() error {
 	request, err := http.NewRequest(r.method, r.endpoint.URL.String(), bytes.NewReader(r.data))
 	if err != nil {
-		r.respChan <- errorResponse(err, r.endpoint.URL)
+		r.respChan <- errorResponse(err, r.endpoint.id, r.endpoint.URL)
 		return err
 	}
 
@@ -104,7 +104,7 @@ func (r httpRequest) Execute() error {
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		r.respChan <- errorResponse(err, r.endpoint.URL)
+		r.respChan <- errorResponse(err, r.endpoint.id, r.endpoint.URL)
 		return err
 	}
 
@@ -363,7 +363,7 @@ func (ws *wsSend) Execute() error {
 			ws.conn.Close()
 
 			// Send an error response
-			ws.conn.respChan <- errorResponse(err, ws.conn.URL)
+			ws.conn.respChan <- errorResponse(err, ws.conn.id, ws.conn.URL)
 			return err
 		}
 	}
@@ -372,9 +372,9 @@ func (ws *wsSend) Execute() error {
 }
 
 // errorResponse is a helper to create a WatcherResponse with an error.
-func errorResponse(err error, url *url.URL) WatcherResponse {
+func errorResponse(err error, id xid.ID, url *url.URL) WatcherResponse {
 	return WatcherResponse{
-		WatcherID: xid.NilID(),
+		WatcherID: id,
 		URL:       url,
 		Err:       err,
 		Payload:   nil,
