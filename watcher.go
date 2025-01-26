@@ -81,9 +81,6 @@ func (w *Watcher) Start(responseChan chan WatcherResponse) error {
 		}
 	}
 
-	// Start the goroutine that forwards responses to the response channel
-	//go w.forwardResponses(responseChan)
-
 	return result.ErrorOrNil()
 }
 
