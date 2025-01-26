@@ -127,7 +127,7 @@ func TestWadjitLifecycle(t *testing.T) {
 				} else if string(data) == "second" {
 					secondCount.Add(1)
 				}
-			case <-w.doneChan:
+			case <-w.ctx.Done():
 				return
 			}
 		}

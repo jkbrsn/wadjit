@@ -1,6 +1,7 @@
 package wadjit
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -16,8 +17,10 @@ type Wadjit struct {
 	newWatcherChan chan *Watcher
 	wRespChan      chan WatcherResponse
 	userChan       chan WatcherResponse
-	doneChan       chan struct{}
 	consumeStarted chan struct{} // Blocks until the caller starts consuming responses
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // AddWatcher adds a watcher to the Wadjit.
@@ -49,7 +52,7 @@ func (w *Wadjit) RemoveWatcher(id xid.ID) error {
 
 // Close stops all Wadjit processes and closes the Wadjit.
 func (w *Wadjit) Close() {
-	close(w.doneChan)
+	w.cancel()
 
 	w.watchers.Range(func(key, value interface{}) bool {
 		watcher := value.(*Watcher)
@@ -75,7 +78,7 @@ func (w *Wadjit) listenForResponses() {
 			// Send the response to the external facing channel
 			// LATER: consider adding Watcher response metrics here
 			w.userChan <- response
-		case <-w.doneChan:
+		case <-w.ctx.Done():
 			return
 		}
 	}
@@ -95,7 +98,7 @@ func (w *Wadjit) listenForWatchers() {
 				continue
 			}
 			w.watchers.Store(watcher.ID(), watcher)
-		case <-w.doneChan:
+		case <-w.ctx.Done():
 			return
 		}
 	}
@@ -103,6 +106,7 @@ func (w *Wadjit) listenForWatchers() {
 
 // New creates, starts, and returns a new Wadjit.
 func New() *Wadjit {
+	ctx, cancel := context.WithCancel(context.Background())
 	w := &Wadjit{
 		watchers:       sync.Map{},
 		taskManager:    taskman.New(),
@@ -110,7 +114,8 @@ func New() *Wadjit {
 		wRespChan:      make(chan WatcherResponse, 512),
 		userChan:       make(chan WatcherResponse, 512),
 		consumeStarted: make(chan struct{}),
-		doneChan:       make(chan struct{}),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 
 	go w.listenForResponses()
