@@ -333,7 +333,6 @@ type wsSend struct {
 // Note: for concurrency safety, the connection's WriteMessage method is used exclusively here.
 func (ws *wsSend) Execute() error {
 	// If the connection is closed, try to reconnect
-	// TODO: exchange this for an active reconnect, with exponential backoff
 	if ws.conn.conn == nil {
 		if err := ws.conn.reconnect(); err != nil {
 			return err
