@@ -14,3 +14,4 @@
 - WS reconnect strategy evaluation
   - Change for an active reconnect, with exponential backoff, would also include keep-alive measures
   - Introduce a pre-execute check that the connection is alive and ready to be used
+- Make WS use read and write deadlines to avoid blocking

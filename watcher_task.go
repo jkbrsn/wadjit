@@ -127,7 +127,6 @@ func (r httpRequest) Execute() error {
 
 // wsConn represents a WebSocket connection to a target URL, and can spawn tasks to send
 // messages to that endpoint.
-// TODO: use read and write deadlines?
 type wsConn struct {
 	mu sync.Mutex
 

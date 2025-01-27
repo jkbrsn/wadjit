@@ -175,6 +175,4 @@ func TestWadjitLifecycle(t *testing.T) {
 	// Try adding the same Watcher again
 	err = w.AddWatcher(watcher1)
 	assert.Error(t, err, "expected error adding a closed watcher")
-
-	// TODO: consider testing cloning watcher1, or unsetting the doneChan, to allow re-adding it
 }
