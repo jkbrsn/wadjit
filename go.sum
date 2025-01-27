@@ -8,8 +8,8 @@ github.com/hashicorp/errwrap v1.0.0 h1:hLrqtEDnRye3+sgx6z4qVLNuviH3MR5aQ0ykNJa/U
 github.com/hashicorp/errwrap v1.0.0/go.mod h1:YH+1FKiLXxHSkmPseP+kNlulaMuP3n2brvKWEqk/Jc4=
 github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+lD48awMYo=
 github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
-github.com/jakobilobi/go-taskman v0.2.1 h1:zvd5l9iYNCH2pzYjItHtTZjjnevJ980H76qhg1uzqmM=
-github.com/jakobilobi/go-taskman v0.2.1/go.mod h1:LDBPhp/n/cIaR8swYuYY6Hl+O8j1n64APmIEK/mUZHk=
+github.com/jakobilobi/go-taskman v0.2.2 h1:6GVXPBj4b6Hk95VpdMfItlqs1Y/w4T2a+QjjGLNTUSE=
+github.com/jakobilobi/go-taskman v0.2.2/go.mod h1:F+YgiG7dBpPDteadXknHAc8QjQcx1NaVU9WtsbrTUDc=
 github.com/mattn/go-colorable v0.1.13 h1:fFA4WZxdEF4tXPZVKMLwD8oUnCTTo08duU7wxecdEvA=
 github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovkB8vQcUbaXHg=
 github.com/mattn/go-isatty v0.0.16/go.mod h1:kYGgaQfpe5nmfYZH+SKPsOc2e4SrIfOl2e/yFXSvRLM=
