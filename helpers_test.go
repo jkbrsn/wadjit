@@ -2,6 +2,7 @@ package wadjit
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -118,6 +119,8 @@ func echoServer() *httptest.Server {
 				return
 			}
 			defer conn.Close()
+
+			fmt.Println("WebSocket connection established")
 
 			// Echo messages back to the client
 			for {

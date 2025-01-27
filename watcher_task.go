@@ -181,7 +181,10 @@ func (c *wsConn) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) e
 	c.respChan = responseChannel
 	c.mu.Unlock()
 
-	c.connect()
+	err := c.connect()
+	if err != nil {
+		return fmt.Errorf("failed to connect when initializing: %w", err)
+	}
 
 	return nil
 }

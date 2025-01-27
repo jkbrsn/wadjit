@@ -110,11 +110,25 @@ func TestWadjitLifecycle(t *testing.T) {
 		tasks,
 	)
 	assert.NoError(t, err, "error creating watcher 2")
+	// Create third watcher
+	id3 := xid.New()
+	wsURL := "ws" + server.URL[4:] + "/ws"
+	url, err = url.Parse(wsURL)
+	assert.NoError(t, err, "failed to parse URL")
+	tasks = append([]WatcherTask{}, &wsConn{URL: url})
+	watcher3, err := NewWatcher(
+		id3,
+		10*time.Millisecond,
+		[]byte("third"),
+		tasks,
+	)
+	assert.NoError(t, err, "error creating watcher 3")
 
 	// Consume responses
 	responses := w.ResponsesChannel()
 	firstCount := atomic.Int32{}
 	secondCount := atomic.Int32{}
+	thirdCount := atomic.Int32{}
 	go func() {
 		for {
 			select {
@@ -126,6 +140,8 @@ func TestWadjitLifecycle(t *testing.T) {
 					firstCount.Add(1)
 				} else if string(data) == "second" {
 					secondCount.Add(1)
+				} else if string(data) == "third" {
+					thirdCount.Add(1)
 				}
 			case <-w.ctx.Done():
 				return
@@ -134,25 +150,27 @@ func TestWadjitLifecycle(t *testing.T) {
 	}()
 
 	// Add watchers
-	t.Logf("Adding watcher 1: %s", id1)
 	err = w.AddWatcher(watcher1)
 	assert.NoError(t, err, "error adding watcher 1")
-	t.Logf("Adding watcher 2: %s", id2)
 	err = w.AddWatcher(watcher2)
 	assert.NoError(t, err, "error adding watcher 2")
-	time.Sleep(2 * time.Millisecond) // Wait for watchers to be added
-	assert.Equal(t, 2, syncMapLen(&w.watchers))
+	err = w.AddWatcher(watcher3)
+	assert.NoError(t, err, "error adding watcher 3")
+	time.Sleep(4 * time.Millisecond) // Wait for watchers to be added
+	assert.Equal(t, 3, syncMapLen(&w.watchers))
 
 	// Let the watchers run
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(25 * time.Millisecond)
 
 	// Confirm the first watcher executed more tasks than the second
 	assert.Greater(t, firstCount.Load(), secondCount.Load())
+	assert.Greater(t, firstCount.Load(), thirdCount.Load())
+	assert.Greater(t, thirdCount.Load(), secondCount.Load())
 
 	// Remove the first watcher
 	err = w.RemoveWatcher(id1)
 	assert.NoError(t, err)
-	assert.Equal(t, 1, syncMapLen(&w.watchers))
+	assert.Equal(t, 2, syncMapLen(&w.watchers))
 
 	// Try adding the same Watcher again
 	err = w.AddWatcher(watcher1)
@@ -160,5 +178,3 @@ func TestWadjitLifecycle(t *testing.T) {
 
 	// TODO: consider testing cloning watcher1, or unsetting the doneChan, to allow re-adding it
 }
-
-// TODO: test Wadjit execution for WS

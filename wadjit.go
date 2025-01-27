@@ -90,9 +90,13 @@ func (w *Wadjit) listenForWatchers() {
 	for {
 		select {
 		case watcher := <-w.newWatcherChan:
-			watcher.Start(w.wRespChan)
+			err := watcher.Start(w.wRespChan)
+			if err != nil {
+				fmt.Printf("error starting watcher: %v\n", err)
+				continue
+			}
 			job := watcher.Job()
-			err := w.taskManager.ScheduleJob(job)
+			err = w.taskManager.ScheduleJob(job)
 			if err != nil {
 				fmt.Printf("error scheduling job: %v\n", err)
 				continue
