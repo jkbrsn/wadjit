@@ -15,17 +15,16 @@ func TestWatcherInitialization(t *testing.T) {
 	id := xid.New()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
-	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}}
+	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
 	var tasks []WatcherTask
 	for _, task := range httpTasks {
 		tasks = append(tasks, &task)
 	}
-	watcher, err := NewWatcher(id, cadence, payload, tasks)
+	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err)
 
 	assert.Equal(t, id, watcher.ID())
 	assert.Equal(t, cadence, watcher.cadence)
-	assert.Equal(t, payload, watcher.payload)
 	assert.NotNil(t, watcher.doneChan)
 	assert.NotNil(t, watcher.watcherTasks)
 }
@@ -39,11 +38,11 @@ func TestWatcherStart(t *testing.T) {
 	watcher := &Watcher{
 		id:      id,
 		cadence: cadence,
-		payload: payload,
 		watcherTasks: []WatcherTask{
 			&HTTPEndpoint{
-				URL:    &url.URL{Scheme: "http", Host: "localhost:8080"},
-				Header: make(http.Header),
+				URL:     &url.URL{Scheme: "http", Host: "localhost:8080"},
+				Header:  make(http.Header),
+				Payload: payload,
 			},
 		},
 	}
@@ -72,9 +71,9 @@ func TestWatcherExecution(t *testing.T) {
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
 	var tasks []WatcherTask
-	tasks = append(tasks, &HTTPEndpoint{URL: httpURL, Header: header})
-	tasks = append(tasks, &wsConn{URL: wsURL, Header: header})
-	watcher, err := NewWatcher(id, cadence, payload, tasks)
+	tasks = append(tasks, &HTTPEndpoint{URL: httpURL, Header: header, Payload: payload})
+	tasks = append(tasks, &wsConn{URL: wsURL, Header: header, Payload: payload})
+	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err)
 
 	// Start the watcher and execute the tasks
@@ -82,7 +81,7 @@ func TestWatcherExecution(t *testing.T) {
 	err = watcher.Start(watcherResponses)
 	assert.NoError(t, err)
 	for _, task := range watcher.watcherTasks {
-		task.Task(payload).Execute()
+		task.Task().Execute()
 	}
 
 	// Listen for responses on the watcherResponses channel
@@ -126,7 +125,7 @@ func TestWatcherExecution_Error(t *testing.T) {
 		Header:          header,
 		ErrTaskResponse: fmt.Errorf("mock error"),
 	})
-	watcher, err := NewWatcher(id, cadence, []byte{}, tasks)
+	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err)
 
 	// Start the watcher and execute the task1
@@ -134,7 +133,7 @@ func TestWatcherExecution_Error(t *testing.T) {
 	err = watcher.Start(watcherResponses)
 	assert.NoError(t, err)
 	for _, task := range watcher.watcherTasks {
-		task.Task([]byte{}).Execute()
+		task.Task().Execute()
 	}
 
 	// Listen for responses on the watcherResponses channel

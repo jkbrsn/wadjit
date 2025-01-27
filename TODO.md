@@ -2,6 +2,7 @@
 
 ## v0.2.0
 
+- Add a second WS task implementation, for when responses can't be correlated with requests
 - Add timings to requests and WS sends, to be able to track latency of requests and WS messages
 - Improve readme
 

@@ -26,7 +26,7 @@ type WatcherTask interface {
 	Initialize(id xid.ID, respChan chan<- WatcherResponse) error
 
 	// Task returns a taskman.Task that sends requests and messages to the endpoint.
-	Task(payload []byte) taskman.Task
+	Task() taskman.Task
 
 	// Validate checks that the WatcherTask is ready for initialization.
 	Validate() error
@@ -38,8 +38,9 @@ type WatcherTask interface {
 
 // HTTPEndpoint represents an HTTP endpoint that can spawn tasks to make requests towards it.
 type HTTPEndpoint struct {
-	URL    *url.URL
-	Header http.Header
+	URL     *url.URL
+	Header  http.Header
+	Payload []byte
 
 	id       xid.ID
 	respChan chan<- WatcherResponse
@@ -54,15 +55,16 @@ func (e *HTTPEndpoint) Close() error {
 func (e *HTTPEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) error {
 	e.id = id
 	e.respChan = responseChannel
+	// TODO: set mode based on payload, e.g. JSON RPC, text etc.
 	return nil
 }
 
 // Task returns a taskman.Task that sends an HTTP request to the endpoint.
-func (e *HTTPEndpoint) Task(payload []byte) taskman.Task {
+func (e *HTTPEndpoint) Task() taskman.Task {
 	return &httpRequest{
 		endpoint: e,
 		respChan: e.respChan,
-		data:     payload,
+		data:     e.Payload,
 		method:   http.MethodGet,
 	}
 }
@@ -102,6 +104,8 @@ func (r httpRequest) Execute() error {
 		}
 	}
 
+	// TODO: measure time taken to send request, perhaps all stages of the request
+
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		r.respChan <- errorResponse(err, r.endpoint.id, r.endpoint.URL)
@@ -130,8 +134,9 @@ func (r httpRequest) Execute() error {
 type wsConn struct {
 	mu sync.Mutex
 
-	URL    *url.URL
-	Header http.Header
+	URL     *url.URL
+	Header  http.Header
+	Payload []byte
 
 	conn      *websocket.Conn
 	ctx       context.Context
@@ -178,6 +183,7 @@ func (c *wsConn) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) e
 	c.id = id
 	c.writeChan = make(chan []byte)
 	c.respChan = responseChannel
+	// TODO: set mode based on payload, e.g. JSON RPC, text etc.
 	c.mu.Unlock()
 
 	err := c.connect()
@@ -189,10 +195,10 @@ func (c *wsConn) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) e
 }
 
 // Task returns a taskman.Task that sends a message to the WebSocket endpoint.
-func (c *wsConn) Task(payload []byte) taskman.Task {
+func (c *wsConn) Task() taskman.Task {
 	return &wsSend{
 		conn: c,
-		msg:  payload,
+		msg:  c.Payload,
 	}
 }
 
@@ -310,6 +316,13 @@ func (c *wsConn) readPump(wg *sync.WaitGroup) {
 				return
 			}
 
+			// TODO: if wsConn is set to "JSON RPC mode":
+			// 1. unmarshal p into a JSON-RPC interface
+			// 2. check the id against the "inflight map" in wsConn
+			// 3. if the id is found, get the inflight map metadata and delete the id in the map
+			// 4. restore original id and marshal the JSON-RPC interface back into text message
+			// 5. set metadata to the taskresponse: original id, duration between time sent and time received
+
 			wsResp := NewWSTaskResponse(p)
 
 			// Send the message to the read channel
@@ -323,6 +336,8 @@ func (c *wsConn) readPump(wg *sync.WaitGroup) {
 		}
 	}
 }
+
+// TODO: create second task implementation for "instant mode", that both sends and reads messages in the same task
 
 // wsSend is an implementation to taskman.Task that sends a message to a WebSocket endpoint.
 type wsSend struct {
@@ -349,6 +364,13 @@ func (ws *wsSend) Execute() error {
 		// The connection has been closed
 		return nil
 	default:
+
+		// TODO: if wsConn is set to "JSON RPC mode":
+		// 1. unmarsal ws.msg into a JSON-RPC interface
+		// 2. set the id to a something randomly generated
+		// 3. store the id in a "inflight map" in wsConn, with metadata: original id, time sent
+		// 4. marshal the JSON-RPC interface back into text message
+
 		// Write message to connection
 		if err := ws.conn.conn.WriteMessage(websocket.TextMessage, ws.msg); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {

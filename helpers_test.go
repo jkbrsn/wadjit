@@ -57,8 +57,9 @@ func (m *MockTaskResponse) Reader() (io.ReadCloser, error) {
 }
 
 type MockWatcherTask struct {
-	URL    *url.URL
-	Header http.Header
+	URL     *url.URL
+	Header  http.Header
+	Payload []byte
 
 	ErrTaskResponse error // Set to return a task that errors
 
@@ -76,10 +77,10 @@ func (m *MockWatcherTask) Initialize(id xid.ID, responseChan chan<- WatcherRespo
 	return nil
 }
 
-func (m *MockWatcherTask) Task(payload []byte) taskman.Task {
+func (m *MockWatcherTask) Task() taskman.Task {
 	return &MockTask{
 		mwt:      m,
-		Payload:  payload,
+		Payload:  m.Payload,
 		respChan: m.respChan,
 	}
 }

@@ -26,12 +26,12 @@ func TestAddWatcher(t *testing.T) {
 	id := xid.New()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
-	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}}
+	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
 	var tasks []WatcherTask
 	for _, task := range httpTasks {
 		tasks = append(tasks, &task)
 	}
-	watcher, err := NewWatcher(id, cadence, payload, tasks)
+	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err, "error creating watcher")
 
 	// Add the watcher
@@ -56,12 +56,12 @@ func TestRemoveWatcher(t *testing.T) {
 	id := xid.New()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
-	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}}}
+	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
 	var tasks []WatcherTask
 	for _, task := range httpTasks {
 		tasks = append(tasks, &task)
 	}
-	watcher, err := NewWatcher(id, cadence, payload, tasks)
+	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err, "error creating watcher")
 
 	err = w.AddWatcher(watcher)
@@ -92,21 +92,19 @@ func TestWadjitLifecycle(t *testing.T) {
 
 	// Create first watcher
 	id1 := xid.New()
-	tasks := append([]WatcherTask{}, &HTTPEndpoint{URL: url})
+	tasks := append([]WatcherTask{}, &HTTPEndpoint{URL: url, Payload: []byte("first")})
 	watcher1, err := NewWatcher(
 		id1,
 		5*time.Millisecond,
-		[]byte("first"),
 		tasks,
 	)
 	assert.NoError(t, err, "error creating watcher 1")
 	// Create second watcher
 	id2 := xid.New()
-	tasks = append([]WatcherTask{}, &HTTPEndpoint{URL: url})
+	tasks = append([]WatcherTask{}, &HTTPEndpoint{URL: url, Payload: []byte("second")})
 	watcher2, err := NewWatcher(
 		id2,
 		15*time.Millisecond,
-		[]byte("second"),
 		tasks,
 	)
 	assert.NoError(t, err, "error creating watcher 2")
@@ -115,11 +113,10 @@ func TestWadjitLifecycle(t *testing.T) {
 	wsURL := "ws" + server.URL[4:] + "/ws"
 	url, err = url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")
-	tasks = append([]WatcherTask{}, &wsConn{URL: url})
+	tasks = append([]WatcherTask{}, &wsConn{URL: url, Payload: []byte("third")})
 	watcher3, err := NewWatcher(
 		id3,
 		10*time.Millisecond,
-		[]byte("third"),
 		tasks,
 	)
 	assert.NoError(t, err, "error creating watcher 3")

@@ -15,7 +15,6 @@ import (
 type Watcher struct {
 	id      xid.ID
 	cadence time.Duration
-	payload []byte
 
 	watcherTasks []WatcherTask
 
@@ -47,7 +46,7 @@ func (w *Watcher) ID() xid.ID {
 func (w *Watcher) Job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.watcherTasks))
 	for i := range w.watcherTasks {
-		tasks = append(tasks, w.watcherTasks[i].Task(w.payload))
+		tasks = append(tasks, w.watcherTasks[i].Task())
 	}
 	// Create the job
 	job := taskman.Job{
@@ -125,13 +124,11 @@ func (w *Watcher) Validate() error {
 func NewWatcher(
 	id xid.ID,
 	cadence time.Duration,
-	payload []byte,
 	tasks []WatcherTask,
 ) (*Watcher, error) {
 	w := &Watcher{
 		id:           id,
 		cadence:      cadence,
-		payload:      payload,
 		watcherTasks: tasks,
 		doneChan:     make(chan struct{}),
 	}
