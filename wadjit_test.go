@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewWadjit(t *testing.T) {
@@ -82,9 +83,12 @@ func TestRemoveWatcher(t *testing.T) {
 
 func TestWadjitLifecycle(t *testing.T) {
 	w := New()
-	defer w.Close()
 	server := echoServer()
-	defer server.Close()
+	defer func() {
+		// Make sure the Wadjit is closed before the server closes
+		w.Close()
+		server.Close()
+	}()
 
 	// Set up URLs
 	url, err := url.Parse(server.URL)
@@ -130,7 +134,8 @@ func TestWadjitLifecycle(t *testing.T) {
 		for {
 			select {
 			case response := <-responses:
-				assert.NotNil(t, response.Payload)
+				assert.NoError(t, response.Err)
+				require.NotNil(t, response.Payload)
 				data, err := response.Payload.Data()
 				assert.NoError(t, err)
 				if string(data) == "first" {

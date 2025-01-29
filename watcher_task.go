@@ -139,11 +139,10 @@ type WSEndpoint struct {
 	Header  http.Header
 	Payload []byte
 
-	conn      *websocket.Conn
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	writeChan chan []byte
+	conn   *websocket.Conn
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 
 	id       xid.ID
 	respChan chan<- WatcherResponse
@@ -166,20 +165,21 @@ func (e *WSEndpoint) Close() error {
 	// If the connection is already closed, do nothing
 	if e.conn == nil {
 		return nil
+	} else {
+		// Close the connection
+		formattedCloseMessage := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
+		deadline := time.Now().Add(3 * time.Second)
+		err := e.conn.WriteControl(websocket.CloseMessage, formattedCloseMessage, deadline)
+		if err != nil {
+			return err
+		}
+		// TODO: formally wait for response?
+		err = e.conn.Close()
+		if err != nil {
+			return err
+		}
+		e.conn = nil
 	}
-
-	// Close the connection
-	formattedCloseMessage := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
-	deadline := time.Now().Add(3 * time.Second)
-	err := e.conn.WriteControl(websocket.CloseMessage, formattedCloseMessage, deadline)
-	if err != nil {
-		return err
-	}
-	err = e.conn.Close()
-	if err != nil {
-		return err
-	}
-	e.conn = nil
 
 	// Cancel the context
 	e.cancel()
@@ -187,13 +187,14 @@ func (e *WSEndpoint) Close() error {
 	return nil
 }
 
-// Initialize sets up the WebSocket connection.
+// Initialize prepares the WSEndpoint to be able to send messages to the target endpoint.
+// If configured as one of the persistent connection modes, e.g. JSON RPC, this function will
+// establish a long-lived connection to the endpoint.
 func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) error {
 	e.mu.Lock()
 	e.id = id
-	e.writeChan = make(chan []byte)
 	e.respChan = responseChannel
-	// TODO: set mode based on payload, e.g. JSON RPC, text ete.
+	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.mu.Unlock()
 
 	switch e.mode {
@@ -203,10 +204,11 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 			return fmt.Errorf("failed to connect when initializing: %w", err)
 		}
 	case ModeText:
+		// Text mode does not require a connection to be established
 		fallthrough
 	default:
-		// Default to text mode
-		// TODO: set up context here...? Otherwise done in connect()
+		// Do nothing
+		// TODO: make default detect the proper mode based on analysis of the payload
 	}
 
 	return nil
@@ -253,7 +255,7 @@ func (e *WSEndpoint) connect() error {
 	defer e.mu.Unlock()
 
 	// Only connect if the connection is not already established
-	if e.conn != nil || e.ctx != nil {
+	if e.conn != nil {
 		return fmt.Errorf("connection already established")
 	}
 
@@ -263,9 +265,6 @@ func (e *WSEndpoint) connect() error {
 		return err
 	}
 	e.conn = conn
-
-	// Set up the context and read pump
-	e.ctx, e.cancel = context.WithCancel(context.Background())
 
 	// Start the read pump for incoming messages
 	e.wg.Add(1)
@@ -278,11 +277,6 @@ func (e *WSEndpoint) connect() error {
 func (e *WSEndpoint) reconnect() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-
-	// Cancel the current context
-	if e.cancel != nil {
-		e.cancel()
-	}
 
 	// Close the current connection, if it exists
 	if e.conn != nil {
@@ -300,9 +294,6 @@ func (e *WSEndpoint) reconnect() error {
 		return fmt.Errorf("failed to dial when reconnecting: %w", err)
 	}
 	e.conn = conn
-
-	// Set up a new context and read pump
-	e.ctx, e.cancel = context.WithCancel(context.Background())
 
 	// Restart the read pump for incoming messages
 	e.wg.Add(1)
@@ -453,8 +444,9 @@ func (wsc *wsShortConn) Execute() error {
 		// 1. Establish a new connection
 		conn, _, err := websocket.DefaultDialer.Dial(wsc.wsEndpoint.URL.String(), wsc.wsEndpoint.Header)
 		if err != nil {
+			err = fmt.Errorf("failed to dial: %w", err)
 			wsc.wsEndpoint.respChan <- errorResponse(err, wsc.wsEndpoint.id, wsc.wsEndpoint.URL)
-			return fmt.Errorf("failed to dial: %w", err)
+			return err
 		}
 		defer conn.Close()
 

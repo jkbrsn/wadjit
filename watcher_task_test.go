@@ -17,6 +17,10 @@ func TestWSConnnImplementsWatcherTask(t *testing.T) {
 	var _ WatcherTask = &WSEndpoint{}
 }
 
+//
+// HTTP
+//
+
 func TestHTTPEndpointInitialize(t *testing.T) {
 	url, _ := url.Parse("http://example.com")
 	header := make(http.Header)
@@ -36,6 +40,11 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	assert.NotNil(t, endpoint.respChan)
 }
 
+//
+// WS
+//
+
+// TODO: cover the other WS modes
 func TestWSConnInitialize(t *testing.T) {
 	server := echoServer()
 	defer server.Close()
@@ -49,6 +58,7 @@ func TestWSConnInitialize(t *testing.T) {
 	conn := &WSEndpoint{
 		URL:    url,
 		Header: header,
+		mode:   ModeJSONRPC,
 	}
 
 	assert.Equal(t, url, conn.URL)
@@ -59,7 +69,6 @@ func TestWSConnInitialize(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, conn.respChan)
 	assert.NotNil(t, conn.conn)
-	assert.NotNil(t, conn.writeChan)
 	assert.NotNil(t, conn.ctx)
 	assert.NotNil(t, conn.cancel)
 }
@@ -77,6 +86,7 @@ func TestWSConnReconnect(t *testing.T) {
 	conn := &WSEndpoint{
 		URL:    url,
 		Header: header,
+		mode:   ModeJSONRPC,
 	}
 
 	err = conn.Initialize(xid.NilID(), responseChan)
