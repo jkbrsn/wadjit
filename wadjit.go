@@ -53,6 +53,7 @@ func (w *Wadjit) RemoveWatcher(id xid.ID) error {
 // Close stops all Wadjit processes and closes the Wadjit.
 func (w *Wadjit) Close() {
 	w.cancel()
+	w.taskManager.Stop()
 
 	w.watchers.Range(func(key, value interface{}) bool {
 		watcher := value.(*Watcher)
@@ -60,7 +61,6 @@ func (w *Wadjit) Close() {
 		return true
 	})
 
-	w.taskManager.Stop()
 }
 
 // ResponsesChannel returns the channel where responses from the internal Watcher instances
