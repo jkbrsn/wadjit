@@ -298,6 +298,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 	for {
 		select {
 		case <-e.ctx.Done():
+			// Endpoint shutting down
 			return
 		default:
 			// Read message from connection
@@ -323,14 +324,12 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 			// 4. restore original id and marshal the JSON-RPC interface back into text message
 			// 5. set metadata to the taskresponse: original id, duration between time sent and time received
 
-			wsResp := NewWSTaskResponse(p)
-
 			// Send the message to the read channel
 			response := WatcherResponse{
 				WatcherID: e.id,
 				URL:       e.URL,
 				Err:       nil,
-				Payload:   wsResp,
+				Payload:   NewWSTaskResponse(p),
 			}
 			e.respChan <- response
 		}
@@ -360,7 +359,7 @@ func (wlc *wsLongConn) Execute() error {
 
 	select {
 	case <-wlc.wsEndpoint.ctx.Done():
-		// The connection has been closed
+		// Endpoint shutting down, do nothing
 		return nil
 	default:
 
@@ -386,14 +385,86 @@ func (wlc *wsLongConn) Execute() error {
 
 			// Send an error response
 			wlc.wsEndpoint.respChan <- errorResponse(err, wlc.wsEndpoint.id, wlc.wsEndpoint.URL)
-			return err
+			return fmt.Errorf("failed to write message: %w", err)
 		}
 	}
 
 	return nil
 }
 
-// TODO: create second task implementation for "instant mode", that both sends and reads messages in the same task
+// wsShortConn is an implementation of taskman.Task that sets up a short-lived WebSocket connection
+// to send a message to the endpoint. This is useful for endpoints that require a new connection
+// for each message, or for situations where there is no way to link the response to the request.
+type wsShortConn struct {
+	wsEndpoint *WSEndpoint
+
+	msg []byte
+}
+
+// Execute sets up a WebSocket connection to the WebSocket endpoint, sends a message, and reads
+// the response.
+// Note: for concurrency safety, the connection's WriteMessage method is used exclusively here.
+func (wsc *wsShortConn) Execute() error {
+	// The connection should not be open
+	if wsc.wsEndpoint.conn != nil {
+		return errors.New("connection is already open")
+	}
+
+	wsc.wsEndpoint.lock()
+	defer wsc.wsEndpoint.unlock()
+
+	select {
+	case <-wsc.wsEndpoint.ctx.Done():
+		// Endpoint shutting down, do nothing
+		return nil
+	default:
+		// 1. Establish a new connection
+		conn, _, err := websocket.DefaultDialer.Dial(wsc.wsEndpoint.URL.String(), wsc.wsEndpoint.Header)
+		if err != nil {
+			wsc.wsEndpoint.respChan <- errorResponse(err, wsc.wsEndpoint.id, wsc.wsEndpoint.URL)
+			return fmt.Errorf("failed to dial: %w", err)
+		}
+		defer conn.Close()
+
+		// 2. Write message to connection
+		if err := conn.WriteMessage(websocket.TextMessage, wsc.msg); err != nil {
+			// An error is unexpected, since the connection was just established
+			err = fmt.Errorf("failed to write message: %w", err)
+			wsc.wsEndpoint.respChan <- errorResponse(err, wsc.wsEndpoint.id, wsc.wsEndpoint.URL)
+			return err
+		}
+
+		// 3. Read exactly one response
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			// An error is unexpected, since the connection was just established
+			err = fmt.Errorf("failed to read message: %w", err)
+			wsc.wsEndpoint.respChan <- errorResponse(err, wsc.wsEndpoint.id, wsc.wsEndpoint.URL)
+			return err
+		}
+
+		// 4. Send the response message on the channel
+		response := WatcherResponse{
+			WatcherID: wsc.wsEndpoint.id,
+			URL:       wsc.wsEndpoint.URL,
+			Err:       nil,
+			Payload:   NewWSTaskResponse(message),
+		}
+		wsc.wsEndpoint.respChan <- response
+
+		// 5. Close the connection gracefully
+		closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
+		err = conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(3*time.Second))
+		if err != nil {
+			// We tried a graceful close, but maybe the connection is already gone
+			return fmt.Errorf("failed to write close message: %w", err)
+		}
+
+		// 6. Skip waiting for the server's close message, exit function to close the connection
+	}
+
+	return nil
+}
 
 // errorResponse is a helper to create a WatcherResponse with an error.
 func errorResponse(err error, id xid.ID, url *url.URL) WatcherResponse {
