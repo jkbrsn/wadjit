@@ -113,7 +113,7 @@ func TestWadjitLifecycle(t *testing.T) {
 	wsURL := "ws" + server.URL[4:] + "/ws"
 	url, err = url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")
-	tasks = append([]WatcherTask{}, &wsConn{URL: url, Payload: []byte("third")})
+	tasks = append([]WatcherTask{}, &WSEndpoint{URL: url, Payload: []byte("third")})
 	watcher3, err := NewWatcher(
 		id3,
 		10*time.Millisecond,

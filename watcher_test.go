@@ -72,7 +72,7 @@ func TestWatcherExecution(t *testing.T) {
 	payload := []byte("test payload")
 	var tasks []WatcherTask
 	tasks = append(tasks, &HTTPEndpoint{URL: httpURL, Header: header, Payload: payload})
-	tasks = append(tasks, &wsConn{URL: wsURL, Header: header, Payload: payload})
+	tasks = append(tasks, &WSEndpoint{URL: wsURL, Header: header, Payload: payload})
 	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err)
 

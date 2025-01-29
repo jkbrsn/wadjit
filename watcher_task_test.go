@@ -14,7 +14,7 @@ func TestHTTPEndpointImplementsWatcherTask(t *testing.T) {
 }
 
 func TestWSConnnImplementsWatcherTask(t *testing.T) {
-	var _ WatcherTask = &wsConn{}
+	var _ WatcherTask = &WSEndpoint{}
 }
 
 func TestHTTPEndpointInitialize(t *testing.T) {
@@ -46,7 +46,7 @@ func TestWSConnInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	conn := &wsConn{
+	conn := &WSEndpoint{
 		URL:    url,
 		Header: header,
 	}
@@ -74,7 +74,7 @@ func TestWSConnReconnect(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	conn := &wsConn{
+	conn := &WSEndpoint{
 		URL:    url,
 		Header: header,
 	}
