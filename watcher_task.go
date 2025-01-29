@@ -132,7 +132,8 @@ func (r httpRequest) Execute() error {
 // WSEndpoint connects to the target endpoint, and spawns tasks to send messages
 // to that endpoint.
 type WSEndpoint struct {
-	mu sync.Mutex
+	mu   sync.Mutex
+	mode WSEndpointMode
 
 	URL     *url.URL
 	Header  http.Header
@@ -147,6 +148,15 @@ type WSEndpoint struct {
 	id       xid.ID
 	respChan chan<- WatcherResponse
 }
+
+// WSEndpointMode is an enum for the mode of the WebSocket endpoint.
+type WSEndpointMode int
+
+const (
+	ModeUnknown WSEndpointMode = iota // Defaults to ModeText
+	ModeText                          // Text mode is the default mode
+	ModeJSONRPC                       // JSON RPC mode
+)
 
 // Close closes the WebSocket connection, and cancels its context.
 func (e *WSEndpoint) Close() error {
@@ -186,9 +196,17 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 	// TODO: set mode based on payload, e.g. JSON RPC, text ete.
 	e.mu.Unlock()
 
-	err := e.connect()
-	if err != nil {
-		return fmt.Errorf("failed to connect when initializing: %w", err)
+	switch e.mode {
+	case ModeJSONRPC:
+		err := e.connect()
+		if err != nil {
+			return fmt.Errorf("failed to connect when initializing: %w", err)
+		}
+	case ModeText:
+		fallthrough
+	default:
+		// Default to text mode
+		// TODO: set up context here...? Otherwise done in connect()
 	}
 
 	return nil
@@ -196,9 +214,23 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 
 // Task returns a taskman.Task that sends a message to the WebSocket endpoint.
 func (e *WSEndpoint) Task() taskman.Task {
-	return &wsLongConn{
-		wsEndpoint: e,
-		msg:        e.Payload,
+	switch e.mode {
+	case ModeText:
+		return &wsShortConn{
+			wsEndpoint: e,
+			msg:        e.Payload,
+		}
+	case ModeJSONRPC:
+		return &wsLongConn{
+			wsEndpoint: e,
+			msg:        e.Payload,
+		}
+	default:
+		// Default to text mode
+		e.mu.Lock()
+		e.mode = ModeText
+		e.mu.Unlock()
+		return e.Task()
 	}
 }
 
