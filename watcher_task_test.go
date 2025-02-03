@@ -44,7 +44,6 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 // WS
 //
 
-// TODO: cover the other WS modes
 func TestWSConnInitialize(t *testing.T) {
 	server := echoServer()
 	defer server.Close()
@@ -55,22 +54,43 @@ func TestWSConnInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	conn := &WSEndpoint{
-		URL:    url,
-		Header: header,
-		mode:   ModeJSONRPC,
-	}
+	t.Run("ModeJSONRPC", func(t *testing.T) {
+		conn := &WSEndpoint{
+			URL:    url,
+			Header: header,
+			mode:   ModeJSONRPC,
+		}
 
-	assert.Equal(t, url, conn.URL)
-	assert.Equal(t, header, conn.Header)
-	assert.Nil(t, conn.respChan)
+		assert.Equal(t, url, conn.URL)
+		assert.Equal(t, header, conn.Header)
+		assert.Nil(t, conn.respChan)
 
-	err = conn.Initialize(xid.NilID(), responseChan)
-	assert.NoError(t, err)
-	assert.NotNil(t, conn.respChan)
-	assert.NotNil(t, conn.conn)
-	assert.NotNil(t, conn.ctx)
-	assert.NotNil(t, conn.cancel)
+		err = conn.Initialize(xid.NilID(), responseChan)
+		assert.NoError(t, err)
+		assert.NotNil(t, conn.respChan)
+		assert.NotNil(t, conn.conn)
+		assert.NotNil(t, conn.ctx)
+		assert.NotNil(t, conn.cancel)
+	})
+
+	t.Run("ModeText", func(t *testing.T) {
+		conn := &WSEndpoint{
+			URL:    url,
+			Header: header,
+			mode:   ModeText,
+		}
+
+		assert.Equal(t, url, conn.URL)
+		assert.Equal(t, header, conn.Header)
+		assert.Nil(t, conn.respChan)
+
+		err = conn.Initialize(xid.NilID(), responseChan)
+		assert.NoError(t, err)
+		assert.NotNil(t, conn.respChan)
+		assert.Nil(t, conn.conn) // no connection should be established since wsShortConn is used
+		assert.NotNil(t, conn.ctx)
+		assert.NotNil(t, conn.cancel)
+	})
 }
 
 func TestWSConnReconnect(t *testing.T) {

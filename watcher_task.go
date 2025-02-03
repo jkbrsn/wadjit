@@ -204,11 +204,13 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 			return fmt.Errorf("failed to connect when initializing: %w", err)
 		}
 	case ModeText:
-		// Text mode does not require a connection to be established
-		fallthrough
+		// Text mode does not require a connection to be established, so do nothing
 	default:
-		// Do nothing
-		// TODO: make default detect the proper mode based on analysis of the payload
+		// Default to text mode, since its task does not require anything outside of its own scope
+		// TODO: make default detect the proper mode based on analysis of the payload, instead of defaulting to text mode
+		e.mu.Lock()
+		e.mode = ModeText
+		e.mu.Unlock()
 	}
 
 	return nil
@@ -229,10 +231,11 @@ func (e *WSEndpoint) Task() taskman.Task {
 		}
 	default:
 		// Default to text mode
-		e.mu.Lock()
-		e.mode = ModeText
-		e.mu.Unlock()
-		return e.Task()
+		// TODO: this probably works alright, but maybe redesign to return error instead?
+		return &wsShortConn{
+			wsEndpoint: e,
+			msg:        e.Payload,
+		}
 	}
 }
 
@@ -251,6 +254,9 @@ func (e *WSEndpoint) Validate() error {
 // connect establishes a connection to the WebSocket endpoint. If already connected,
 // this function does nothing.
 func (e *WSEndpoint) connect() error {
+	if e.mode == ModeText {
+		return errors.New("cannot establish long connection in text mode")
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -275,6 +281,9 @@ func (e *WSEndpoint) connect() error {
 
 // reconnect closes the current connection and establishes a new one.
 func (e *WSEndpoint) reconnect() error {
+	if e.mode == ModeText {
+		return errors.New("cannot re-establish long connection in text mode")
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
