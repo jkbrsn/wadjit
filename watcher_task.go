@@ -3,9 +3,11 @@ package wadjit
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"strings"
 	"sync"
@@ -44,6 +46,8 @@ type HTTPEndpoint struct {
 
 	id       xid.ID
 	respChan chan<- WatcherResponse
+
+	Metrics bool // Set to true to enable metrics collection
 }
 
 // Close closes the HTTP endpoint.
@@ -98,13 +102,21 @@ func (r httpRequest) Execute() error {
 		return err
 	}
 
+	var timings RequestTimings
+	if r.endpoint.Metrics {
+		trace := traceRequest(&timings)
+
+		// TODO: figure out how to deal with ContentTransfer and Total - read response before returning?
+
+		ctx := httptrace.WithClientTrace(request.Context(), trace)
+		request = request.WithContext(ctx)
+	}
+
 	for key, values := range r.endpoint.Header {
 		for _, value := range values {
 			request.Header.Add(key, value)
 		}
 	}
-
-	// TODO: measure time taken to send request, perhaps all stages of the request
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
@@ -113,6 +125,8 @@ func (r httpRequest) Execute() error {
 	}
 
 	taskResp := NewHTTPTaskResponse(response)
+
+	// TODO: add timings to taskResp metadata
 
 	// Send the response without reading it, leaving that to the Watcher's owner
 	r.respChan <- WatcherResponse{
@@ -123,6 +137,59 @@ func (r httpRequest) Execute() error {
 	}
 
 	return nil
+}
+
+// RequestTimings stores the timings of an HTTP request.
+type RequestTimings struct {
+	DNSLookup        time.Duration // Time taken to resolve DNS
+	TCPConnect       time.Duration // Time taken to establish a TCP connection
+	TLSHandshake     time.Duration // Time taken to perform a TLS handshake
+	ServerProcessing time.Duration // Time taken for the server to process the request
+	ContentTransfer  time.Duration // Time taken to transfer the content
+	Total            time.Duration // Total time taken for all stages
+}
+
+func traceRequest(timings *RequestTimings) *httptrace.ClientTrace {
+	var dnsStart, connectStart, tlsStart, preTransfer time.Time
+
+	return &httptrace.ClientTrace{
+		DNSStart: func(_ httptrace.DNSStartInfo) {
+			dnsStart = time.Now()
+		},
+		DNSDone: func(_ httptrace.DNSDoneInfo) {
+			// DNSDone is called immediately after DNS resolution ends
+			connectStart = time.Now()
+			if !dnsStart.IsZero() {
+				timings.DNSLookup = time.Since(dnsStart)
+			}
+		},
+		ConnectStart: func(_, _ string) {
+			if connectStart.IsZero() {
+				connectStart = time.Now()
+			}
+		},
+		ConnectDone: func(_, _ string, err error) {
+			if err == nil && !connectStart.IsZero() {
+				timings.TCPConnect = time.Since(connectStart)
+			}
+		},
+		TLSHandshakeStart: func() {
+			tlsStart = time.Now()
+		},
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
+			if err == nil && !tlsStart.IsZero() {
+				timings.TLSHandshake = time.Since(tlsStart)
+			}
+		},
+		GotConn: func(_ httptrace.GotConnInfo) {
+			preTransfer = time.Now()
+		},
+		GotFirstResponseByte: func() {
+			if !preTransfer.IsZero() {
+				timings.ServerProcessing = time.Since(preTransfer)
+			}
+		},
+	}
 }
 
 //
