@@ -428,6 +428,8 @@ func (wlc *wsLongConn) Execute() error {
 		// 3. store the id in a "inflight map" in WSEndpoint, with metadata: original id, time sent
 		// 4. marshal the JSON-RPC interface back into text message
 
+		// TODO: add timings that can go into the task response
+
 		// Write message to connection
 		if err := wlc.wsEndpoint.conn.WriteMessage(websocket.TextMessage, wlc.msg); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
