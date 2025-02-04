@@ -19,12 +19,10 @@ import (
 
 // WatcherResponse represents a response from a watcher.
 type WatcherResponse struct {
-	WatcherID xid.ID
-	URL       *url.URL
-	Err       error
-
-	// Payload stores the response data from the endpoint, regardless of protocol.
-	Payload TaskResponse
+	WatcherID xid.ID       // ID of the watcher that generated the response
+	URL       *url.URL     // URL of the response's target
+	Err       error        // Error that occurred during the request, if nil the request was successful
+	Payload   TaskResponse // Payload stores the response data from the endpoint
 }
 
 // Data reads and returns the data from the response.
@@ -80,15 +78,21 @@ type TaskResponse interface {
 }
 
 // TaskResponseMetadata is optional metadata that HTTP or WS might provide.
+// TODO: cover these in a test
 type TaskResponseMetadata struct {
+	// HTTP metadata
 	StatusCode int
 	Headers    http.Header
 
-	// Response latency is the time it took to receive the very first byte of the response. For
-	// HTTP, this is the time from sending the request to receiving the first byte of the response.
-	// For WS, this is the time from inital Dial to the first 101 response for a new conenction, or
+	// Latency is the time it took to receive the very first byte of the response.
+	// For HTTP, this is the time from request send to receiving the first byte of the response.
+	// For WS, this is the time from inital Dial to the first 101 response for a new conn, or
 	// the time from sending a message to receiving a response on an existing connection.
 	Latency time.Duration
+	// Size is the size of the response body, or message, in bytes.
+	Size int64
+	// TimeReceived is the time the response was received.
+	TimeReceived time.Time
 }
 
 //
@@ -99,11 +103,12 @@ type TaskResponseMetadata struct {
 type HTTPTaskResponse struct {
 	resp *http.Response
 
-	once     sync.Once   // ensures Data() is only processed once
-	dataOnce atomic.Bool // new flag to track if once was done
-	data     []byte
-	dataErr  error
-	latency  time.Duration
+	once       sync.Once   // ensures Data() is only processed once
+	dataOnce   atomic.Bool // new flag to track if once was done
+	data       []byte
+	dataErr    error
+	latency    time.Duration
+	receivedAt time.Time
 
 	usedReader atomic.Bool // flags if we returned a Reader
 }
@@ -174,9 +179,11 @@ func (h *HTTPTaskResponse) Metadata() TaskResponseMetadata {
 	}
 
 	md := TaskResponseMetadata{
-		StatusCode: h.resp.StatusCode,
-		Headers:    http.Header{},
-		Latency:    h.latency,
+		StatusCode:   h.resp.StatusCode,
+		Headers:      http.Header{},
+		Latency:      h.latency,
+		Size:         h.resp.ContentLength,
+		TimeReceived: h.receivedAt,
 	}
 	for k, v := range h.resp.Header {
 		md.Headers[k] = v
@@ -194,8 +201,11 @@ func (h *HTTPTaskResponse) dataDone() bool {
 // WebSocket
 //
 
+// WSTaskResponse is a TaskResponse for WebSocket responses.
 type WSTaskResponse struct {
-	data []byte
+	data       []byte
+	latency    time.Duration
+	receivedAt time.Time
 }
 
 // NewWSTaskResponse can store an incoming WS message as a byte slice.
@@ -216,5 +226,9 @@ func (w *WSTaskResponse) Reader() (io.ReadCloser, error) {
 // Metadata returns metadata connected to the response.
 // TODO: populate with reasonable metadata
 func (w *WSTaskResponse) Metadata() TaskResponseMetadata {
-	return TaskResponseMetadata{}
+	return TaskResponseMetadata{
+		Latency:      w.latency,
+		Size:         int64(len(w.data)),
+		TimeReceived: w.receivedAt,
+	}
 }

@@ -122,6 +122,7 @@ func (r httpRequest) Execute() error {
 	// Create a task response
 	taskResponse := NewHTTPTaskResponse(response)
 	taskResponse.latency = timings.FirstResponseByte.Sub(timings.Start)
+	taskResponse.receivedAt = time.Now()
 
 	// Send the response on the channel
 	r.respChan <- WatcherResponse{
@@ -477,6 +478,7 @@ func (wsc *wsShortConn) Execute() error {
 		return nil
 	default:
 		// 1. Establish a new connection
+		start := time.Now()
 		conn, _, err := websocket.DefaultDialer.Dial(wsc.wsEndpoint.URL.String(), wsc.wsEndpoint.Header)
 		if err != nil {
 			err = fmt.Errorf("failed to dial: %w", err)
@@ -484,6 +486,7 @@ func (wsc *wsShortConn) Execute() error {
 			return err
 		}
 		defer conn.Close()
+		handshakeTime := time.Since(start)
 
 		// 2. Write message to connection
 		if err := conn.WriteMessage(websocket.TextMessage, wsc.msg); err != nil {
@@ -502,16 +505,20 @@ func (wsc *wsShortConn) Execute() error {
 			return err
 		}
 
-		// 4. Send the response message on the channel
-		response := WatcherResponse{
+		// 4. Create a task response
+		taskResponse := NewWSTaskResponse(message)
+		taskResponse.latency = handshakeTime
+		taskResponse.receivedAt = time.Now()
+
+		// 5. Send the response message on the channel
+		wsc.wsEndpoint.respChan <- WatcherResponse{
 			WatcherID: wsc.wsEndpoint.id,
 			URL:       wsc.wsEndpoint.URL,
 			Err:       nil,
-			Payload:   NewWSTaskResponse(message),
+			Payload:   taskResponse,
 		}
-		wsc.wsEndpoint.respChan <- response
 
-		// 5. Close the connection gracefully
+		// 6. Close the connection gracefully
 		closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
 		err = conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(3*time.Second))
 		if err != nil {
@@ -519,7 +526,7 @@ func (wsc *wsShortConn) Execute() error {
 			return fmt.Errorf("failed to write close message: %w", err)
 		}
 
-		// 6. Skip waiting for the server's close message, exit function to close the connection
+		// 7. Skip waiting for the server's close message, exit function to close the connection
 	}
 
 	return nil
