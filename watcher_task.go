@@ -102,9 +102,9 @@ func (r httpRequest) Execute() error {
 		return err
 	}
 
-	var timings RequestTimings
+	timings := &RequestTimes{}
 	if r.endpoint.Metrics {
-		trace := traceRequest(&timings)
+		trace := traceRequest(timings)
 
 		// TODO: figure out how to deal with ContentTransfer and Total - read response before returning?
 
@@ -124,70 +124,76 @@ func (r httpRequest) Execute() error {
 		return err
 	}
 
-	taskResp := NewHTTPTaskResponse(response)
-
-	// TODO: add timings to taskResp metadata
-
-	// Send the response without reading it, leaving that to the Watcher's owner
-	r.respChan <- WatcherResponse{
+	watcherResp := WatcherResponse{
 		WatcherID: r.endpoint.id,
 		URL:       r.endpoint.URL,
 		Err:       nil,
-		Payload:   taskResp,
+		Payload:   NewHTTPTaskResponse(response),
 	}
+
+	// If metrics are enabled, read the response body to complete the timings
+	if r.endpoint.Metrics {
+		_, err := watcherResp.Data()
+		if err != nil {
+			r.respChan <- errorResponse(err, r.endpoint.id, r.endpoint.URL)
+		}
+		timings.ContentTransferred = time.Now()
+		//timings.Total = timings.ContentTransferred.Sub(timings.Start)
+	}
+
+	// Send the response on the channel
+	r.respChan <- watcherResp
 
 	return nil
 }
 
-// RequestTimings stores the timings of an HTTP request.
-type RequestTimings struct {
-	DNSLookup        time.Duration // Time taken to resolve DNS
-	TCPConnect       time.Duration // Time taken to establish a TCP connection
-	TLSHandshake     time.Duration // Time taken to perform a TLS handshake
-	ServerProcessing time.Duration // Time taken for the server to process the request
-	ContentTransfer  time.Duration // Time taken to transfer the content
-	Total            time.Duration // Total time taken for all stages
+// RequestTimes stores the timestamps of an HTTP request.
+type RequestTimes struct {
+	Start              time.Time // When the request started
+	DNSDone            time.Time // When DNS resolution ended
+	ConnectDone        time.Time // When the connection was established
+	TLSHandshakeStart  time.Time // When the TLS handshake was started
+	TLSHandshakeDone   time.Time // When the TLS handshake was completed
+	GotConn            time.Time // When the connection was obtained
+	FirstResponseByte  time.Time // When the first byte of the response was received
+	ContentTransferred time.Time // When the content was fully transferred
 }
 
-func traceRequest(timings *RequestTimings) *httptrace.ClientTrace {
-	var dnsStart, connectStart, tlsStart, preTransfer time.Time
-
+func traceRequest(times *RequestTimes) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		DNSStart: func(_ httptrace.DNSStartInfo) {
-			dnsStart = time.Now()
+			times.Start = time.Now()
 		},
 		DNSDone: func(_ httptrace.DNSDoneInfo) {
-			// DNSDone is called immediately after DNS resolution ends
-			connectStart = time.Now()
-			if !dnsStart.IsZero() {
-				timings.DNSLookup = time.Since(dnsStart)
-			}
+			times.DNSDone = time.Now()
 		},
 		ConnectStart: func(_, _ string) {
-			if connectStart.IsZero() {
-				connectStart = time.Now()
+			if times.DNSDone.IsZero() {
+				times.DNSDone = time.Now()
 			}
 		},
 		ConnectDone: func(_, _ string, err error) {
-			if err == nil && !connectStart.IsZero() {
-				timings.TCPConnect = time.Since(connectStart)
+			if err != nil {
+				// TODO: handle error?
+				return
 			}
+			times.ConnectDone = time.Now()
 		},
 		TLSHandshakeStart: func() {
-			tlsStart = time.Now()
+			times.TLSHandshakeStart = time.Now()
 		},
 		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
-			if err == nil && !tlsStart.IsZero() {
-				timings.TLSHandshake = time.Since(tlsStart)
+			if err != nil {
+				// TODO: handle error?
+				return
 			}
+			times.TLSHandshakeDone = time.Now()
 		},
 		GotConn: func(_ httptrace.GotConnInfo) {
-			preTransfer = time.Now()
+			times.GotConn = time.Now()
 		},
 		GotFirstResponseByte: func() {
-			if !preTransfer.IsZero() {
-				timings.ServerProcessing = time.Since(preTransfer)
-			}
+			times.FirstResponseByte = time.Now()
 		},
 	}
 }
