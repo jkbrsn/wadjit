@@ -134,14 +134,9 @@ func (r httpRequest) Execute() error {
 	return nil
 }
 
-// RequestTimes stores the timestamps of an HTTP request.
+// RequestTimes stores the timestamps of an HTTP request used to time latency.
 type RequestTimes struct {
-	Start time.Time // When the request started
-	//DNSDone            time.Time // When DNS resolution ended
-	//ConnectDone        time.Time // When the connection was established
-	//TLSHandshakeStart  time.Time // When the TLS handshake was started
-	//TLSHandshakeDone   time.Time // When the TLS handshake was completed
-	//GotConn            time.Time // When the connection was obtained
+	Start             time.Time // When the request started
 	FirstResponseByte time.Time // When the first byte of the response was received
 }
 
@@ -150,34 +145,6 @@ func traceRequest(times *RequestTimes) *httptrace.ClientTrace {
 		DNSStart: func(_ httptrace.DNSStartInfo) {
 			times.Start = time.Now()
 		},
-		/* DNSDone: func(_ httptrace.DNSDoneInfo) {
-			times.DNSDone = time.Now()
-		},
-		ConnectStart: func(_, _ string) {
-			if times.DNSDone.IsZero() {
-				times.DNSDone = time.Now()
-			}
-		},
-		ConnectDone: func(_, _ string, err error) {
-			if err != nil {
-				// TODO: handle error?
-				return
-			}
-			times.ConnectDone = time.Now()
-		},
-		TLSHandshakeStart: func() {
-			times.TLSHandshakeStart = time.Now()
-		},
-		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
-			if err != nil {
-				// TODO: handle error?
-				return
-			}
-			times.TLSHandshakeDone = time.Now()
-		},
-		GotConn: func(_ httptrace.GotConnInfo) {
-			times.GotConn = time.Now()
-		}, */
 		GotFirstResponseByte: func() {
 			times.FirstResponseByte = time.Now()
 		},
