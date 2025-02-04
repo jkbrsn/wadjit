@@ -3,7 +3,6 @@ package wadjit
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -46,8 +45,6 @@ type HTTPEndpoint struct {
 
 	id       xid.ID
 	respChan chan<- WatcherResponse
-
-	Metrics bool // Set to true to enable metrics collection
 }
 
 // Close closes the HTTP endpoint.
@@ -102,61 +99,50 @@ func (r httpRequest) Execute() error {
 		return err
 	}
 
+	// Add tracing to the request
 	timings := &RequestTimes{}
-	if r.endpoint.Metrics {
-		trace := traceRequest(timings)
+	trace := traceRequest(timings)
+	ctx := httptrace.WithClientTrace(request.Context(), trace)
+	request = request.WithContext(ctx)
 
-		// TODO: figure out how to deal with ContentTransfer and Total - read response before returning?
-
-		ctx := httptrace.WithClientTrace(request.Context(), trace)
-		request = request.WithContext(ctx)
-	}
-
+	// Add headers to the request
 	for key, values := range r.endpoint.Header {
 		for _, value := range values {
 			request.Header.Add(key, value)
 		}
 	}
 
+	// Send the request
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		r.respChan <- errorResponse(err, r.endpoint.id, r.endpoint.URL)
 		return err
 	}
 
-	watcherResp := WatcherResponse{
+	// Create a task response
+	taskResponse := NewHTTPTaskResponse(response)
+	taskResponse.latency = timings.FirstResponseByte.Sub(timings.Start)
+
+	// Send the response on the channel
+	r.respChan <- WatcherResponse{
 		WatcherID: r.endpoint.id,
 		URL:       r.endpoint.URL,
 		Err:       nil,
-		Payload:   NewHTTPTaskResponse(response),
+		Payload:   taskResponse,
 	}
-
-	// If metrics are enabled, read the response body to complete the timings
-	if r.endpoint.Metrics {
-		_, err := watcherResp.Data()
-		if err != nil {
-			r.respChan <- errorResponse(err, r.endpoint.id, r.endpoint.URL)
-		}
-		timings.ContentTransferred = time.Now()
-		//timings.Total = timings.ContentTransferred.Sub(timings.Start)
-	}
-
-	// Send the response on the channel
-	r.respChan <- watcherResp
 
 	return nil
 }
 
 // RequestTimes stores the timestamps of an HTTP request.
 type RequestTimes struct {
-	Start              time.Time // When the request started
-	DNSDone            time.Time // When DNS resolution ended
-	ConnectDone        time.Time // When the connection was established
-	TLSHandshakeStart  time.Time // When the TLS handshake was started
-	TLSHandshakeDone   time.Time // When the TLS handshake was completed
-	GotConn            time.Time // When the connection was obtained
-	FirstResponseByte  time.Time // When the first byte of the response was received
-	ContentTransferred time.Time // When the content was fully transferred
+	Start time.Time // When the request started
+	//DNSDone            time.Time // When DNS resolution ended
+	//ConnectDone        time.Time // When the connection was established
+	//TLSHandshakeStart  time.Time // When the TLS handshake was started
+	//TLSHandshakeDone   time.Time // When the TLS handshake was completed
+	//GotConn            time.Time // When the connection was obtained
+	FirstResponseByte time.Time // When the first byte of the response was received
 }
 
 func traceRequest(times *RequestTimes) *httptrace.ClientTrace {
@@ -164,7 +150,7 @@ func traceRequest(times *RequestTimes) *httptrace.ClientTrace {
 		DNSStart: func(_ httptrace.DNSStartInfo) {
 			times.Start = time.Now()
 		},
-		DNSDone: func(_ httptrace.DNSDoneInfo) {
+		/* DNSDone: func(_ httptrace.DNSDoneInfo) {
 			times.DNSDone = time.Now()
 		},
 		ConnectStart: func(_, _ string) {
@@ -191,7 +177,7 @@ func traceRequest(times *RequestTimes) *httptrace.ClientTrace {
 		},
 		GotConn: func(_ httptrace.GotConnInfo) {
 			times.GotConn = time.Now()
-		},
+		}, */
 		GotFirstResponseByte: func() {
 			times.FirstResponseByte = time.Now()
 		},

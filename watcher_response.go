@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/xid"
 )
@@ -82,6 +83,12 @@ type TaskResponse interface {
 type TaskResponseMetadata struct {
 	StatusCode int
 	Headers    http.Header
+
+	// Response latency is the time it took to receive the very first byte of the response. For
+	// HTTP, this is the time from sending the request to receiving the first byte of the response.
+	// For WS, this is the time from inital Dial to the first 101 response for a new conenction, or
+	// the time from sending a message to receiving a response on an existing connection.
+	Latency time.Duration
 }
 
 //
@@ -96,6 +103,7 @@ type HTTPTaskResponse struct {
 	dataOnce atomic.Bool // new flag to track if once was done
 	data     []byte
 	dataErr  error
+	latency  time.Duration
 
 	usedReader atomic.Bool // flags if we returned a Reader
 }
@@ -168,6 +176,7 @@ func (h *HTTPTaskResponse) Metadata() TaskResponseMetadata {
 	md := TaskResponseMetadata{
 		StatusCode: h.resp.StatusCode,
 		Headers:    http.Header{},
+		Latency:    h.latency,
 	}
 	for k, v := range h.resp.Header {
 		md.Headers[k] = v
