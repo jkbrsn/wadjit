@@ -143,7 +143,8 @@ type RequestTimes struct {
 
 func traceRequest(times *RequestTimes) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
-		DNSStart: func(_ httptrace.DNSStartInfo) {
+		// The earliest guaranteed callback is usually ConnectStart, so we set the start time there
+		ConnectStart: func(_, _ string) {
 			times.Start = time.Now()
 		},
 		GotFirstResponseByte: func() {

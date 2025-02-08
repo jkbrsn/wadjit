@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -93,6 +94,28 @@ type TaskResponseMetadata struct {
 	Size int64
 	// TimeReceived is the time the response was received.
 	TimeReceived time.Time
+}
+
+func (m TaskResponseMetadata) String() string {
+	buffer := bytes.Buffer{}
+	buffer.WriteString("{")
+	first := true
+	for key, values := range m.Headers {
+		for _, value := range values {
+			if !first {
+				buffer.WriteString(", ")
+			}
+			buffer.WriteString(key + ": " + value)
+			first = false
+		}
+	}
+	buffer.WriteString("}")
+	return "TaskResponseMetadata{" +
+		"StatusCode: " + strconv.Itoa(m.StatusCode) + ", " +
+		"Headers: " + buffer.String() + ", " +
+		"Latency: " + m.Latency.String() + ", " +
+		"Size: " + strconv.Itoa(int(m.Size)) + ", " +
+		"TimeReceived: " + m.TimeReceived.String() + "}"
 }
 
 //

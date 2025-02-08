@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
@@ -38,6 +39,55 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	err := endpoint.Initialize(xid.NilID(), responseChan)
 	assert.NoError(t, err)
 	assert.NotNil(t, endpoint.respChan)
+}
+
+func TestHTTPEndpointExecute(t *testing.T) {
+	server := echoServer()
+	defer server.Close()
+
+	url, err := url.Parse(server.URL)
+	assert.NoError(t, err, "failed to parse HTTP URL")
+	header := make(http.Header)
+	responseChan := make(chan WatcherResponse, 1)
+
+	header.Add("Content-Type", "application/json")
+
+	endpoint := &HTTPEndpoint{
+		URL:     url,
+		Header:  header,
+		Payload: []byte(`{"key":"value"}`),
+	}
+
+	err = endpoint.Initialize(xid.NilID(), responseChan)
+	assert.NoError(t, err)
+
+	task := endpoint.Task()
+	assert.NotNil(t, task)
+
+	go func() {
+		err := task.Execute()
+		assert.NoError(t, err)
+	}()
+
+	select {
+	case resp := <-responseChan:
+		assert.NotNil(t, resp)
+		assert.Equal(t, xid.NilID(), resp.WatcherID)
+		assert.Equal(t, url, resp.URL)
+		assert.NoError(t, resp.Err)
+		assert.NotNil(t, resp.Payload)
+		// Check the response metadata
+		metadata := resp.Metadata()
+		assert.NotNil(t, metadata)
+		assert.Equal(t, "application/json", metadata.Headers.Get("Content-Type"))
+		assert.Greater(t, metadata.Latency, time.Duration(0))
+		// Check the response data
+		data, err := resp.Data()
+		assert.NoError(t, err)
+		assert.JSONEq(t, `{"key":"value"}`, string(data))
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for response")
+	}
 }
 
 //

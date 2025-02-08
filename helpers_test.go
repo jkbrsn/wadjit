@@ -141,8 +141,12 @@ func echoServer() *httptest.Server {
 				w.Write([]byte("no payload found"))
 				return
 			}
-			// Echo payload back to the client
+			// Echo content type header back to the client
+			if r.Header.Get("Content-Type") == "application/json" {
+				w.Header().Set("Content-Type", "application/json")
+			}
 			w.WriteHeader(http.StatusOK)
+			// Echo payload back to the client
 			w.Write(payload)
 		}
 	}))
