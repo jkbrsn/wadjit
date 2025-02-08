@@ -2,7 +2,7 @@
 
 ## v0.2.0
 
-- Add timings to HTTP requests and WS sends, to be able to track latency of requests and WS messages
+- Add timings to WS sends, to be able to track latency of WS connects and messages
   - These metrics can go into the metadata of the responses
 - Improve readme
 - Clear in-code TODOs

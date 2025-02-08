@@ -143,6 +143,69 @@ func TestWSConnInitialize(t *testing.T) {
 	})
 }
 
+func TestWSEndpointExecute(t *testing.T) {
+	server := echoServer()
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[4:] + "/ws"
+	url, err := url.Parse(wsURL)
+	assert.NoError(t, err, "failed to parse URL")
+	header := make(http.Header)
+	responseChan := make(chan WatcherResponse)
+
+	t.Run("wsLongConn", func(t *testing.T) {
+		/* endpoint := &WSEndpoint{
+			URL:     url,
+			Header:  header,
+			mode:    ModeJSONRPC,
+			Payload: []byte(`{"key":"value"}`),
+		} */
+		// TODO: implement
+	})
+
+	t.Run("wsShortConn", func(t *testing.T) {
+		endpoint := &WSEndpoint{
+			URL:     url,
+			Header:  header,
+			mode:    ModeText,
+			Payload: []byte(`{"key":"value"}`),
+		}
+
+		err = endpoint.Initialize(xid.NilID(), responseChan)
+		assert.NoError(t, err)
+
+		task := endpoint.Task()
+		assert.NotNil(t, task)
+
+		go func() {
+			err := task.Execute()
+			assert.NoError(t, err)
+		}()
+
+		select {
+		case resp := <-responseChan:
+			assert.NotNil(t, resp)
+			assert.Equal(t, xid.NilID(), resp.WatcherID)
+			assert.Equal(t, url, resp.URL)
+			assert.NoError(t, resp.Err)
+			assert.NotNil(t, resp.Payload)
+			// Check the response metadata
+			metadata := resp.Metadata()
+			assert.NotNil(t, metadata)
+			assert.Nil(t, metadata.Headers)
+			assert.Zero(t, metadata.StatusCode)
+			assert.Equal(t, len(endpoint.Payload), int(metadata.Size))
+			assert.Greater(t, metadata.Latency, time.Duration(0))
+			// Check the response data
+			data, err := resp.Data()
+			assert.NoError(t, err)
+			assert.JSONEq(t, `{"key":"value"}`, string(data))
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for response")
+		}
+	})
+}
+
 func TestWSConnReconnect(t *testing.T) {
 	server := echoServer()
 	defer server.Close()
