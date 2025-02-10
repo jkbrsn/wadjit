@@ -154,13 +154,47 @@ func TestWSEndpointExecute(t *testing.T) {
 	responseChan := make(chan WatcherResponse)
 
 	t.Run("wsLongConn", func(t *testing.T) {
-		/* endpoint := &WSEndpoint{
+		// TODO: move this to a separate test, which does not rely on the echo server
+		payload := `{"id":1,"method":"echo","params":["test"],"jsonrpc":"2.0"}`
+		endpoint := &WSEndpoint{
 			URL:     url,
 			Header:  header,
 			mode:    ModeJSONRPC,
-			Payload: []byte(`{"key":"value"}`),
-		} */
-		// TODO: implement
+			Payload: []byte(payload),
+		}
+
+		err = endpoint.Initialize(xid.NilID(), responseChan)
+		assert.NoError(t, err)
+
+		task := endpoint.Task()
+		assert.NotNil(t, task)
+
+		go func() {
+			err := task.Execute()
+			assert.NoError(t, err)
+		}()
+
+		select {
+		case resp := <-responseChan:
+			assert.NotNil(t, resp)
+			assert.Equal(t, xid.NilID(), resp.WatcherID)
+			assert.Equal(t, url, resp.URL)
+			assert.NoError(t, resp.Err)
+			assert.NotNil(t, resp.Payload)
+			// Check the response metadata
+			metadata := resp.Metadata()
+			assert.NotNil(t, metadata)
+			assert.Nil(t, metadata.Headers)
+			assert.Zero(t, metadata.StatusCode)
+			assert.Equal(t, len(endpoint.Payload), int(metadata.Size))
+			assert.Greater(t, metadata.Latency, time.Duration(0))
+			// Check the response data
+			data, err := resp.Data()
+			assert.NoError(t, err)
+			assert.JSONEq(t, payload, string(data))
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for response")
+		}
 	})
 
 	t.Run("wsShortConn", func(t *testing.T) {

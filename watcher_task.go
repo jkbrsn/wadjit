@@ -3,8 +3,12 @@ package wadjit
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
+	"math/rand"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -12,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bytedance/sonic"
+	"github.com/bytedance/sonic/ast"
 	"github.com/gorilla/websocket"
 	"github.com/jakobilobi/go-taskman"
 	"github.com/rs/xid"
@@ -167,10 +173,11 @@ type WSEndpoint struct {
 	Header  http.Header
 	Payload []byte
 
-	conn   *websocket.Conn
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	conn         *websocket.Conn
+	ctx          context.Context
+	cancel       context.CancelFunc
+	inflightMsgs sync.Map // Key string to value time.Time
+	wg           sync.WaitGroup
 
 	id       xid.ID
 	respChan chan<- WatcherResponse
@@ -184,6 +191,13 @@ const (
 	ModeText                          // Text mode is the default mode
 	ModeJSONRPC                       // JSON RPC mode
 )
+
+// WSInflightMessage stores metadata about a message that is currently in-flight.
+type WSInflightMessage struct {
+	inflightID string
+	originalID interface{}
+	timeSent   time.Time
+}
 
 // Close closes the WebSocket connection, and cancels its context.
 func (e *WSEndpoint) Close() error {
@@ -250,19 +264,16 @@ func (e *WSEndpoint) Task() taskman.Task {
 	case ModeText:
 		return &wsShortConn{
 			wsEndpoint: e,
-			msg:        e.Payload,
 		}
 	case ModeJSONRPC:
 		return &wsLongConn{
 			wsEndpoint: e,
-			msg:        e.Payload,
 		}
 	default:
 		// Default to text mode
 		// TODO: this probably works alright, but maybe redesign to return error instead?
 		return &wsShortConn{
 			wsEndpoint: e,
-			msg:        e.Payload,
 		}
 	}
 }
@@ -376,32 +387,78 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 				// If there was an error, close the connection
 				return
 			}
+			timeRead := time.Now()
 
-			// TODO: if WSEndpoint is set to "JSON RPC mode":
-			// 1. unmarshal p into a JSON-RPC interface
-			// 2. check the id against the "inflight map" in WSEndpoint
-			// 3. if the id is found, get the inflight map metadata and delete the id in the map
-			// 4. restore original id and marshal the JSON-RPC interface back into text message
-			// 5. set metadata to the taskresponse: original id, duration between time sent and time received
+			// TODO: limit these steps to JSON RPC mode
 
-			// Send the message to the read channel
-			response := WatcherResponse{
-				WatcherID: e.id,
-				URL:       e.URL,
-				Err:       nil,
-				Payload:   NewWSTaskResponse(p),
+			// 1. Unmarshal p into a JSON-RPC response interface
+			jsonRPCResp := &JSONRPCResponse{}
+			err = jsonRPCResp.ParseFromBytes(p, len(p))
+			if err != nil {
+				// Send an error response
+				e.respChan <- errorResponse(err, e.id, e.URL)
+				return
 			}
-			e.respChan <- response
+
+			// 2. Check the ID against the inflight messages map
+			fmt.Printf("Received response: %v\n", jsonRPCResp)
+			if !jsonRPCResp.IsEmpty() {
+				responseID, err := jsonRPCResp.ID()
+				if err != nil {
+					// Send an error response
+					e.respChan <- errorResponse(err, e.id, e.URL)
+					return
+				}
+				responseIDStr := fmt.Sprintf("%v", responseID)
+
+				// 3. If the ID is known, get the inflight map metadata and delete the ID in the map
+				if inflightMsg, ok := e.inflightMsgs.Load(responseIDStr); ok {
+					inflightMsg := inflightMsg.(WSInflightMessage)
+					fmt.Printf("Received response for ID %v\n", inflightMsg)
+					latency := timeRead.Sub(inflightMsg.timeSent)
+					e.inflightMsgs.Delete(responseIDStr)
+
+					// 4. Restore original ID and marshal the JSON-RPC interface back into a byte slice
+					jsonRPCResp.id = inflightMsg.originalID
+					p, err = jsonRPCResp.MarshalJSON()
+					if err != nil {
+						// Send an error response
+						e.respChan <- errorResponse(err, e.id, e.URL)
+						return
+					}
+					// 5. set metadata to the taskresponse: original id, duration between time sent and time received
+					taskResponse := NewWSTaskResponse(p)
+					taskResponse.latency = latency
+					taskResponse.receivedAt = timeRead
+
+					// Send the message to the read channel
+					response := WatcherResponse{
+						WatcherID: e.id,
+						URL:       e.URL,
+						Err:       nil,
+						Payload:   taskResponse,
+					}
+					e.respChan <- response
+				}
+			} else {
+				// Send the message to the read channel
+				response := WatcherResponse{
+					WatcherID: e.id,
+					URL:       e.URL,
+					Err:       nil,
+					Payload:   NewWSTaskResponse(p),
+				}
+				e.respChan <- response
+			}
 		}
 	}
 }
 
 // wsLongConn is an implementation of taskman.Task that sends a message on a persistent
 // WebSocket connection.
+// TODO: rename/rebrand into a wsJSONRPC struct, or something like that
 type wsLongConn struct {
 	wsEndpoint *WSEndpoint
-
-	msg []byte
 }
 
 // Execute sends a message to the WebSocket endpoint.
@@ -422,17 +479,56 @@ func (wlc *wsLongConn) Execute() error {
 		// Endpoint shutting down, do nothing
 		return nil
 	default:
+		// Prepare shadowed variables for the message
+		var payload []byte
+		var err error
 
-		// TODO: if WSEndpoint is set to "JSON RPC mode":
-		// 1. unmarsal ws.msg into a JSON-RPC interface
-		// 2. set the id to a something randomly generated
-		// 3. store the id in a "inflight map" in WSEndpoint, with metadata: original id, time sent
-		// 4. marshal the JSON-RPC interface back into text message
+		// TODO: limit these steps to JSON RPC mode
+		if wlc.wsEndpoint.mode == ModeJSONRPC {
+			// 1. Unmarshal the msg into a JSON-RPC interface
+			jsonRPCReq := &JSONRPCRequest{}
+			if len(wlc.wsEndpoint.Payload) > 0 {
+				// TODO: optimize this to only get the ID?
+				err := jsonRPCReq.UnmarshalJSON(wlc.wsEndpoint.Payload)
+				if err != nil {
+					wlc.wsEndpoint.respChan <- errorResponse(err, wlc.wsEndpoint.id, wlc.wsEndpoint.URL)
+					return fmt.Errorf("failed to unmarshal JSON-RPC message: %w", err)
+				}
+			}
 
-		// TODO: add timings that can go into the task response
+			// 2. Generate a random ID and extract the original ID from the JSON-RPC interface
+			inflightID := xid.New().String()
+			var originalID interface{}
+			if !jsonRPCReq.IsEmpty() {
+				originalID = jsonRPCReq.ID
+				jsonRPCReq.ID = inflightID
+			}
+
+			// 3. store the id in a "inflight map" in WSEndpoint, with metadata: original id, time sent
+			inflightMsg := WSInflightMessage{
+				inflightID: inflightID,
+				originalID: originalID,
+			}
+
+			// 4. Marshal the updated JSON-RPC interface back into text message
+			payload, err = sonic.Marshal(jsonRPCReq)
+			if err != nil {
+				wlc.wsEndpoint.respChan <- errorResponse(err, wlc.wsEndpoint.id, wlc.wsEndpoint.URL)
+				return fmt.Errorf("failed to marshal JSON-RPC message: %w", err)
+			}
+			inflightMsg.timeSent = time.Now()
+
+			// 5. Store the inflight message in the WSEndpoint
+			wlc.wsEndpoint.inflightMsgs.Store(inflightID, inflightMsg)
+		}
+
+		// If the payload is nil, use the endpoint's payload
+		if payload == nil {
+			payload = wlc.wsEndpoint.Payload
+		}
 
 		// Write message to connection
-		if err := wlc.wsEndpoint.conn.WriteMessage(websocket.TextMessage, wlc.msg); err != nil {
+		if err := wlc.wsEndpoint.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				// This is an expected situation, handle gracefully
 			} else if strings.Contains(err.Error(), "websocket: close sent") {
@@ -459,8 +555,6 @@ func (wlc *wsLongConn) Execute() error {
 // for each message, or for situations where there is no way to link the response to the request.
 type wsShortConn struct {
 	wsEndpoint *WSEndpoint
-
-	msg []byte
 }
 
 // Execute sets up a WebSocket connection to the WebSocket endpoint, sends a message, and reads
@@ -492,7 +586,7 @@ func (wsc *wsShortConn) Execute() error {
 		handshakeTime := time.Since(start)
 
 		// 2. Write message to connection
-		if err := conn.WriteMessage(websocket.TextMessage, wsc.msg); err != nil {
+		if err := conn.WriteMessage(websocket.TextMessage, wsc.wsEndpoint.Payload); err != nil {
 			// An error is unexpected, since the connection was just established
 			err = fmt.Errorf("failed to write message: %w", err)
 			wsc.wsEndpoint.respChan <- errorResponse(err, wsc.wsEndpoint.id, wsc.wsEndpoint.URL)
@@ -543,4 +637,352 @@ func errorResponse(err error, id xid.ID, url *url.URL) WatcherResponse {
 		Err:       err,
 		Payload:   nil,
 	}
+}
+
+// TODO: move all below to separate file
+
+// JSON RPC
+
+// JSONRPCError represents a standard JSON RPC error.
+type JSONRPCError struct {
+	Code    int    `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+
+	// Errors might contain additional data, e.g. revert reason
+	Data interface{} `json:"data,omitempty"`
+}
+
+// JSONRPCRequest is a struct for JSON RPC requests.
+type JSONRPCRequest struct {
+	JSONRPC string        `json:"jsonrpc,omitempty"`
+	ID      interface{}   `json:"id,omitempty"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+}
+
+// IDString returns the ID as a string, regardless of its type.
+func (r *JSONRPCRequest) IDString() string {
+	switch id := r.ID.(type) {
+	case string:
+		return id
+	case int64:
+		return fmt.Sprintf("%d", id)
+	default:
+		return ""
+	}
+}
+
+// IsEmpty returns whether the JSON RPC request can be considered empty.
+func (r *JSONRPCRequest) IsEmpty() bool {
+	if r == nil {
+		return true
+	}
+
+	if r.Method == "" {
+		return true
+	}
+
+	return false
+}
+
+// UnmarshalJSON unmarshals a JSON RPC request using sonic. It includes two custom actions:
+// - Sets the JSON RPC version to 2.0.
+// - Unmarshals the ID seprately, to handle both string and float64 types.
+func (r *JSONRPCRequest) UnmarshalJSON(data []byte) error {
+	type Alias JSONRPCRequest
+	aux := &struct {
+		*Alias
+		ID json.RawMessage `json:"id,omitempty"`
+	}{
+		Alias: (*Alias)(r),
+	}
+	aux.JSONRPC = "2.0"
+
+	if err := sonic.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	// Unmarshal the ID separately
+	if aux.ID != nil {
+		var id interface{}
+		if err := sonic.Unmarshal(aux.ID, &id); err != nil {
+			return err
+		}
+		switch v := id.(type) {
+		case float64:
+			r.ID = int64(v)
+		case string:
+			r.ID = v
+		}
+	}
+
+	// Set a random ID if none is provided
+	if r.ID == nil {
+		r.ID = RandomJSONRPCID()
+	} else {
+		switch id := r.ID.(type) {
+		case string:
+			if id == "" {
+				r.ID = RandomJSONRPCID()
+			}
+		}
+	}
+
+	return nil
+}
+
+// JSONRPCResponse is a struct for JSON RPC responses.
+type JSONRPCResponse struct {
+	id      interface{}
+	idBytes []byte
+	muID    sync.RWMutex
+
+	Error    *JSONRPCError
+	errBytes []byte
+	muErr    sync.RWMutex
+
+	Result   []byte
+	muResult sync.RWMutex
+	astNode  *ast.Node
+}
+
+// ID returns the ID of the JSON RPC response.
+func (r *JSONRPCResponse) ID() (interface{}, error) {
+	r.muID.RLock()
+
+	if r.id != nil {
+		r.muID.RUnlock()
+		return r.id, nil
+	}
+	r.muID.RUnlock()
+
+	r.muID.Lock()
+	defer r.muID.Unlock()
+
+	if len(r.idBytes) == 0 {
+		return nil, errors.New("ID is nil")
+	}
+
+	err := sonic.Unmarshal(r.idBytes, &r.id)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unmarshal ID: %w", err)
+	}
+
+	return r.id, nil
+}
+
+// IsEmpty returns whether the JSON RPC response can be considered empty.
+func (r *JSONRPCResponse) IsEmpty() bool {
+	if r == nil {
+		return true
+	}
+
+	r.muResult.RLock()
+	defer r.muResult.RUnlock()
+
+	lnr := len(r.Result)
+	if lnr == 0 ||
+		(lnr == 4 && r.Result[0] == '"' && r.Result[1] == '0' && r.Result[2] == 'x' && r.Result[3] == '"') ||
+		(lnr == 4 && r.Result[0] == 'n' && r.Result[1] == 'u' && r.Result[2] == 'l' && r.Result[3] == 'l') ||
+		(lnr == 2 && r.Result[0] == '"' && r.Result[1] == '"') ||
+		(lnr == 2 && r.Result[0] == '[' && r.Result[1] == ']') ||
+		(lnr == 2 && r.Result[0] == '{' && r.Result[1] == '}') {
+		fmt.Print("something is nil")
+		return true
+	}
+
+	return false
+}
+
+// MarshalJSON marshals a JSON RPC response into a byte slice.
+func (r *JSONRPCResponse) MarshalJSON() ([]byte, error) {
+	r.muID.RLock()
+	defer r.muID.RUnlock()
+	r.muErr.RLock()
+	defer r.muErr.RUnlock()
+	r.muResult.RLock()
+	defer r.muResult.RUnlock()
+
+	response := map[string]interface{}{
+		"id":     r.id,
+		"error":  r.Error,
+		"result": r.Result,
+	}
+
+	return sonic.Marshal(response)
+}
+
+// ParseError parses an error from a raw JSON RPC response.
+func (r *JSONRPCResponse) ParseError(raw string) error {
+	r.muErr.Lock()
+	defer r.muErr.Unlock()
+
+	r.errBytes = nil
+
+	// First attempt to unmarshal the error as a typical JSON-RPC error
+	var rpcErr JSONRPCError
+	if err := sonic.UnmarshalString(raw, &rpcErr); err != nil {
+		// Special case: check for non-standard error structures in the raw data
+		if raw == "" || raw == "null" {
+			r.Error = &JSONRPCError{
+				int(-32603), // TODO: ServerSideException, use a custom error code enum
+				"unexpected empty response from upstream endpoint",
+				"",
+			}
+			return nil
+		}
+	}
+
+	// Check if the error is well-formed and has necessary fields
+	if rpcErr.Code != 0 || rpcErr.Message != "" {
+		r.Error = &rpcErr
+		r.errBytes = Str2Mem(raw)
+		return nil
+	}
+
+	// Handle case: numeric "code", "message", and "data"
+	caseNumerics := &struct {
+		Code    int    `json:"code,omitempty"`
+		Message string `json:"message,omitempty"`
+		Data    string `json:"data,omitempty"`
+	}{}
+	if err := sonic.UnmarshalString(raw, caseNumerics); err == nil {
+		if caseNumerics.Code != 0 || caseNumerics.Message != "" || caseNumerics.Data != "" {
+			r.Error = &JSONRPCError{
+				caseNumerics.Code,
+				caseNumerics.Message,
+				caseNumerics.Data,
+			}
+
+			return nil
+		}
+	}
+
+	// Handle case: only "error" field as a string
+	caseErrorStr := &struct {
+		Error string `json:"error"`
+	}{}
+	if err := sonic.UnmarshalString(raw, caseErrorStr); err == nil && caseErrorStr.Error != "" {
+		r.Error = &JSONRPCError{
+			int(-32603), // TODO: ServerSideException, use a custom error code enum
+			caseErrorStr.Error,
+			"",
+		}
+		return nil
+	}
+
+	// Handle case: no match, treat the raw data as message string
+	r.Error = &JSONRPCError{
+		int(-32603), // TODO: ServerSideException, use a custom error code enum
+		raw,
+		"",
+	}
+	return nil
+}
+
+// ParseFromStream parses a JSON RPC response from a stream.
+func (r *JSONRPCResponse) ParseFromStream(reader io.Reader, expectedSize int) error {
+	// 16KB chunks by default
+	chunkSize := 16 * 1024
+	data, err := ReadAll(reader, int64(chunkSize), expectedSize)
+	if err != nil {
+		return err
+	}
+
+	return r.ParseFromBytes(data, expectedSize)
+}
+
+// ParseFromStream parses a JSON RPC response from a byte slice.
+func (r *JSONRPCResponse) ParseFromBytes(data []byte, expectedSize int) error {
+	// Parse the JSON data into an ast.Node
+	searcher := ast.NewSearcher(Mem2Str(data))
+	searcher.CopyReturn = false
+	searcher.ConcurrentRead = false
+	searcher.ValidateJSON = false
+
+	// Extract the "id" field
+	if idNode, err := searcher.GetByPath("id"); err == nil {
+		if rawID, err := idNode.Raw(); err == nil {
+			r.muID.Lock()
+			defer r.muID.Unlock()
+			r.idBytes = Str2Mem(rawID)
+		}
+	}
+
+	// Extract the "result" or "error" field
+	if resultNode, err := searcher.GetByPath("result"); err == nil {
+		if rawResult, err := resultNode.Raw(); err == nil {
+			r.muResult.Lock()
+			defer r.muResult.Unlock()
+			r.Result = Str2Mem(rawResult)
+			r.astNode = &resultNode
+		} else {
+			return err
+		}
+	} else if errorNode, err := searcher.GetByPath("error"); err == nil {
+		if rawError, err := errorNode.Raw(); err == nil {
+			if err := r.ParseError(rawError); err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	} else if err := r.ParseError(Mem2Str(data)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// HELPERS
+
+// RandomJSONRPCID returns a value appropriate for a JSON RPC ID field, e.g. a int64 type but
+// with only 32 bits range, to avoid overflow during conversions and reading/sending to upstreams.
+func RandomJSONRPCID() int64 {
+	return int64(rand.Intn(math.MaxInt32)) // #nosec G404
+}
+
+// ReadAll reads all data from the given reader and returns it as a byte slice.
+func ReadAll(reader io.Reader, chunkSize int64, expectedSize int) ([]byte, error) {
+	// 16KB buffer by default
+	buffer := bytes.NewBuffer(make([]byte, 0, 16*1024))
+
+	// TODO: move this size limit to a config setting
+	upperSizeLimit := 50 * 1024 * 1024 // 50MB cap to avoid DDoS by a corrupt/malicious upstream
+	if expectedSize > 0 && expectedSize < upperSizeLimit {
+		n := expectedSize - buffer.Cap()
+		if n > 0 {
+			buffer.Grow(n)
+		}
+	}
+
+	// Read data in chunks
+	for {
+		n, err := io.CopyN(buffer, reader, chunkSize)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		if n == 0 {
+			break
+		}
+	}
+
+	return buffer.Bytes(), nil
+}
+
+// Mem2Str safely converts a byte slice to a string without copying the underlying data.
+// This is a read-only operation, as strings are immutable in Go.
+// Note: Avoid modifying the original byte slice after conversion.
+func Mem2Str(b []byte) string {
+	return string(b)
+}
+
+// Str2Mem safely converts a string to a byte slice without copying the underlying data.
+// The resulting byte slice should only be used for read operations to avoid violating
+// Go's string immutability guarantee.
+func Str2Mem(s string) []byte {
+	return []byte(s)
 }
