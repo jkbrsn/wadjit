@@ -108,11 +108,11 @@ var upgrader = websocket.Upgrader{
 
 // echoServer creates a test server that echos back the payload sent to it.
 func echoServer() *httptest.Server {
-	// Create a test server with a custom handler.
+	// Create a test server with a custom handler
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/ws":
-			// Handle WebSocket upgrade.
+			// Handle WebSocket upgrade
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
@@ -148,6 +148,114 @@ func echoServer() *httptest.Server {
 			w.WriteHeader(http.StatusOK)
 			// Echo payload back to the client
 			w.Write(payload)
+		}
+	}))
+
+	return server
+}
+
+// jsonRPCServer creates a test server that responds to JSON-RPC requests.
+// The server echoes back the entire message sent to it under the "result" key, and the request ID under
+// the "id" key. If the payload is not a valid JSON-RPC request, the server will respond with a parse
+// error as per the JSON-RPC 2.0 specification.
+func jsonRPCServer() *httptest.Server {
+	// Create a test server with a custom handler
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ws":
+			// Handle WebSocket upgrade
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
+				return
+			}
+			defer conn.Close()
+
+			// Echo messages back to the client as the result of a JSON-RPC request
+			for {
+				mt, message, err := conn.ReadMessage()
+				if err != nil {
+					return
+				}
+				// Parse the message as a JSON-RPC request
+				var req JSONRPCRequest
+				err = req.UnmarshalJSON(message)
+				if err != nil {
+					// Respond with a parse error
+					resp := JSONRPCResponse{
+						Error: &JSONRPCError{
+							Code:    -32700,
+							Message: "Parse error",
+						},
+					}
+					respBytes, _ := resp.MarshalJSON()
+					err = conn.WriteMessage(mt, respBytes)
+					if err != nil {
+						return
+					}
+					continue
+				}
+				// Echo the request back to the client
+				resp := JSONRPCResponse{
+					id:     req.ID,
+					Error:  nil,
+					Result: message,
+				}
+				respBytes, _ := resp.MarshalJSON()
+				err = conn.WriteMessage(mt, respBytes)
+				if err != nil {
+					return
+				}
+			}
+
+		default:
+			// Read payload from the client
+			payload, err := io.ReadAll(r.Body)
+			if err != nil {
+				// Write harcoded message to the client
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("no payload found"))
+				return
+			}
+
+			// JSON header not found
+			// TODO: is this correct?
+			if r.Header.Get("Content-Type") != "application/json" {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("no json header found"))
+				return
+			}
+
+			// Parse the payload as a JSON-RPC request
+			var req JSONRPCRequest
+			err = req.UnmarshalJSON(payload)
+			if err != nil {
+				// Respond with a parse error
+				resp := JSONRPCResponse{
+					Error: &JSONRPCError{
+						Code:    -32700,
+						Message: "Parse error",
+					},
+				}
+				respBytes, _ := resp.MarshalJSON()
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(respBytes)
+				return
+			}
+
+			// Build the response
+			resp := JSONRPCResponse{
+				id:     req.ID,
+				Error:  nil,
+				Result: payload,
+			}
+			respBytes, _ := resp.MarshalJSON()
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			// Echo payload back to the client as the result of a JSON-RPC request
+			w.Write(respBytes)
 		}
 	}))
 

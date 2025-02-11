@@ -176,7 +176,7 @@ type WSEndpoint struct {
 	conn         *websocket.Conn
 	ctx          context.Context
 	cancel       context.CancelFunc
-	inflightMsgs sync.Map // Key string to value time.Time
+	inflightMsgs sync.Map // Key string to value WSInflightMessage
 	wg           sync.WaitGroup
 
 	id       xid.ID
@@ -401,7 +401,6 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 			}
 
 			// 2. Check the ID against the inflight messages map
-			fmt.Printf("Received response: %v\n", jsonRPCResp)
 			if !jsonRPCResp.IsEmpty() {
 				responseID, err := jsonRPCResp.ID()
 				if err != nil {
@@ -414,7 +413,6 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 				// 3. If the ID is known, get the inflight map metadata and delete the ID in the map
 				if inflightMsg, ok := e.inflightMsgs.Load(responseIDStr); ok {
 					inflightMsg := inflightMsg.(WSInflightMessage)
-					fmt.Printf("Received response for ID %v\n", inflightMsg)
 					latency := timeRead.Sub(inflightMsg.timeSent)
 					e.inflightMsgs.Delete(responseIDStr)
 
@@ -741,9 +739,18 @@ type JSONRPCResponse struct {
 	errBytes []byte
 	muErr    sync.RWMutex
 
-	Result   []byte
+	Result   json.RawMessage
 	muResult sync.RWMutex
 	astNode  *ast.Node
+}
+
+// jsonRPCResponse is an internal representation of a JSON RPC response.
+// This is decoupled from the public struct to allow for custom handling of
+type jsonRPCResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      interface{}     `json:"id,omitempty"`
+	Error   *JSONRPCError   `json:"error,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
 }
 
 // ID returns the ID of the JSON RPC response.
@@ -796,20 +803,34 @@ func (r *JSONRPCResponse) IsEmpty() bool {
 
 // MarshalJSON marshals a JSON RPC response into a byte slice.
 func (r *JSONRPCResponse) MarshalJSON() ([]byte, error) {
+	// Retrieve the id value.
 	r.muID.RLock()
-	defer r.muID.RUnlock()
-	r.muErr.RLock()
-	defer r.muErr.RUnlock()
-	r.muResult.RLock()
-	defer r.muResult.RUnlock()
+	id := r.id
+	r.muID.RUnlock()
 
-	response := map[string]interface{}{
-		"id":     r.id,
-		"error":  r.Error,
-		"result": r.Result,
+	// Retrieve the error value.
+	r.muErr.RLock()
+	errVal := r.Error
+	r.muErr.RUnlock()
+
+	// Retrieve the result. Since it is already a JSON encoded []byte,
+	// we wrap it as json.RawMessage to prevent sonic from re-encoding it.
+	r.muResult.RLock()
+	var result json.RawMessage
+	if len(r.Result) > 0 {
+		result = json.RawMessage(r.Result)
+	}
+	r.muResult.RUnlock()
+
+	// Build the output struct. Fields with zero values are omitted.
+	out := jsonRPCResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error:   errVal,
+		Result:  result,
 	}
 
-	return sonic.Marshal(response)
+	return sonic.Marshal(out)
 }
 
 // ParseError parses an error from a raw JSON RPC response.
