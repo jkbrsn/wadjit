@@ -182,9 +182,10 @@ type WSEndpoint struct {
 type WSEndpointMode int
 
 const (
-	ModeUnknown WSEndpointMode = iota // Defaults to ModeText
-	ModeText                          // Text mode is the default mode
-	ModeJSONRPC                       // JSON RPC mode
+	ModeUnknown      WSEndpointMode = iota // Defaults to ModeText
+	OneHitText                             // One hit text mode is the default mode
+	OneHitJSONRPC                          // One hit JSON RPC mode
+	LongLivedJSONRPC                       // Long lived JSON RPC mode
 )
 
 // WSInflightMessage stores metadata about a message that is currently in-flight.
@@ -235,18 +236,19 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 	e.mu.Unlock()
 
 	switch e.mode {
-	case ModeJSONRPC:
+	case LongLivedJSONRPC:
 		err := e.connect()
 		if err != nil {
 			return fmt.Errorf("failed to connect when initializing: %w", err)
 		}
-	case ModeText:
-		// Text mode does not require a connection to be established, so do nothing
+	case OneHitJSONRPC:
+		fallthrough
+	case OneHitText:
+		// One hit modes do not require a connection to be established, so do nothing
 	default:
-		// Default to text mode, since its task does not require anything outside of its own scope
-		// TODO: make default detect the proper mode based on analysis of the payload, instead of defaulting to text mode
+		// Default to one hit text mode, since its a mode not requiring anything logic outside of its own scope
 		e.mu.Lock()
-		e.mode = ModeText
+		e.mode = OneHitText
 		e.mu.Unlock()
 	}
 
@@ -256,11 +258,11 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 // Task returns a taskman.Task that sends a message to the WebSocket endpoint.
 func (e *WSEndpoint) Task() taskman.Task {
 	switch e.mode {
-	case ModeText:
+	case OneHitText:
 		return &wsShortConn{
 			wsEndpoint: e,
 		}
-	case ModeJSONRPC:
+	case LongLivedJSONRPC:
 		return &wsLongConn{
 			wsEndpoint: e,
 		}
@@ -288,7 +290,7 @@ func (e *WSEndpoint) Validate() error {
 // connect establishes a connection to the WebSocket endpoint. If already connected,
 // this function does nothing.
 func (e *WSEndpoint) connect() error {
-	if e.mode == ModeText {
+	if e.mode == OneHitText || e.mode == OneHitJSONRPC {
 		return errors.New("cannot establish long connection in text mode")
 	}
 	e.mu.Lock()
@@ -315,7 +317,7 @@ func (e *WSEndpoint) connect() error {
 
 // reconnect closes the current connection and establishes a new one.
 func (e *WSEndpoint) reconnect() error {
-	if e.mode == ModeText {
+	if e.mode == OneHitText || e.mode == OneHitJSONRPC {
 		return errors.New("cannot re-establish long connection in text mode")
 	}
 	e.mu.Lock()
@@ -477,7 +479,7 @@ func (wlc *wsLongConn) Execute() error {
 		var err error
 
 		// TODO: limit these steps to JSON RPC mode
-		if wlc.wsEndpoint.mode == ModeJSONRPC {
+		if wlc.wsEndpoint.mode == LongLivedJSONRPC {
 			// 1. Unmarshal the msg into a JSON-RPC interface
 			jsonRPCReq := &JSONRPCRequest{}
 			if len(wlc.wsEndpoint.Payload) > 0 {

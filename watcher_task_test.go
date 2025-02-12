@@ -105,11 +105,11 @@ func TestWSConnInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	t.Run("ModeJSONRPC", func(t *testing.T) {
+	t.Run("LongLivedJSONRPC", func(t *testing.T) {
 		conn := &WSEndpoint{
 			URL:    url,
 			Header: header,
-			mode:   ModeJSONRPC,
+			mode:   LongLivedJSONRPC,
 		}
 
 		assert.Equal(t, url, conn.URL)
@@ -124,11 +124,11 @@ func TestWSConnInitialize(t *testing.T) {
 		assert.NotNil(t, conn.cancel)
 	})
 
-	t.Run("ModeText", func(t *testing.T) {
+	t.Run("OneHitText", func(t *testing.T) {
 		conn := &WSEndpoint{
 			URL:    url,
 			Header: header,
-			mode:   ModeText,
+			mode:   OneHitText,
 		}
 
 		assert.Equal(t, url, conn.URL)
@@ -160,7 +160,7 @@ func TestWSEndpointExecutewsLongConn(t *testing.T) {
 	endpoint := &WSEndpoint{
 		URL:     url,
 		Header:  header,
-		mode:    ModeJSONRPC,
+		mode:    LongLivedJSONRPC,
 		Payload: []byte(payload),
 	}
 
@@ -238,7 +238,7 @@ func TestWSEndpointExecutewsShortConn(t *testing.T) {
 	endpoint := &WSEndpoint{
 		URL:     url,
 		Header:  header,
-		mode:    ModeText,
+		mode:    OneHitText,
 		Payload: []byte(`{"key":"value"}`),
 	}
 
@@ -289,7 +289,7 @@ func TestWSConnReconnect(t *testing.T) {
 	conn := &WSEndpoint{
 		URL:    url,
 		Header: header,
-		mode:   ModeJSONRPC,
+		mode:   LongLivedJSONRPC,
 	}
 
 	err = conn.Initialize(xid.NilID(), responseChan)
