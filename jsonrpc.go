@@ -395,6 +395,21 @@ func (r *JSONRPCResponse) String() string {
 	return fmt.Sprintf("ID: %v, Error: %v, Result bytes: %d", r.id, r.Error, len(r.Result))
 }
 
+// JSONRPCResponseFromStream creates a JSON RPC response from a stream.
+func JSONRPCResponseFromStream(body io.ReadCloser, expectedSize int) (*JSONRPCResponse, error) {
+	resp := &JSONRPCResponse{}
+
+	if body != nil {
+		err := resp.ParseFromStream(body, expectedSize)
+		if err != nil {
+			return nil, err
+		}
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("empty body")
+}
+
 //
 // HELPERS
 //
