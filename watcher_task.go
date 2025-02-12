@@ -184,7 +184,6 @@ type WSEndpointMode int
 const (
 	ModeUnknown      WSEndpointMode = iota // Defaults to ModeText
 	OneHitText                             // One hit text mode is the default mode
-	OneHitJSONRPC                          // One hit JSON RPC mode
 	LongLivedJSONRPC                       // Long lived JSON RPC mode
 )
 
@@ -241,8 +240,6 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 		if err != nil {
 			return fmt.Errorf("failed to connect when initializing: %w", err)
 		}
-	case OneHitJSONRPC:
-		fallthrough
 	case OneHitText:
 		// One hit modes do not require a connection to be established, so do nothing
 	default:
@@ -290,7 +287,7 @@ func (e *WSEndpoint) Validate() error {
 // connect establishes a connection to the WebSocket endpoint. If already connected,
 // this function does nothing.
 func (e *WSEndpoint) connect() error {
-	if e.mode == OneHitText || e.mode == OneHitJSONRPC {
+	if e.mode == OneHitText {
 		return errors.New("cannot establish long connection in text mode")
 	}
 	e.mu.Lock()
@@ -317,7 +314,7 @@ func (e *WSEndpoint) connect() error {
 
 // reconnect closes the current connection and establishes a new one.
 func (e *WSEndpoint) reconnect() error {
-	if e.mode == OneHitText || e.mode == OneHitJSONRPC {
+	if e.mode == OneHitText {
 		return errors.New("cannot re-establish long connection in text mode")
 	}
 	e.mu.Lock()
