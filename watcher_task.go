@@ -182,7 +182,7 @@ type WSEndpoint struct {
 type WSEndpointMode int
 
 const (
-	ModeUnknown      WSEndpointMode = iota // Defaults to ModeText
+	ModeUnknown      WSEndpointMode = iota // Defaults to OneHitText
 	OneHitText                             // One hit text mode is the default mode
 	LongLivedJSONRPC                       // Long lived JSON RPC mode
 )
@@ -203,14 +203,14 @@ func (e *WSEndpoint) Close() error {
 	if e.conn == nil {
 		return nil
 	} else {
-		// Close the connection
+		// Send a close message
 		formattedCloseMessage := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
 		deadline := time.Now().Add(3 * time.Second)
 		err := e.conn.WriteControl(websocket.CloseMessage, formattedCloseMessage, deadline)
 		if err != nil {
 			return err
 		}
-		// TODO: formally wait for response?
+		// Close the connection
 		err = e.conn.Close()
 		if err != nil {
 			return err
@@ -256,17 +256,17 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 func (e *WSEndpoint) Task() taskman.Task {
 	switch e.mode {
 	case OneHitText:
-		return &wsShortConn{
+		return &wsOneHit{
 			wsEndpoint: e,
 		}
 	case LongLivedJSONRPC:
-		return &wsLongConn{
+		return &wsLongLived{
+			protocol:   JSONRPC,
 			wsEndpoint: e,
 		}
 	default:
-		// Default to text mode
-		// TODO: this probably works alright, but maybe redesign to return error instead?
-		return &wsShortConn{
+		// Default to one hit mode since it should work for most implementations
+		return &wsOneHit{
 			wsEndpoint: e,
 		}
 	}
@@ -287,8 +287,8 @@ func (e *WSEndpoint) Validate() error {
 // connect establishes a connection to the WebSocket endpoint. If already connected,
 // this function does nothing.
 func (e *WSEndpoint) connect() error {
-	if e.mode == OneHitText {
-		return errors.New("cannot establish long connection in text mode")
+	if e.mode != LongLivedJSONRPC {
+		return errors.New("cannot establish long lived connection for non-long mode")
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -314,8 +314,8 @@ func (e *WSEndpoint) connect() error {
 
 // reconnect closes the current connection and establishes a new one.
 func (e *WSEndpoint) reconnect() error {
-	if e.mode == OneHitText {
-		return errors.New("cannot re-establish long connection in text mode")
+	if e.mode != LongLivedJSONRPC {
+		return errors.New("can only reconnect for long-lived connections")
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -383,54 +383,54 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 			}
 			timeRead := time.Now()
 
-			// TODO: limit these steps to JSON RPC mode
-
-			// 1. Unmarshal p into a JSON-RPC response interface
-			jsonRPCResp := &JSONRPCResponse{}
-			err = jsonRPCResp.ParseFromBytes(p, len(p))
-			if err != nil {
-				// Send an error response
-				e.respChan <- errorResponse(err, e.id, e.URL)
-				return
-			}
-
-			// 2. Check the ID against the inflight messages map
-			if !jsonRPCResp.IsEmpty() {
-				responseID := jsonRPCResp.ID()
-				if responseID == nil {
+			if e.mode == LongLivedJSONRPC {
+				// 1. Unmarshal p into a JSON-RPC response interface
+				jsonRPCResp := &JSONRPCResponse{}
+				err = jsonRPCResp.ParseFromBytes(p, len(p))
+				if err != nil {
 					// Send an error response
 					e.respChan <- errorResponse(err, e.id, e.URL)
 					return
 				}
-				responseIDStr := fmt.Sprintf("%v", responseID)
 
-				// 3. If the ID is known, get the inflight map metadata and delete the ID in the map
-				if inflightMsg, ok := e.inflightMsgs.Load(responseIDStr); ok {
-					inflightMsg := inflightMsg.(WSInflightMessage)
-					latency := timeRead.Sub(inflightMsg.timeSent)
-					e.inflightMsgs.Delete(responseIDStr)
-
-					// 4. Restore original ID and marshal the JSON-RPC interface back into a byte slice
-					jsonRPCResp.id = inflightMsg.originalID
-					p, err = jsonRPCResp.MarshalJSON()
-					if err != nil {
+				// 2. Check the ID against the inflight messages map
+				if !jsonRPCResp.IsEmpty() {
+					responseID := jsonRPCResp.ID()
+					if responseID == nil {
 						// Send an error response
 						e.respChan <- errorResponse(err, e.id, e.URL)
 						return
 					}
-					// 5. set metadata to the taskresponse: original id, duration between time sent and time received
-					taskResponse := NewWSTaskResponse(p)
-					taskResponse.latency = latency
-					taskResponse.receivedAt = timeRead
+					responseIDStr := fmt.Sprintf("%v", responseID)
 
-					// Send the message to the read channel
-					response := WatcherResponse{
-						WatcherID: e.id,
-						URL:       e.URL,
-						Err:       nil,
-						Payload:   taskResponse,
+					// 3. If the ID is known, get the inflight map metadata and delete the ID in the map
+					if inflightMsg, ok := e.inflightMsgs.Load(responseIDStr); ok {
+						inflightMsg := inflightMsg.(WSInflightMessage)
+						latency := timeRead.Sub(inflightMsg.timeSent)
+						e.inflightMsgs.Delete(responseIDStr)
+
+						// 4. Restore original ID and marshal the JSON-RPC interface back into a byte slice
+						jsonRPCResp.id = inflightMsg.originalID
+						p, err = jsonRPCResp.MarshalJSON()
+						if err != nil {
+							// Send an error response
+							e.respChan <- errorResponse(err, e.id, e.URL)
+							return
+						}
+						// 5. set metadata to the taskresponse: original id, duration between time sent and time received
+						taskResponse := NewWSTaskResponse(p)
+						taskResponse.latency = latency
+						taskResponse.receivedAt = timeRead
+
+						// Send the message to the read channel
+						response := WatcherResponse{
+							WatcherID: e.id,
+							URL:       e.URL,
+							Err:       nil,
+							Payload:   taskResponse,
+						}
+						e.respChan <- response
 					}
-					e.respChan <- response
 				}
 			} else {
 				// Send the message to the read channel
@@ -446,28 +446,41 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 	}
 }
 
-// wsLongConn is an implementation of taskman.Task that sends a message on a persistent
+// wsLongLived is an implementation of taskman.Task that sends a message on a persistent
 // WebSocket connection.
-// TODO: rename/rebrand into a wsJSONRPC struct, or something like that
-type wsLongConn struct {
+type wsLongLived struct {
 	wsEndpoint *WSEndpoint
+	protocol   wsLongLivedProtocol
 }
+
+// wsLongLivedProtocol is an enum for the communication protocol used by the long-lived
+// WebSocket connection.
+type wsLongLivedProtocol int
+
+const (
+	UnknownProtocol wsLongLivedProtocol = iota
+	JSONRPC
+)
 
 // Execute sends a message to the WebSocket endpoint.
 // Note: for concurrency safety, the connection's WriteMessage method is used exclusively here.
-func (wlc *wsLongConn) Execute() error {
+func (ll *wsLongLived) Execute() error {
+	if ll.protocol != JSONRPC {
+		return errors.New("unsupported protocol")
+	}
+
 	// If the connection is closed, try to reconnect
-	if wlc.wsEndpoint.conn == nil {
-		if err := wlc.wsEndpoint.reconnect(); err != nil {
+	if ll.wsEndpoint.conn == nil {
+		if err := ll.wsEndpoint.reconnect(); err != nil {
 			return err
 		}
 	}
 
-	wlc.wsEndpoint.lock()
-	defer wlc.wsEndpoint.unlock()
+	ll.wsEndpoint.lock()
+	defer ll.wsEndpoint.unlock()
 
 	select {
-	case <-wlc.wsEndpoint.ctx.Done():
+	case <-ll.wsEndpoint.ctx.Done():
 		// Endpoint shutting down, do nothing
 		return nil
 	default:
@@ -475,52 +488,49 @@ func (wlc *wsLongConn) Execute() error {
 		var payload []byte
 		var err error
 
-		// TODO: limit these steps to JSON RPC mode
-		if wlc.wsEndpoint.mode == LongLivedJSONRPC {
-			// 1. Unmarshal the msg into a JSON-RPC interface
-			jsonRPCReq := &JSONRPCRequest{}
-			if len(wlc.wsEndpoint.Payload) > 0 {
-				// TODO: optimize this to only get the ID?
-				err := jsonRPCReq.UnmarshalJSON(wlc.wsEndpoint.Payload)
-				if err != nil {
-					wlc.wsEndpoint.respChan <- errorResponse(err, wlc.wsEndpoint.id, wlc.wsEndpoint.URL)
-					return fmt.Errorf("failed to unmarshal JSON-RPC message: %w", err)
-				}
-			}
-
-			// 2. Generate a random ID and extract the original ID from the JSON-RPC interface
-			inflightID := xid.New().String()
-			var originalID interface{}
-			if !jsonRPCReq.IsEmpty() {
-				originalID = jsonRPCReq.ID
-				jsonRPCReq.ID = inflightID
-			}
-
-			// 3. store the id in a "inflight map" in WSEndpoint, with metadata: original id, time sent
-			inflightMsg := WSInflightMessage{
-				inflightID: inflightID,
-				originalID: originalID,
-			}
-
-			// 4. Marshal the updated JSON-RPC interface back into text message
-			payload, err = sonic.Marshal(jsonRPCReq)
+		// 1. Unmarshal the msg into a JSON-RPC interface
+		jsonRPCReq := &JSONRPCRequest{}
+		if len(ll.wsEndpoint.Payload) > 0 {
+			// TODO: optimize this to only get the ID?
+			err := jsonRPCReq.UnmarshalJSON(ll.wsEndpoint.Payload)
 			if err != nil {
-				wlc.wsEndpoint.respChan <- errorResponse(err, wlc.wsEndpoint.id, wlc.wsEndpoint.URL)
-				return fmt.Errorf("failed to marshal JSON-RPC message: %w", err)
+				ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.id, ll.wsEndpoint.URL)
+				return fmt.Errorf("failed to unmarshal JSON-RPC message: %w", err)
 			}
-			inflightMsg.timeSent = time.Now()
-
-			// 5. Store the inflight message in the WSEndpoint
-			wlc.wsEndpoint.inflightMsgs.Store(inflightID, inflightMsg)
 		}
+
+		// 2. Generate a random ID and extract the original ID from the JSON-RPC interface
+		inflightID := xid.New().String()
+		var originalID interface{}
+		if !jsonRPCReq.IsEmpty() {
+			originalID = jsonRPCReq.ID
+			jsonRPCReq.ID = inflightID
+		}
+
+		// 3. store the id in a "inflight map" in WSEndpoint, with metadata: original id, time sent
+		inflightMsg := WSInflightMessage{
+			inflightID: inflightID,
+			originalID: originalID,
+		}
+
+		// 4. Marshal the updated JSON-RPC interface back into text message
+		payload, err = sonic.Marshal(jsonRPCReq)
+		if err != nil {
+			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.id, ll.wsEndpoint.URL)
+			return fmt.Errorf("failed to marshal JSON-RPC message: %w", err)
+		}
+		inflightMsg.timeSent = time.Now()
+
+		// 5. Store the inflight message in the WSEndpoint
+		ll.wsEndpoint.inflightMsgs.Store(inflightID, inflightMsg)
 
 		// If the payload is nil, use the endpoint's payload
 		if payload == nil {
-			payload = wlc.wsEndpoint.Payload
+			payload = ll.wsEndpoint.Payload
 		}
 
 		// Write message to connection
-		if err := wlc.wsEndpoint.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+		if err := ll.wsEndpoint.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				// This is an expected situation, handle gracefully
 			} else if strings.Contains(err.Error(), "websocket: close sent") {
@@ -531,10 +541,10 @@ func (wlc *wsLongConn) Execute() error {
 			}
 
 			// If there was an error, close the connection
-			wlc.wsEndpoint.Close()
+			ll.wsEndpoint.Close()
 
 			// Send an error response
-			wlc.wsEndpoint.respChan <- errorResponse(err, wlc.wsEndpoint.id, wlc.wsEndpoint.URL)
+			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.id, ll.wsEndpoint.URL)
 			return fmt.Errorf("failed to write message: %w", err)
 		}
 	}
@@ -542,46 +552,46 @@ func (wlc *wsLongConn) Execute() error {
 	return nil
 }
 
-// wsShortConn is an implementation of taskman.Task that sets up a short-lived WebSocket connection
+// wsOneHit is an implementation of taskman.Task that sets up a short-lived WebSocket connection
 // to send a message to the endpoint. This is useful for endpoints that require a new connection
 // for each message, or for situations where there is no way to link the response to the request.
-type wsShortConn struct {
+type wsOneHit struct {
 	wsEndpoint *WSEndpoint
 }
 
 // Execute sets up a WebSocket connection to the WebSocket endpoint, sends a message, and reads
 // the response.
 // Note: for concurrency safety, the connection's WriteMessage method is used exclusively here.
-func (wsc *wsShortConn) Execute() error {
+func (oh *wsOneHit) Execute() error {
 	// The connection should not be open
-	if wsc.wsEndpoint.conn != nil {
+	if oh.wsEndpoint.conn != nil {
 		return errors.New("connection is already open")
 	}
 
-	wsc.wsEndpoint.lock()
-	defer wsc.wsEndpoint.unlock()
+	oh.wsEndpoint.lock()
+	defer oh.wsEndpoint.unlock()
 
 	select {
-	case <-wsc.wsEndpoint.ctx.Done():
+	case <-oh.wsEndpoint.ctx.Done():
 		// Endpoint shutting down, do nothing
 		return nil
 	default:
 		// 1. Establish a new connection
 		start := time.Now()
-		conn, _, err := websocket.DefaultDialer.Dial(wsc.wsEndpoint.URL.String(), wsc.wsEndpoint.Header)
+		conn, _, err := websocket.DefaultDialer.Dial(oh.wsEndpoint.URL.String(), oh.wsEndpoint.Header)
 		if err != nil {
 			err = fmt.Errorf("failed to dial: %w", err)
-			wsc.wsEndpoint.respChan <- errorResponse(err, wsc.wsEndpoint.id, wsc.wsEndpoint.URL)
+			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.id, oh.wsEndpoint.URL)
 			return err
 		}
 		defer conn.Close()
 		handshakeTime := time.Since(start)
 
 		// 2. Write message to connection
-		if err := conn.WriteMessage(websocket.TextMessage, wsc.wsEndpoint.Payload); err != nil {
+		if err := conn.WriteMessage(websocket.TextMessage, oh.wsEndpoint.Payload); err != nil {
 			// An error is unexpected, since the connection was just established
 			err = fmt.Errorf("failed to write message: %w", err)
-			wsc.wsEndpoint.respChan <- errorResponse(err, wsc.wsEndpoint.id, wsc.wsEndpoint.URL)
+			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.id, oh.wsEndpoint.URL)
 			return err
 		}
 
@@ -590,7 +600,7 @@ func (wsc *wsShortConn) Execute() error {
 		if err != nil {
 			// An error is unexpected, since the connection was just established
 			err = fmt.Errorf("failed to read message: %w", err)
-			wsc.wsEndpoint.respChan <- errorResponse(err, wsc.wsEndpoint.id, wsc.wsEndpoint.URL)
+			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.id, oh.wsEndpoint.URL)
 			return err
 		}
 
@@ -600,9 +610,9 @@ func (wsc *wsShortConn) Execute() error {
 		taskResponse.receivedAt = time.Now()
 
 		// 5. Send the response message on the channel
-		wsc.wsEndpoint.respChan <- WatcherResponse{
-			WatcherID: wsc.wsEndpoint.id,
-			URL:       wsc.wsEndpoint.URL,
+		oh.wsEndpoint.respChan <- WatcherResponse{
+			WatcherID: oh.wsEndpoint.id,
+			URL:       oh.wsEndpoint.URL,
 			Err:       nil,
 			Payload:   taskResponse,
 		}

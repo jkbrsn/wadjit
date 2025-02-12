@@ -138,14 +138,14 @@ func TestWSConnInitialize(t *testing.T) {
 		err = conn.Initialize(xid.NilID(), responseChan)
 		assert.NoError(t, err)
 		assert.NotNil(t, conn.respChan)
-		assert.Nil(t, conn.conn) // no connection should be established since wsShortConn is used
+		assert.Nil(t, conn.conn) // no connection should be established since wsOneHit is used
 		assert.NotNil(t, conn.ctx)
 		assert.NotNil(t, conn.cancel)
 	})
 }
 
 // TODO: test error case, when the connection fails and we need to reconnect
-func TestWSEndpointExecutewsLongConn(t *testing.T) {
+func TestWSEndpointExecutewsLongLived(t *testing.T) {
 	server := jsonRPCServer()
 	defer server.Close()
 
@@ -225,7 +225,7 @@ func TestWSEndpointExecutewsLongConn(t *testing.T) {
 }
 
 // TODO: test shortConn + JSONRPC
-func TestWSEndpointExecutewsShortConn(t *testing.T) {
+func TestWSEndpointExecutewsOneHit(t *testing.T) {
 	server := echoServer()
 	defer server.Close()
 
