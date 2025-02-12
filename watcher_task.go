@@ -397,8 +397,8 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 
 			// 2. Check the ID against the inflight messages map
 			if !jsonRPCResp.IsEmpty() {
-				responseID, err := jsonRPCResp.ID()
-				if err != nil {
+				responseID := jsonRPCResp.ID()
+				if responseID == nil {
 					// Send an error response
 					e.respChan <- errorResponse(err, e.id, e.URL)
 					return

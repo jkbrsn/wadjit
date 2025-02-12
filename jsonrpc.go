@@ -3,7 +3,6 @@ package wadjit
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -56,6 +55,10 @@ type jsonRPCResponse struct {
 	Result  json.RawMessage `json:"result,omitempty"`
 }
 
+//
+// JSON RPC REQUEST
+//
+
 // IDString returns the ID as a string, regardless of its type.
 func (r *JSONRPCRequest) IDString() string {
 	switch id := r.ID.(type) {
@@ -79,6 +82,12 @@ func (r *JSONRPCRequest) IsEmpty() bool {
 	}
 
 	return false
+}
+
+// String returns a string representation of the JSON RPC request.
+// Note: implements the fmt.Stringer interface.
+func (r *JSONRPCRequest) String() string {
+	return fmt.Sprintf("ID: %v, Method: %s", r.ID, r.Method)
 }
 
 // UnmarshalJSON unmarshals a JSON RPC request using sonic. It includes two custom actions:
@@ -127,13 +136,30 @@ func (r *JSONRPCRequest) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// JSONRPCRequestFromBytes creates a JSON RPC request from a byte slice.
+func JSONRPCRequestFromBytes(data []byte) (*JSONRPCRequest, error) {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, fmt.Errorf("empty data")
+	}
+	req := &JSONRPCRequest{}
+	err := req.UnmarshalJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	return req, nil
+}
+
+//
+// JSON RPC RESPONSE
+//
+
 // ID returns the ID of the JSON RPC response.
-func (r *JSONRPCResponse) ID() (interface{}, error) {
+func (r *JSONRPCResponse) ID() interface{} {
 	r.muID.RLock()
 
 	if r.id != nil {
 		r.muID.RUnlock()
-		return r.id, nil
+		return r.id
 	}
 	r.muID.RUnlock()
 
@@ -141,15 +167,15 @@ func (r *JSONRPCResponse) ID() (interface{}, error) {
 	defer r.muID.Unlock()
 
 	if len(r.idBytes) == 0 {
-		return nil, errors.New("ID is nil")
+		return nil
 	}
 
 	err := sonic.Unmarshal(r.idBytes, &r.id)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal ID: %w", err)
+		return nil
 	}
 
-	return r.id, nil
+	return r.id
 }
 
 // IsEmpty returns whether the JSON RPC response can be considered empty.
@@ -168,7 +194,25 @@ func (r *JSONRPCResponse) IsEmpty() bool {
 		(lnr == 2 && r.Result[0] == '"' && r.Result[1] == '"') ||
 		(lnr == 2 && r.Result[0] == '[' && r.Result[1] == ']') ||
 		(lnr == 2 && r.Result[0] == '{' && r.Result[1] == '}') {
-		fmt.Print("something is nil")
+		return true
+	}
+
+	return false
+}
+
+// IsNull determines if the JSON RPC response is null.
+func (r *JSONRPCResponse) IsNull() bool {
+	if r == nil {
+		return true
+	}
+
+	r.muResult.RLock()
+	defer r.muResult.RUnlock()
+
+	r.muErr.RLock()
+	defer r.muErr.RUnlock()
+
+	if len(r.Result) == 0 && r.Error == nil && r.ID() == nil {
 		return true
 	}
 
@@ -329,7 +373,31 @@ func (r *JSONRPCResponse) ParseFromBytes(data []byte, expectedSize int) error {
 	return nil
 }
 
+// SetID sets the ID of the JSON RPC response, as interface and as bytes.
+func (r *JSONRPCResponse) SetID(id interface{}) error {
+	r.muID.Lock()
+	defer r.muID.Unlock()
+
+	r.id = id
+
+	bytes, err := sonic.Marshal(id)
+	if err != nil {
+		return err
+	}
+	r.idBytes = bytes
+
+	return nil
+}
+
+// String returns a string representation of the JSON RPC response.
+// Note: implements the fmt.Stringer interface.
+func (r *JSONRPCResponse) String() string {
+	return fmt.Sprintf("ID: %v, Error: %v, Result bytes: %d", r.id, r.Error, len(r.Result))
+}
+
+//
 // HELPERS
+//
 
 // randomJSONRPCID returns a value appropriate for a JSON RPC ID field, e.g. a int64 type but
 // with only 32 bits range, to avoid overflow during conversions and reading/sending to upstreams.
