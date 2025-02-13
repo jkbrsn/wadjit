@@ -79,7 +79,6 @@ type TaskResponse interface {
 }
 
 // TaskResponseMetadata is optional metadata that HTTP or WS might provide.
-// TODO: cover these in a test
 type TaskResponseMetadata struct {
 	// HTTP metadata
 	StatusCode int
@@ -247,7 +246,6 @@ func (w *WSTaskResponse) Reader() (io.ReadCloser, error) {
 }
 
 // Metadata returns metadata connected to the response.
-// TODO: populate with reasonable metadata
 func (w *WSTaskResponse) Metadata() TaskResponseMetadata {
 	return TaskResponseMetadata{
 		Latency:      w.latency,

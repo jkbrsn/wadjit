@@ -264,7 +264,7 @@ func (r *JSONRPCResponse) ParseError(raw string) error {
 		// Special case: check for non-standard error structures in the raw data
 		if raw == "" || raw == "null" {
 			r.Error = &JSONRPCError{
-				int(-32603), // TODO: ServerSideException, use a custom error code enum
+				int(-32603), // ServerSideException
 				"unexpected empty response from upstream endpoint",
 				"",
 			}
@@ -303,7 +303,7 @@ func (r *JSONRPCResponse) ParseError(raw string) error {
 	}{}
 	if err := sonic.UnmarshalString(raw, caseErrorStr); err == nil && caseErrorStr.Error != "" {
 		r.Error = &JSONRPCError{
-			int(-32603), // TODO: ServerSideException, use a custom error code enum
+			int(-32603), // ServerSideException
 			caseErrorStr.Error,
 			"",
 		}
@@ -312,7 +312,7 @@ func (r *JSONRPCResponse) ParseError(raw string) error {
 
 	// Handle case: no match, treat the raw data as message string
 	r.Error = &JSONRPCError{
-		int(-32603), // TODO: ServerSideException, use a custom error code enum
+		int(-32603), // ServerSideException
 		raw,
 		"",
 	}

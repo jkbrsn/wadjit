@@ -219,10 +219,9 @@ func jsonRPCServer() *httptest.Server {
 			}
 
 			// JSON header not found
-			// TODO: is this correct?
 			if r.Header.Get("Content-Type") != "application/json" {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("no json header found"))
+				w.Write([]byte("no Content-Type: application/json header found"))
 				return
 			}
 
