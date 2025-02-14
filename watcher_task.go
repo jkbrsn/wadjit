@@ -329,6 +329,7 @@ func (e *WSEndpoint) reconnect() error {
 
 	// Wait for the read pump to finish
 	e.wg.Wait()
+	e.conn = nil
 
 	// Establish a new connection
 	conn, _, err := websocket.DefaultDialer.Dial(e.URL.String(), e.Header)
@@ -470,7 +471,7 @@ func (ll *wsLongLived) Execute() error {
 	}
 
 	// If the connection is closed, try to reconnect
-	if ll.wsEndpoint.conn == nil {
+	if ll.wsEndpoint.conn == nil || ll.wsEndpoint.conn.UnderlyingConn() == nil {
 		if err := ll.wsEndpoint.reconnect(); err != nil {
 			return err
 		}

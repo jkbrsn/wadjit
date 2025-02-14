@@ -144,7 +144,6 @@ func TestWSConnInitialize(t *testing.T) {
 	})
 }
 
-// TODO: test error case, when the connection fails and we need to reconnect
 func TestWSEndpointExecutewsLongLived(t *testing.T) {
 	server := jsonRPCServer()
 	defer server.Close()
@@ -218,13 +217,42 @@ func TestWSEndpointExecutewsLongLived(t *testing.T) {
 		data, err := resp.Data()
 		assert.NoError(t, err)
 		assert.JSONEq(t, string(expectedResp), string(data))
-		//assert.JSONEq(t, payload, string(data))
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for response")
+	}
+
+	// Close the endpoint's internal connection and try to execute again
+	err = endpoint.conn.Close()
+	assert.NoError(t, err)
+	endpoint.conn = nil
+	// TODO: also test the case where the connection is closed by the server
+
+	wg.Add(1)
+	go func() {
+		err := task.Execute()
+		assert.NoError(t, err)
+		wg.Done()
+	}()
+
+	wg.Wait()
+
+	select {
+	case resp := <-responseChan:
+		assert.NotNil(t, resp)
+		assert.NotNil(t, resp.Payload)
+		assert.NoError(t, resp.Err)
+		assert.Equal(t, url, resp.URL)
+
+		assert.NotNil(t, endpoint.conn)
+
+		metadata := resp.Metadata()
+		assert.NotNil(t, metadata)
+		assert.Equal(t, len(expectedResp), int(metadata.Size))
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for response")
 	}
 }
 
-// TODO: test shortConn + JSONRPC
 func TestWSEndpointExecutewsOneHit(t *testing.T) {
 	server := echoServer()
 	defer server.Close()
