@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestHTTPEndpointImplementsWatcherTask(t *testing.T) {
@@ -28,10 +29,7 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	endpoint := &HTTPEndpoint{
-		URL:    url,
-		Header: header,
-	}
+	endpoint := NewHTTPEndpoint(url, header, nil)
 
 	assert.Equal(t, url, endpoint.URL)
 	assert.Equal(t, header, endpoint.Header)
@@ -53,11 +51,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 
 	header.Add("Content-Type", "application/json")
 
-	endpoint := &HTTPEndpoint{
-		URL:     url,
-		Header:  header,
-		Payload: []byte(`{"key":"value"}`),
-	}
+	endpoint := NewHTTPEndpoint(url, header, []byte(`{"key":"value"}`))
 
 	err = endpoint.Initialize(xid.NilID(), responseChan)
 	assert.NoError(t, err)
@@ -89,6 +83,20 @@ func TestHTTPEndpointExecute(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for response")
 	}
+}
+
+func TestNewHTTPEndpoint(t *testing.T) {
+	url, err := url.Parse("http://example.com")
+	assert.NoError(t, err, "failed to parse URL")
+	header := make(http.Header)
+	payload := []byte(`{"key":"value"}`)
+
+	endpoint := NewHTTPEndpoint(url, header, payload)
+	require.NotNil(t, endpoint)
+
+	assert.Equal(t, url, endpoint.URL)
+	assert.Equal(t, header, endpoint.Header)
+	assert.Equal(t, payload, endpoint.Payload)
 }
 
 //

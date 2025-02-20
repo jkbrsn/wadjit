@@ -41,10 +41,12 @@ type WatcherTask interface {
 // HTTPEndpoint spawns tasks to make HTTP requests towards the defined endpoint. Implements the
 // WatcherTask interface and is meant for use in a Watcher.
 type HTTPEndpoint struct {
-	URL     *url.URL
 	Header  http.Header
+	Method  string
 	Payload []byte
+	URL     *url.URL
 
+	// Set by Initialize
 	id       xid.ID
 	respChan chan<- WatcherResponse
 }
@@ -68,7 +70,7 @@ func (e *HTTPEndpoint) Task() taskman.Task {
 		endpoint: e,
 		respChan: e.respChan,
 		data:     e.Payload,
-		method:   http.MethodGet,
+		method:   e.Method,
 	}
 }
 
@@ -152,6 +154,16 @@ func traceRequest(times *httpRequestTimes) *httptrace.ClientTrace {
 		GotFirstResponseByte: func() {
 			times.FirstResponseByte = time.Now()
 		},
+	}
+}
+
+// NewHTTPEndpoint creates a new HTTPEndpoint with the given URL, header, and payload.
+func NewHTTPEndpoint(url *url.URL, header http.Header, payload []byte) *HTTPEndpoint {
+	return &HTTPEndpoint{
+		Header:  header,
+		Method:  http.MethodGet, // TODO: support other methods
+		Payload: payload,
+		URL:     url,
 	}
 }
 
