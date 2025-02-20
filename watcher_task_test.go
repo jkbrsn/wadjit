@@ -144,7 +144,7 @@ func TestWSConnInitialize(t *testing.T) {
 	})
 }
 
-func TestWSEndpointExecutewsLongLived(t *testing.T) {
+func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	server := jsonRPCServer()
 	defer server.Close()
 
@@ -185,9 +185,9 @@ func TestWSEndpointExecutewsLongLived(t *testing.T) {
 		return true
 	})
 	assert.Equal(t, 1, length)
-	var inflightMsg WSInflightMessage
+	var inflightMsg wsInflightMessage
 	endpoint.inflightMsgs.Range(func(key, value interface{}) bool {
-		inflightMsg = value.(WSInflightMessage)
+		inflightMsg = value.(wsInflightMessage)
 		return false // Stop after the first item
 	})
 	assert.Equal(t, originalID, inflightMsg.originalID)
