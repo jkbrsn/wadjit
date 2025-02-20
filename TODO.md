@@ -2,8 +2,7 @@
 
 ## v0.2.0
 
-- Add timings to WS sends, to be able to track latency of WS connects and messages
-  - These metrics can go into the metadata of the responses
+- Add an example of using Wadjit
 - Improve readme
 - Clear in-code TODOs
 
