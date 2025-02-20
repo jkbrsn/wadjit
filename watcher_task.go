@@ -38,7 +38,8 @@ type WatcherTask interface {
 // HTTP
 //
 
-// HTTPEndpoint spawns tasks to make HTTP requests towards the defined endpoint.
+// HTTPEndpoint spawns tasks to make HTTP requests towards the defined endpoint. Implements the
+// WatcherTask interface and is meant for use in a Watcher.
 type HTTPEndpoint struct {
 	URL     *url.URL
 	Header  http.Header
@@ -101,7 +102,7 @@ func (r httpRequest) Execute() error {
 	}
 
 	// Add tracing to the request
-	timings := &RequestTimes{}
+	timings := &httpRequestTimes{}
 	trace := traceRequest(timings)
 	ctx := httptrace.WithClientTrace(request.Context(), trace)
 	request = request.WithContext(ctx)
@@ -136,13 +137,13 @@ func (r httpRequest) Execute() error {
 	return nil
 }
 
-// RequestTimes stores the timestamps of an HTTP request used to time latency.
-type RequestTimes struct {
-	Start             time.Time // When the request started
-	FirstResponseByte time.Time // When the first byte of the response was received
+// httpRequestTimes stores the timestamps of an HTTP request used to calculate the latency.
+type httpRequestTimes struct {
+	Start             time.Time
+	FirstResponseByte time.Time
 }
 
-func traceRequest(times *RequestTimes) *httptrace.ClientTrace {
+func traceRequest(times *httpRequestTimes) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		// The earliest guaranteed callback is usually ConnectStart, so we set the start time there
 		ConnectStart: func(_, _ string) {
@@ -158,8 +159,8 @@ func traceRequest(times *RequestTimes) *httptrace.ClientTrace {
 // WebSocket
 //
 
-// WSEndpoint connects to the target endpoint, and spawns tasks to send messages
-// to that endpoint.
+// WSEndpoint connects to the target endpoint, and spawns tasks to send messages to that endpoint.
+// Implements the WatcherTask interface and is meant for use in a Watcher.
 type WSEndpoint struct {
 	mu   sync.Mutex
 	mode WSEndpointMode
