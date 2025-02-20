@@ -578,7 +578,6 @@ func (oh *wsOneHit) Execute() error {
 		return nil
 	default:
 		// 1. Establish a new connection
-		start := time.Now()
 		conn, _, err := websocket.DefaultDialer.Dial(oh.wsEndpoint.URL.String(), oh.wsEndpoint.Header)
 		if err != nil {
 			err = fmt.Errorf("failed to dial: %w", err)
@@ -586,9 +585,9 @@ func (oh *wsOneHit) Execute() error {
 			return err
 		}
 		defer conn.Close()
-		handshakeTime := time.Since(start)
 
 		// 2. Write message to connection
+		writeStart := time.Now()
 		if err := conn.WriteMessage(websocket.TextMessage, oh.wsEndpoint.Payload); err != nil {
 			// An error is unexpected, since the connection was just established
 			err = fmt.Errorf("failed to write message: %w", err)
@@ -604,10 +603,11 @@ func (oh *wsOneHit) Execute() error {
 			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.id, oh.wsEndpoint.URL)
 			return err
 		}
+		messageRTT := time.Since(writeStart)
 
 		// 4. Create a task response
 		taskResponse := NewWSTaskResponse(message)
-		taskResponse.latency = handshakeTime
+		taskResponse.latency = messageRTT
 		taskResponse.receivedAt = time.Now()
 
 		// 5. Send the response message on the channel
