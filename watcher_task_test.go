@@ -113,11 +113,11 @@ func TestWSConnInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	t.Run("LongLivedJSONRPC", func(t *testing.T) {
+	t.Run("PersistentJSONRPC", func(t *testing.T) {
 		conn := &WSEndpoint{
 			URL:    url,
 			Header: header,
-			mode:   LongLivedJSONRPC,
+			Mode:   PersistentJSONRPC,
 		}
 
 		assert.Equal(t, url, conn.URL)
@@ -136,7 +136,7 @@ func TestWSConnInitialize(t *testing.T) {
 		conn := &WSEndpoint{
 			URL:    url,
 			Header: header,
-			mode:   OneHitText,
+			Mode:   OneHitText,
 		}
 
 		assert.Equal(t, url, conn.URL)
@@ -167,7 +167,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	endpoint := &WSEndpoint{
 		URL:     url,
 		Header:  header,
-		mode:    LongLivedJSONRPC,
+		Mode:    PersistentJSONRPC,
 		Payload: []byte(payload),
 	}
 
@@ -274,7 +274,7 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 	endpoint := &WSEndpoint{
 		URL:     url,
 		Header:  header,
-		mode:    OneHitText,
+		Mode:    OneHitText,
 		Payload: []byte(`{"key":"value"}`),
 	}
 
@@ -325,7 +325,7 @@ func TestWSConnReconnect(t *testing.T) {
 	conn := &WSEndpoint{
 		URL:    url,
 		Header: header,
-		mode:   LongLivedJSONRPC,
+		Mode:   PersistentJSONRPC,
 	}
 
 	err = conn.Initialize(xid.NilID(), responseChan)
@@ -336,4 +336,45 @@ func TestWSConnReconnect(t *testing.T) {
 
 	err = conn.reconnect()
 	assert.NoError(t, err)
+}
+
+func TestNewWSEndpoint(t *testing.T) {
+	url, err := url.Parse("ws://example.com/ws")
+	assert.NoError(t, err, "failed to parse URL")
+	header := make(http.Header)
+	payload := []byte(`{"key":"value"}`)
+
+	t.Run("ModeUnknown mode", func(t *testing.T) {
+		endpoint := NewWSEndpoint(url, header, ModeUnknown, payload)
+		require.NotNil(t, endpoint)
+
+		assert.Equal(t, url, endpoint.URL)
+		assert.Equal(t, header, endpoint.Header)
+		assert.Equal(t, payload, endpoint.Payload)
+		assert.Equal(t, ModeUnknown, endpoint.Mode)
+
+		// Initialize should set the mode to default mode OneHitText
+		endpoint.Initialize(xid.NilID(), make(chan WatcherResponse))
+		assert.Equal(t, OneHitText, endpoint.Mode)
+	})
+
+	t.Run("OneHitText mode", func(t *testing.T) {
+		endpoint := NewWSEndpoint(url, header, OneHitText, payload)
+		require.NotNil(t, endpoint)
+
+		assert.Equal(t, url, endpoint.URL)
+		assert.Equal(t, header, endpoint.Header)
+		assert.Equal(t, payload, endpoint.Payload)
+		assert.Equal(t, OneHitText, endpoint.Mode)
+	})
+
+	t.Run("PersistentJSONRPC mode", func(t *testing.T) {
+		endpoint := NewWSEndpoint(url, header, PersistentJSONRPC, payload)
+		require.NotNil(t, endpoint)
+
+		assert.Equal(t, url, endpoint.URL)
+		assert.Equal(t, header, endpoint.Header)
+		assert.Equal(t, payload, endpoint.Payload)
+		assert.Equal(t, PersistentJSONRPC, endpoint.Mode)
+	})
 }

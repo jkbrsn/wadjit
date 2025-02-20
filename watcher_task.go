@@ -174,30 +174,39 @@ func NewHTTPEndpoint(url *url.URL, header http.Header, payload []byte) *HTTPEndp
 // WSEndpoint connects to the target endpoint, and spawns tasks to send messages to that endpoint.
 // Implements the WatcherTask interface and is meant for use in a Watcher.
 type WSEndpoint struct {
-	mu   sync.Mutex
-	mode WSEndpointMode
+	mu sync.Mutex
 
-	URL     *url.URL
 	Header  http.Header
+	Mode    WSEndpointMode
 	Payload []byte
+	URL     *url.URL
 
+	// Set internally
 	conn         *websocket.Conn
-	ctx          context.Context
-	cancel       context.CancelFunc
 	inflightMsgs sync.Map // Key string to value wsInflightMessage
 	wg           sync.WaitGroup
 
+	// Set by Initialize
 	id       xid.ID
 	respChan chan<- WatcherResponse
+	ctx      context.Context
+	cancel   context.CancelFunc
 }
 
 // WSEndpointMode is an enum for the mode of the WebSocket endpoint.
 type WSEndpointMode int
 
 const (
-	ModeUnknown      WSEndpointMode = iota // Defaults to OneHitText
-	OneHitText                             // One hit text mode is the default mode
-	LongLivedJSONRPC                       // Long lived JSON RPC mode
+	ModeUnknown WSEndpointMode = iota // Defaults to OneHitText
+	// One hit text mode is the basic mode where a new connection is established for each message
+	// and the response is read once. This design is due to the nature of standard text-based
+	// WebSocket messages not having a way to link responses to requests.
+	OneHitText
+	// Persistent JSON RPC mode is a mode where a long-lived connection is established to the
+	// endpoint, and JSON-RPC messages are sent and received. This mode sets a temporary ID for
+	// each message, which is used to link an incoming response to the request. This allows for
+	// reuse of the same connection for multiple messages while keeping message integrity.
+	PersistentJSONRPC
 )
 
 // wsInflightMessage stores metadata about a message that is currently in-flight.
@@ -247,8 +256,8 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.mu.Unlock()
 
-	switch e.mode {
-	case LongLivedJSONRPC:
+	switch e.Mode {
+	case PersistentJSONRPC:
 		err := e.connect()
 		if err != nil {
 			return fmt.Errorf("failed to connect when initializing: %w", err)
@@ -258,7 +267,7 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 	default:
 		// Default to one hit text mode, since its a mode not requiring anything logic outside of its own scope
 		e.mu.Lock()
-		e.mode = OneHitText
+		e.Mode = OneHitText
 		e.mu.Unlock()
 	}
 
@@ -267,12 +276,12 @@ func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherRespons
 
 // Task returns a taskman.Task that sends a message to the WebSocket endpoint.
 func (e *WSEndpoint) Task() taskman.Task {
-	switch e.mode {
+	switch e.Mode {
 	case OneHitText:
 		return &wsOneHit{
 			wsEndpoint: e,
 		}
-	case LongLivedJSONRPC:
+	case PersistentJSONRPC:
 		return &wsPersistent{
 			protocol:   JSONRPC,
 			wsEndpoint: e,
@@ -300,7 +309,7 @@ func (e *WSEndpoint) Validate() error {
 // connect establishes a connection to the WebSocket endpoint. If already connected,
 // this function does nothing.
 func (e *WSEndpoint) connect() error {
-	if e.mode != LongLivedJSONRPC {
+	if e.Mode != PersistentJSONRPC {
 		return errors.New("cannot establish long lived connection for non-long mode")
 	}
 	e.mu.Lock()
@@ -327,7 +336,7 @@ func (e *WSEndpoint) connect() error {
 
 // reconnect closes the current connection and establishes a new one.
 func (e *WSEndpoint) reconnect() error {
-	if e.mode != LongLivedJSONRPC {
+	if e.Mode != PersistentJSONRPC {
 		return errors.New("can only reconnect for long-lived connections")
 	}
 	e.mu.Lock()
@@ -397,7 +406,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 			}
 			timeRead := time.Now()
 
-			if e.mode == LongLivedJSONRPC {
+			if e.Mode == PersistentJSONRPC {
 				// 1. Unmarshal p into a JSON-RPC response interface
 				jsonRPCResp := &JSONRPCResponse{}
 				err = jsonRPCResp.ParseFromBytes(p, len(p))
@@ -643,6 +652,21 @@ func (ll *wsPersistent) Execute() error {
 	}
 
 	return nil
+}
+
+// NewWSEndpoint creates a new WSEndpoint with the given URL, header, mode, and payload.
+func NewWSEndpoint(
+	url *url.URL,
+	header http.Header,
+	mode WSEndpointMode,
+	payload []byte,
+) *WSEndpoint {
+	return &WSEndpoint{
+		Header:  header,
+		Mode:    mode,
+		Payload: payload,
+		URL:     url,
+	}
 }
 
 // errorResponse is a helper to create a WatcherResponse with an error.
