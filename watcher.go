@@ -121,6 +121,7 @@ func (w *Watcher) Validate() error {
 }
 
 // NewWatcher creates and validates a new Watcher.
+// TODO: allow creation without ID? Let watcher manager assign ID?
 func NewWatcher(
 	id xid.ID,
 	cadence time.Duration,

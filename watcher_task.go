@@ -525,6 +525,7 @@ func (oh *wsOneHit) Execute() error {
 		taskResponse := NewWSTaskResponse(message)
 		taskResponse.latency = messageRTT
 		taskResponse.receivedAt = time.Now()
+		// TODO: add taskResponse.sentAt
 
 		// 5. Send the response message on the channel
 		oh.wsEndpoint.respChan <- WatcherResponse{
