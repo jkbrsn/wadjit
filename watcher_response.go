@@ -91,6 +91,8 @@ type TaskResponseMetadata struct {
 	Size int64
 	// TimeReceived is the time the response was received.
 	TimeReceived time.Time
+	// TimeSent is the time the request or message was sent.
+	TimeSent time.Time
 }
 
 func (m TaskResponseMetadata) String() string {
@@ -129,6 +131,7 @@ type HTTPTaskResponse struct {
 	dataErr    error
 	latency    time.Duration
 	receivedAt time.Time
+	sentAt     time.Time
 
 	usedReader atomic.Bool // flags if we returned a Reader
 }
@@ -204,6 +207,7 @@ func (h *HTTPTaskResponse) Metadata() TaskResponseMetadata {
 		Latency:      h.latency,
 		Size:         h.resp.ContentLength,
 		TimeReceived: h.receivedAt,
+		TimeSent:     h.sentAt,
 	}
 	for k, v := range h.resp.Header {
 		md.Headers[k] = v
@@ -226,6 +230,7 @@ type WSTaskResponse struct {
 	data       []byte
 	latency    time.Duration
 	receivedAt time.Time
+	sentAt     time.Time
 }
 
 // NewWSTaskResponse can store an incoming WS message as a byte slice.
@@ -249,5 +254,6 @@ func (w *WSTaskResponse) Metadata() TaskResponseMetadata {
 		Latency:      w.latency,
 		Size:         int64(len(w.data)),
 		TimeReceived: w.receivedAt,
+		TimeSent:     w.sentAt,
 	}
 }

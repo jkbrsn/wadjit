@@ -76,6 +76,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 		assert.NotNil(t, metadata)
 		assert.Equal(t, "application/json", metadata.Headers.Get("Content-Type"))
 		assert.Greater(t, metadata.Latency, time.Duration(0))
+		assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
 		// Check the response data
 		data, err := resp.Data()
 		assert.NoError(t, err)
@@ -221,6 +222,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		assert.Zero(t, metadata.StatusCode)
 		assert.Equal(t, len(expectedResp), int(metadata.Size))
 		assert.Greater(t, metadata.Latency, time.Duration(0))
+		assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
 		// Check the response data
 		data, err := resp.Data()
 		assert.NoError(t, err)
@@ -303,6 +305,7 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		assert.Zero(t, metadata.StatusCode)
 		assert.Equal(t, len(endpoint.Payload), int(metadata.Size))
 		assert.Greater(t, metadata.Latency, time.Duration(0))
+		assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
 		// Check the response data
 		data, err := resp.Data()
 		assert.NoError(t, err)

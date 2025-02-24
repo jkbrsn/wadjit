@@ -127,6 +127,7 @@ func (r httpRequest) Execute() error {
 	taskResponse := NewHTTPTaskResponse(response)
 	taskResponse.latency = timings.FirstResponseByte.Sub(timings.Start)
 	taskResponse.receivedAt = time.Now()
+	taskResponse.sentAt = timings.Start
 
 	// Send the response on the channel
 	r.respChan <- WatcherResponse{
@@ -429,7 +430,6 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 					// 3. If the ID is known, get the inflight map metadata and delete the ID in the map
 					if inflightMsg, ok := e.inflightMsgs.Load(responseIDStr); ok {
 						inflightMsg := inflightMsg.(wsInflightMessage)
-						latency := timeRead.Sub(inflightMsg.timeSent)
 						e.inflightMsgs.Delete(responseIDStr)
 
 						// 4. Restore original ID and marshal the JSON-RPC interface back into a byte slice
@@ -442,8 +442,9 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 						}
 						// 5. set metadata to the taskresponse: original id, duration between time sent and time received
 						taskResponse := NewWSTaskResponse(p)
-						taskResponse.latency = latency
+						taskResponse.latency = timeRead.Sub(inflightMsg.timeSent)
 						taskResponse.receivedAt = timeRead
+						taskResponse.sentAt = inflightMsg.timeSent
 
 						// Send the message to the read channel
 						response := WatcherResponse{
@@ -525,7 +526,7 @@ func (oh *wsOneHit) Execute() error {
 		taskResponse := NewWSTaskResponse(message)
 		taskResponse.latency = messageRTT
 		taskResponse.receivedAt = time.Now()
-		// TODO: add taskResponse.sentAt
+		taskResponse.sentAt = writeStart
 
 		// 5. Send the response message on the channel
 		oh.wsEndpoint.respChan <- WatcherResponse{
