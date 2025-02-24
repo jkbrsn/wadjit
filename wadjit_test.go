@@ -38,7 +38,7 @@ func TestAddWatcher(t *testing.T) {
 	// Add the watcher
 	err = w.AddWatcher(watcher)
 	assert.NoError(t, err, "error adding watcher")
-	w.consumeStarted <- struct{}{}   // Unblock Watcher adding (otherwise done by w.ResponseChannel())
+	w.wadjitStarted <- struct{}{}    // Unblock Watcher adding (otherwise done by w.ResponseChannel())
 	time.Sleep(5 * time.Millisecond) // wait for watcher to be added
 
 	// Check that the watcher was added correctly
@@ -67,7 +67,7 @@ func TestRemoveWatcher(t *testing.T) {
 
 	err = w.AddWatcher(watcher)
 	assert.NoError(t, err, "error adding watcher")
-	w.consumeStarted <- struct{}{}   // Unblock Watcher adding (otherwise done by w.ResponseChannel())
+	w.wadjitStarted <- struct{}{}    // Unblock Watcher adding (otherwise done by w.ResponseChannel())
 	time.Sleep(5 * time.Millisecond) // Wait for watcher to be added
 
 	assert.Equal(t, 1, syncMapLen(&w.watchers))
@@ -126,7 +126,7 @@ func TestWadjitLifecycle(t *testing.T) {
 	assert.NoError(t, err, "error creating watcher 3")
 
 	// Consume responses
-	responses := w.ResponsesChannel()
+	responses := w.Start()
 	firstCount := atomic.Int32{}
 	secondCount := atomic.Int32{}
 	thirdCount := atomic.Int32{}

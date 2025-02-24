@@ -15,16 +15,16 @@ type Wadjit struct {
 	taskManager *taskman.TaskManager
 
 	newWatcherChan chan *Watcher
-	wRespChan      chan WatcherResponse
-	userChan       chan WatcherResponse
-	consumeStarted chan struct{} // Blocks until the caller starts consuming responses
+	respGatherChan chan WatcherResponse
+	respExportChan chan WatcherResponse
+	wadjitStarted  chan struct{} // Blocks Watchers from initializing until Start is called
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-// AddWatcher adds a watcher to the Wadjit.
-// Note: unless the ResponseChannel is consumed, added Watchers will not be started.
+// AddWatcher adds a Watcher to the Wadjit.
+// Note: unless Start has been called, added Watchers will not be start their tasks.
 func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	if err := watcher.Validate(); err != nil {
 		return fmt.Errorf("error validating watcher: %v", err)
@@ -33,7 +33,19 @@ func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	return nil
 }
 
-// RemoveWatcher removes a watcher from the Wadjit.
+// Close stops all Wadjit processes and closes the Wadjit.
+func (w *Wadjit) Close() {
+	w.cancel()
+	w.taskManager.Stop()
+
+	w.watchers.Range(func(key, value interface{}) bool {
+		watcher := value.(*Watcher)
+		watcher.Close()
+		return true
+	})
+}
+
+// RemoveWatcher removes a Watcher from the Wadjit.
 func (w *Wadjit) RemoveWatcher(id xid.ID) error {
 	watcher, ok := w.watchers.LoadAndDelete(id)
 	if !ok {
@@ -50,47 +62,37 @@ func (w *Wadjit) RemoveWatcher(id xid.ID) error {
 	return nil
 }
 
-// Close stops all Wadjit processes and closes the Wadjit.
-func (w *Wadjit) Close() {
-	w.cancel()
-	w.taskManager.Stop()
-
-	w.watchers.Range(func(key, value interface{}) bool {
-		watcher := value.(*Watcher)
-		watcher.Close()
-		return true
-	})
-
+// Start starts the Wadjit by unblocking Watcher initialization. After calling this function it
+// is assumed that responsed sent on the returned channel will be consumed, and that failing to
+// do so might produce a block.
+func (w *Wadjit) Start() <-chan WatcherResponse {
+	w.wadjitStarted <- struct{}{}
+	return w.respExportChan
 }
 
-// ResponsesChannel returns the channel where responses from the internal Watcher instances
-// are sent.
-// Note: this method unblocks Watchers being added to the Wadjit.
-func (w *Wadjit) ResponsesChannel() <-chan WatcherResponse {
-	w.consumeStarted <- struct{}{}
-	return w.userChan
-}
-
+// listenForResponses consumes the channel where Watchers send responses from their monitoring jobs
+// and forwards those responses to the externally facing channel.
 func (w *Wadjit) listenForResponses() {
 	for {
 		select {
-		case response := <-w.wRespChan:
+		case response := <-w.respGatherChan:
 			// Send the response to the external facing channel
-			// LATER: consider adding Watcher response metrics here
-			w.userChan <- response
+			// TODO: consider adding Watcher response metrics here
+			w.respExportChan <- response
 		case <-w.ctx.Done():
 			return
 		}
 	}
 }
 
+// listenForWatchers consumes Watchers sent on the newWatcherChan and starts the Jobs defined by
+// them when a Watcher is received. Blocks until the caller starts the Wadjit.
 func (w *Wadjit) listenForWatchers() {
-	// Block until the caller starts consuming responses
-	<-w.consumeStarted
+	<-w.wadjitStarted
 	for {
 		select {
 		case watcher := <-w.newWatcherChan:
-			err := watcher.Start(w.wRespChan)
+			err := watcher.Start(w.respGatherChan)
 			if err != nil {
 				fmt.Printf("error starting watcher: %v\n", err)
 				continue
@@ -108,16 +110,16 @@ func (w *Wadjit) listenForWatchers() {
 	}
 }
 
-// New creates, starts, and returns a new Wadjit.
+// New creates, and returns a new Wadjit. To start the Wadjit, a separate call to Start is needed.
 func New() *Wadjit {
 	ctx, cancel := context.WithCancel(context.Background())
 	w := &Wadjit{
 		watchers:       sync.Map{},
 		taskManager:    taskman.New(),
 		newWatcherChan: make(chan *Watcher, 16),
-		wRespChan:      make(chan WatcherResponse, 512),
-		userChan:       make(chan WatcherResponse, 512),
-		consumeStarted: make(chan struct{}),
+		respGatherChan: make(chan WatcherResponse, 512),
+		respExportChan: make(chan WatcherResponse, 512),
+		wadjitStarted:  make(chan struct{}),
 		ctx:            ctx,
 		cancel:         cancel,
 	}

@@ -34,7 +34,7 @@ func main() {
 	}
 
 	// Start consuming responses, this also triggers the watchers to start
-	respChannel := manager.ResponsesChannel()
+	respChannel := manager.Start()
 	for {
 		resp, ok := <-respChannel
 		if !ok {
