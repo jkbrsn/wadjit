@@ -144,3 +144,11 @@ func NewWatcher(
 
 	return w, nil
 }
+
+// WatcherTasksToSlice is a helper function to get a slice of the WatcherTask interface from
+// object types implementing it.
+func WatcherTasksToSlice(tasks ...WatcherTask) []WatcherTask {
+	var taskSlice []WatcherTask
+	taskSlice = append(taskSlice, tasks...)
+	return taskSlice
+}

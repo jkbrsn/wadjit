@@ -82,9 +82,7 @@ func timeTasks() []wadjit.WatcherTask {
 		},
 	}
 
-	var tasks []wadjit.WatcherTask
-	tasks = append(tasks, londonTimeTask)
-	tasks = append(tasks, singaporeTimeTask)
+	tasks := wadjit.WatcherTasksToSlice(londonTimeTask, singaporeTimeTask)
 
 	return tasks
 }
