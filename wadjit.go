@@ -39,7 +39,7 @@ func (w *Wadjit) Close() {
 
 	w.watchers.Range(func(key, value interface{}) bool {
 		watcher := value.(*Watcher)
-		watcher.Close()
+		watcher.close()
 		return true
 	})
 }
@@ -51,7 +51,7 @@ func (w *Wadjit) RemoveWatcher(id string) error {
 		return fmt.Errorf("watcher with ID %s not found", id)
 	}
 
-	err := watcher.(*Watcher).Close()
+	err := watcher.(*Watcher).close()
 	if err != nil {
 		return err
 	}
@@ -91,18 +91,18 @@ func (w *Wadjit) listenForWatchers() {
 	for {
 		select {
 		case watcher := <-w.newWatcherChan:
-			err := watcher.Start(w.respGatherChan)
+			err := watcher.start(w.respGatherChan)
 			if err != nil {
 				fmt.Printf("error starting watcher: %v\n", err)
 				continue
 			}
-			job := watcher.Job()
+			job := watcher.job()
 			err = w.taskManager.ScheduleJob(job)
 			if err != nil {
 				fmt.Printf("error scheduling job: %v\n", err)
 				continue
 			}
-			w.watchers.Store(watcher.ID(), watcher)
+			w.watchers.Store(watcher.ID, watcher)
 		case <-w.ctx.Done():
 			return
 		}

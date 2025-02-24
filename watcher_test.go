@@ -23,10 +23,10 @@ func TestWatcherInitialization(t *testing.T) {
 	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err)
 
-	assert.Equal(t, id, watcher.ID())
-	assert.Equal(t, cadence, watcher.cadence)
+	assert.Equal(t, id, watcher.ID)
+	assert.Equal(t, cadence, watcher.Cadence)
 	assert.NotNil(t, watcher.doneChan)
-	assert.NotNil(t, watcher.watcherTasks)
+	assert.NotNil(t, watcher.Tasks)
 }
 
 func TestWatcherStart(t *testing.T) {
@@ -36,9 +36,9 @@ func TestWatcherStart(t *testing.T) {
 	responseChan := make(chan WatcherResponse)
 
 	watcher := &Watcher{
-		id:      id,
-		cadence: cadence,
-		watcherTasks: []WatcherTask{
+		ID:      id,
+		Cadence: cadence,
+		Tasks: []WatcherTask{
 			&HTTPEndpoint{
 				URL:     &url.URL{Scheme: "http", Host: "localhost:8080"},
 				Header:  make(http.Header),
@@ -47,9 +47,9 @@ func TestWatcherStart(t *testing.T) {
 		},
 	}
 
-	err := watcher.Start(responseChan)
+	err := watcher.start(responseChan)
 	assert.NoError(t, err)
-	assert.NotNil(t, watcher.watcherTasks)
+	assert.NotNil(t, watcher.Tasks)
 
 	// These are not nil, even though uninitialized, since Start initializes them if found nil
 	assert.NotNil(t, watcher.doneChan)
@@ -78,14 +78,14 @@ func TestWatcherExecution(t *testing.T) {
 
 	// Start the watcher and execute the tasks
 	watcherResponses := make(chan WatcherResponse, 2)
-	err = watcher.Start(watcherResponses)
+	err = watcher.start(watcherResponses)
 	assert.NoError(t, err)
-	for _, task := range watcher.watcherTasks {
+	for _, task := range watcher.Tasks {
 		task.Task().Execute()
 	}
 
 	// Listen for responses on the watcherResponses channel
-	for i := 0; i < len(watcher.watcherTasks); i++ {
+	for i := 0; i < len(watcher.Tasks); i++ {
 		response := <-watcherResponses
 		assert.NotNil(t, response)
 		assert.NotNil(t, response.URL)
@@ -130,9 +130,9 @@ func TestWatcherExecution_Error(t *testing.T) {
 
 	// Start the watcher and execute the task1
 	watcherResponses := make(chan WatcherResponse, 2)
-	err = watcher.Start(watcherResponses)
+	err = watcher.start(watcherResponses)
 	assert.NoError(t, err)
-	for _, task := range watcher.watcherTasks {
+	for _, task := range watcher.Tasks {
 		task.Task().Execute()
 	}
 

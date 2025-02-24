@@ -13,23 +13,59 @@ import (
 // Watcher is a watcher that sends HTTP requests and WS messages to endpoints, and then
 // forwards the responses to a response channel.
 type Watcher struct {
-	id      string
-	cadence time.Duration
-
-	watcherTasks []WatcherTask
+	ID      string
+	Cadence time.Duration
+	Tasks   []WatcherTask
 
 	doneChan chan struct{}
 }
 
+// Validate checks that the Watcher is valid for use in the Wadjit.
+func (w *Watcher) Validate() error {
+	if w == nil {
+		return errors.New("watcher is nil")
+	}
+
+	var result *multierror.Error
+	if w.ID == "" {
+		result = multierror.Append(result, errors.New("var ID must not be nil"))
+	}
+	if w.Cadence <= 0 {
+		result = multierror.Append(result, errors.New("var Cadence must be greater than 0"))
+	}
+	if len(w.Tasks) == 0 {
+		result = multierror.Append(result, errors.New("var Tasks must not be nil or empty"))
+	}
+	if w.doneChan == nil {
+		result = multierror.Append(result, errors.New("doneChan must not be nil"))
+	} else {
+		select {
+		case <-w.doneChan:
+			result = multierror.Append(result, errors.New("doneChan must not be closed"))
+		default:
+			// doneChan is not closed
+		}
+	}
+
+	for i := range w.Tasks {
+		err := w.Tasks[i].Validate()
+		if err != nil {
+			result = multierror.Append(result, err)
+		}
+	}
+
+	return result.ErrorOrNil()
+}
+
 // Close closes the HTTP watcher.
-func (w *Watcher) Close() error {
+func (w *Watcher) close() error {
 	// Signal that the watcher is done
 	close(w.doneChan)
 
 	// Close all WS connections
 	var result *multierror.Error
-	for i := range w.watcherTasks {
-		err := w.watcherTasks[i].Close()
+	for i := range w.Tasks {
+		err := w.Tasks[i].Close()
 		if err != nil {
 			result = multierror.Append(result, err)
 		}
@@ -37,29 +73,24 @@ func (w *Watcher) Close() error {
 	return result.ErrorOrNil()
 }
 
-// ID returns the ID of the Watcher.
-func (w *Watcher) ID() string {
-	return w.id
-}
-
-// Job returns a taskman.Job that executes the Watcher's tasks.
-func (w *Watcher) Job() taskman.Job {
-	tasks := make([]taskman.Task, 0, len(w.watcherTasks))
-	for i := range w.watcherTasks {
-		tasks = append(tasks, w.watcherTasks[i].Task())
+// job returns a taskman.Job that executes the Watcher's tasks.
+func (w *Watcher) job() taskman.Job {
+	tasks := make([]taskman.Task, 0, len(w.Tasks))
+	for i := range w.Tasks {
+		tasks = append(tasks, w.Tasks[i].Task())
 	}
 	// Create the job
 	job := taskman.Job{
-		ID:       w.id,
-		Cadence:  w.cadence,
-		NextExec: time.Now().Add(w.cadence),
+		ID:       w.ID,
+		Cadence:  w.Cadence,
+		NextExec: time.Now().Add(w.Cadence),
 		Tasks:    tasks,
 	}
 	return job
 }
 
 // Start sets up the Watcher to start listening for responses, and initializes its tasks.
-func (w *Watcher) Start(responseChan chan WatcherResponse) error {
+func (w *Watcher) start(responseChan chan WatcherResponse) error {
 	var result *multierror.Error
 
 	// If the response channel is nil, the watcher cannot function
@@ -73,45 +104,8 @@ func (w *Watcher) Start(responseChan chan WatcherResponse) error {
 	}
 
 	// Initialize the watcher tasks
-	for i := range w.watcherTasks {
-		err := w.watcherTasks[i].Initialize(w.id, responseChan)
-		if err != nil {
-			result = multierror.Append(result, err)
-		}
-	}
-
-	return result.ErrorOrNil()
-}
-
-// Validate checks that the Watcher is valid for use in the Wadjit.
-func (w *Watcher) Validate() error {
-	if w == nil {
-		return errors.New("watcher is nil")
-	}
-
-	var result *multierror.Error
-	if w.id == "" {
-		result = multierror.Append(result, errors.New("id must not be nil"))
-	}
-	if w.cadence <= 0 {
-		result = multierror.Append(result, errors.New("cadence must be greater than 0"))
-	}
-	if len(w.watcherTasks) == 0 {
-		result = multierror.Append(result, errors.New("watcherTasks must not be nil or empty"))
-	}
-	if w.doneChan == nil {
-		result = multierror.Append(result, errors.New("doneChan must not be nil"))
-	} else {
-		select {
-		case <-w.doneChan:
-			result = multierror.Append(result, errors.New("doneChan must not be closed"))
-		default:
-			// doneChan is not closed
-		}
-	}
-
-	for i := range w.watcherTasks {
-		err := w.watcherTasks[i].Validate()
+	for i := range w.Tasks {
+		err := w.Tasks[i].Initialize(w.ID, responseChan)
 		if err != nil {
 			result = multierror.Append(result, err)
 		}
@@ -132,10 +126,10 @@ func NewWatcher(
 	}
 
 	w := &Watcher{
-		id:           id,
-		cadence:      cadence,
-		watcherTasks: tasks,
-		doneChan:     make(chan struct{}),
+		ID:       id,
+		Cadence:  cadence,
+		Tasks:    tasks,
+		doneChan: make(chan struct{}),
 	}
 
 	if err := w.Validate(); err != nil {
