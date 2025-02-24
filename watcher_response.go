@@ -10,8 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/rs/xid"
 )
 
 //
@@ -20,7 +18,7 @@ import (
 
 // WatcherResponse represents a response from a watcher.
 type WatcherResponse struct {
-	WatcherID xid.ID       // ID of the watcher that generated the response
+	WatcherID string       // ID of the watcher that generated the response
 	URL       *url.URL     // URL of the response's target
 	Err       error        // Error that occurred during the request, if nil the request was successful
 	Payload   TaskResponse // Payload stores the response data from the endpoint

@@ -35,7 +35,7 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	assert.Equal(t, header, endpoint.Header)
 	assert.Nil(t, endpoint.respChan)
 
-	err := endpoint.Initialize(xid.NilID(), responseChan)
+	err := endpoint.Initialize("", responseChan)
 	assert.NoError(t, err)
 	assert.NotNil(t, endpoint.respChan)
 }
@@ -53,7 +53,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 
 	endpoint := NewHTTPEndpoint(url, header, []byte(`{"key":"value"}`))
 
-	err = endpoint.Initialize(xid.NilID(), responseChan)
+	err = endpoint.Initialize("", responseChan)
 	assert.NoError(t, err)
 
 	task := endpoint.Task()
@@ -67,7 +67,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 	select {
 	case resp := <-responseChan:
 		assert.NotNil(t, resp)
-		assert.Equal(t, xid.NilID(), resp.WatcherID)
+		assert.Equal(t, "", resp.WatcherID)
 		assert.Equal(t, url, resp.URL)
 		assert.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
@@ -124,7 +124,7 @@ func TestWSConnInitialize(t *testing.T) {
 		assert.Equal(t, header, conn.Header)
 		assert.Nil(t, conn.respChan)
 
-		err = conn.Initialize(xid.NilID(), responseChan)
+		err = conn.Initialize("", responseChan)
 		assert.NoError(t, err)
 		assert.NotNil(t, conn.respChan)
 		assert.NotNil(t, conn.conn)
@@ -143,7 +143,7 @@ func TestWSConnInitialize(t *testing.T) {
 		assert.Equal(t, header, conn.Header)
 		assert.Nil(t, conn.respChan)
 
-		err = conn.Initialize(xid.NilID(), responseChan)
+		err = conn.Initialize("", responseChan)
 		assert.NoError(t, err)
 		assert.NotNil(t, conn.respChan)
 		assert.Nil(t, conn.conn) // no connection should be established since wsOneHit is used
@@ -171,7 +171,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		Payload: []byte(payload),
 	}
 
-	err = endpoint.Initialize(xid.NilID(), responseChan)
+	err = endpoint.Initialize("", responseChan)
 	assert.NoError(t, err)
 
 	task := endpoint.Task()
@@ -210,7 +210,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	select {
 	case resp := <-responseChan:
 		assert.NotNil(t, resp)
-		assert.Equal(t, xid.NilID(), resp.WatcherID)
+		assert.Equal(t, "", resp.WatcherID)
 		assert.Equal(t, url, resp.URL)
 		assert.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
@@ -278,7 +278,7 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		Payload: []byte(`{"key":"value"}`),
 	}
 
-	err = endpoint.Initialize(xid.NilID(), responseChan)
+	err = endpoint.Initialize("", responseChan)
 	assert.NoError(t, err)
 
 	task := endpoint.Task()
@@ -292,7 +292,7 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 	select {
 	case resp := <-responseChan:
 		assert.NotNil(t, resp)
-		assert.Equal(t, xid.NilID(), resp.WatcherID)
+		assert.Equal(t, "", resp.WatcherID)
 		assert.Equal(t, url, resp.URL)
 		assert.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
@@ -328,7 +328,7 @@ func TestWSConnReconnect(t *testing.T) {
 		Mode:   PersistentJSONRPC,
 	}
 
-	err = conn.Initialize(xid.NilID(), responseChan)
+	err = conn.Initialize("", responseChan)
 	assert.NoError(t, err)
 
 	err = conn.connect()
@@ -354,7 +354,7 @@ func TestNewWSEndpoint(t *testing.T) {
 		assert.Equal(t, ModeUnknown, endpoint.Mode)
 
 		// Initialize should set the mode to default mode OneHitText
-		endpoint.Initialize(xid.NilID(), make(chan WatcherResponse))
+		endpoint.Initialize("", make(chan WatcherResponse))
 		assert.Equal(t, OneHitText, endpoint.Mode)
 	})
 

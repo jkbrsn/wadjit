@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jakobilobi/wadjit"
-	"github.com/rs/xid"
 )
 
 func main() {
@@ -17,7 +16,7 @@ func main() {
 
 	// Create a watcher that sends HTTP requests to get the current time in London and Singapore
 	timeWatcher, err := wadjit.NewWatcher(
-		xid.New(),
+		"my time watcher",
 		8*time.Second,
 		timeTasks(),
 	)

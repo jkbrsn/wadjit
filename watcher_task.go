@@ -25,7 +25,7 @@ type WatcherTask interface {
 	Close() error
 
 	// Initialize sets up the WatcherTask to be ready to watch an endpoint.
-	Initialize(id xid.ID, respChan chan<- WatcherResponse) error
+	Initialize(id string, respChan chan<- WatcherResponse) error
 
 	// Task returns a taskman.Task that sends requests and messages to the endpoint.
 	Task() taskman.Task
@@ -47,7 +47,7 @@ type HTTPEndpoint struct {
 	URL     *url.URL
 
 	// Set by Initialize
-	id       xid.ID
+	id       string
 	respChan chan<- WatcherResponse
 }
 
@@ -57,7 +57,7 @@ func (e *HTTPEndpoint) Close() error {
 }
 
 // Initialize sets up the HTTP endpoint to be able to send on its responses.
-func (e *HTTPEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) error {
+func (e *HTTPEndpoint) Initialize(id string, responseChannel chan<- WatcherResponse) error {
 	e.id = id
 	e.respChan = responseChannel
 	// TODO: set mode based on payload, e.g. JSON RPC, text ete.
@@ -187,7 +187,7 @@ type WSEndpoint struct {
 	wg           sync.WaitGroup
 
 	// Set by Initialize
-	id       xid.ID
+	id       string
 	respChan chan<- WatcherResponse
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -249,7 +249,7 @@ func (e *WSEndpoint) Close() error {
 // Initialize prepares the WSEndpoint to be able to send messages to the target endpoint.
 // If configured as one of the persistent connection modes, e.g. JSON RPC, this function will
 // establish a long-lived connection to the endpoint.
-func (e *WSEndpoint) Initialize(id xid.ID, responseChannel chan<- WatcherResponse) error {
+func (e *WSEndpoint) Initialize(id string, responseChannel chan<- WatcherResponse) error {
 	e.mu.Lock()
 	e.id = id
 	e.respChan = responseChannel
@@ -671,7 +671,7 @@ func NewWSEndpoint(
 }
 
 // errorResponse is a helper to create a WatcherResponse with an error.
-func errorResponse(err error, id xid.ID, url *url.URL) WatcherResponse {
+func errorResponse(err error, id string, url *url.URL) WatcherResponse {
 	return WatcherResponse{
 		WatcherID: id,
 		URL:       url,

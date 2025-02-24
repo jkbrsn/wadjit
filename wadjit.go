@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/jakobilobi/go-taskman"
-	"github.com/rs/xid"
 )
 
 // Wadjit is a struct that manages a collection of endpoint watchers.
@@ -46,7 +45,7 @@ func (w *Wadjit) Close() {
 }
 
 // RemoveWatcher removes a Watcher from the Wadjit.
-func (w *Wadjit) RemoveWatcher(id xid.ID) error {
+func (w *Wadjit) RemoveWatcher(id string) error {
 	watcher, ok := w.watchers.LoadAndDelete(id)
 	if !ok {
 		return fmt.Errorf("watcher with ID %s not found", id)
@@ -57,7 +56,7 @@ func (w *Wadjit) RemoveWatcher(id xid.ID) error {
 		return err
 	}
 
-	w.taskManager.RemoveJob(id.String())
+	w.taskManager.RemoveJob(id)
 
 	return nil
 }

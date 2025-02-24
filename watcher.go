@@ -13,7 +13,7 @@ import (
 // Watcher is a watcher that sends HTTP requests and WS messages to endpoints, and then
 // forwards the responses to a response channel.
 type Watcher struct {
-	id      xid.ID
+	id      string
 	cadence time.Duration
 
 	watcherTasks []WatcherTask
@@ -38,7 +38,7 @@ func (w *Watcher) Close() error {
 }
 
 // ID returns the ID of the Watcher.
-func (w *Watcher) ID() xid.ID {
+func (w *Watcher) ID() string {
 	return w.id
 }
 
@@ -50,7 +50,7 @@ func (w *Watcher) Job() taskman.Job {
 	}
 	// Create the job
 	job := taskman.Job{
-		ID:       w.id.String(),
+		ID:       w.id,
 		Cadence:  w.cadence,
 		NextExec: time.Now().Add(w.cadence),
 		Tasks:    tasks,
@@ -90,7 +90,7 @@ func (w *Watcher) Validate() error {
 	}
 
 	var result *multierror.Error
-	if w.id == xid.NilID() {
+	if w.id == "" {
 		result = multierror.Append(result, errors.New("id must not be nil"))
 	}
 	if w.cadence <= 0 {
@@ -120,13 +120,17 @@ func (w *Watcher) Validate() error {
 	return result.ErrorOrNil()
 }
 
-// NewWatcher creates and validates a new Watcher.
-// TODO: allow creation without ID? Let watcher manager assign ID?
+// NewWatcher creates and validates a new Watcher. If a nil ID is set to the Watcher, a randomized
+// ID will be generated.
 func NewWatcher(
-	id xid.ID,
+	id string,
 	cadence time.Duration,
 	tasks []WatcherTask,
 ) (*Watcher, error) {
+	if id == "" {
+		id = xid.New().String()
+	}
+
 	w := &Watcher{
 		id:           id,
 		cadence:      cadence,

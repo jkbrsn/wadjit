@@ -11,7 +11,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/jakobilobi/go-taskman"
-	"github.com/rs/xid"
 )
 
 //
@@ -62,7 +61,7 @@ type MockWatcherTask struct {
 
 	ErrTaskResponse error // Set to return a task that errors
 
-	id       xid.ID
+	id       string
 	respChan chan<- WatcherResponse
 }
 
@@ -70,7 +69,7 @@ func (m *MockWatcherTask) Close() error {
 	return nil
 }
 
-func (m *MockWatcherTask) Initialize(id xid.ID, responseChan chan<- WatcherResponse) error {
+func (m *MockWatcherTask) Initialize(id string, responseChan chan<- WatcherResponse) error {
 	m.id = id
 	m.respChan = responseChan
 	return nil

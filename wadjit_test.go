@@ -24,7 +24,7 @@ func TestAddWatcher(t *testing.T) {
 	defer w.Close()
 
 	// Create a watcher
-	id := xid.New()
+	id := xid.New().String()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
 	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
@@ -54,7 +54,7 @@ func TestRemoveWatcher(t *testing.T) {
 	defer w.Close()
 
 	// Create a watcher
-	id := xid.New()
+	id := xid.New().String()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
 	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
@@ -95,7 +95,7 @@ func TestWadjitLifecycle(t *testing.T) {
 	assert.NoError(t, err, "failed to parse HTTP URL")
 
 	// Create first watcher
-	id1 := xid.New()
+	id1 := xid.New().String()
 	tasks := append([]WatcherTask{}, &HTTPEndpoint{URL: url, Payload: []byte("first")})
 	watcher1, err := NewWatcher(
 		id1,
@@ -104,7 +104,7 @@ func TestWadjitLifecycle(t *testing.T) {
 	)
 	assert.NoError(t, err, "error creating watcher 1")
 	// Create second watcher
-	id2 := xid.New()
+	id2 := xid.New().String()
 	tasks = append([]WatcherTask{}, &HTTPEndpoint{URL: url, Payload: []byte("second")})
 	watcher2, err := NewWatcher(
 		id2,
@@ -113,7 +113,7 @@ func TestWadjitLifecycle(t *testing.T) {
 	)
 	assert.NoError(t, err, "error creating watcher 2")
 	// Create third watcher
-	id3 := xid.New()
+	id3 := xid.New().String()
 	wsURL := "ws" + server.URL[4:] + "/ws"
 	url, err = url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")

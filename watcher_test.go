@@ -12,7 +12,7 @@ import (
 )
 
 func TestWatcherInitialization(t *testing.T) {
-	id := xid.New()
+	id := xid.New().String()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
 	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
@@ -30,7 +30,7 @@ func TestWatcherInitialization(t *testing.T) {
 }
 
 func TestWatcherStart(t *testing.T) {
-	id := xid.New()
+	id := xid.New().String()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
 	responseChan := make(chan WatcherResponse)
@@ -67,7 +67,7 @@ func TestWatcherExecution(t *testing.T) {
 	header := make(http.Header)
 
 	// Set up watcher
-	id := xid.New()
+	id := xid.New().String()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
 	var tasks []WatcherTask
@@ -117,7 +117,7 @@ func TestWatcherExecution_Error(t *testing.T) {
 	header := make(http.Header)
 
 	// Set up watcher
-	id := xid.New()
+	id := xid.New().String()
 	cadence := 1 * time.Second
 	var tasks []WatcherTask
 	tasks = append(tasks, &MockWatcherTask{
