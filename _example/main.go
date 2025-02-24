@@ -25,8 +25,23 @@ func main() {
 		return
 	}
 
-	// Add the watcher to the wadjit
+	reflectWatcher, err := wadjit.NewWatcher(
+		"a reflector",
+		4*time.Second,
+		refectTasks(),
+	)
+	if err != nil {
+		fmt.Printf("Error creating watcher: %v\n", err)
+	}
+
+	// Add the watchers to the wadjit
 	err = manager.AddWatcher(timeWatcher)
+	if err != nil {
+		fmt.Printf("Error adding watcher: %v\n", err)
+		return
+	}
+	// TODO: confirm example with this second watcher works
+	err = manager.AddWatcher(reflectWatcher)
 	if err != nil {
 		fmt.Printf("Error adding watcher: %v\n", err)
 		return
@@ -60,12 +75,37 @@ func main() {
 	}
 }
 
+func refectTasks() []wadjit.WatcherTask {
+	postmanTask := &wadjit.WSEndpoint{
+		Mode:    wadjit.OneHitText,
+		Payload: []byte("Hello, Postman"),
+		URL: &url.URL{
+			Scheme: "wss",
+			Host:   "ws.postman-echo.com",
+			Path:   "/raw",
+		},
+	}
+	chilkatTask := &wadjit.WSEndpoint{
+		Mode:    wadjit.OneHitText,
+		Payload: []byte("Hello, Chilkat"),
+		URL: &url.URL{
+			Scheme: "wss",
+			Host:   "websockets.chilkat.io",
+		},
+	}
+
+	tasks := wadjit.WatcherTasksToSlice(postmanTask, chilkatTask)
+
+	return tasks
+}
+
 func timeTasks() []wadjit.WatcherTask {
 	londonTimeTask := &wadjit.HTTPEndpoint{
 		Header:  make(http.Header),
 		Method:  http.MethodGet,
 		Payload: nil,
-		URL: &url.URL{Scheme: "https",
+		URL: &url.URL{
+			Scheme:   "https",
 			Host:     "www.timeapi.io",
 			Path:     "/api/time/current/zone",
 			RawQuery: "timeZone=Europe%2FLondon",
@@ -75,7 +115,8 @@ func timeTasks() []wadjit.WatcherTask {
 		Header:  make(http.Header),
 		Method:  http.MethodGet,
 		Payload: nil,
-		URL: &url.URL{Scheme: "https",
+		URL: &url.URL{
+			Scheme:   "https",
 			Host:     "www.timeapi.io",
 			Path:     "/api/time/current/zone",
 			RawQuery: "timeZone=Asia%2FSingapore",
