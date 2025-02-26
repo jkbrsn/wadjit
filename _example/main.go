@@ -14,17 +14,17 @@ func main() {
 	manager := wadjit.New()
 	defer manager.Close()
 
-	// Create a watcher that sends HTTP requests to get the current time in London and Singapore
-	timeWatcher, err := wadjit.NewWatcher(
-		"my time watcher",
-		8*time.Second,
-		timeTasks(),
+	// Create a watcher that sends HTTP requests to httpbin.org
+	httpBinWatcher, err := wadjit.NewWatcher(
+		"httpbin watcher",
+		5*time.Second,
+		httpBinTasks(),
 	)
 	if err != nil {
 		fmt.Printf("Error creating watcher: %v\n", err)
-		return
 	}
 
+	// Create a watcher that sends WebSocket requests to Postman Echo and Ethereum RPC
 	reflectWatcher, err := wadjit.NewWatcher(
 		"a reflector",
 		4*time.Second,
@@ -34,14 +34,29 @@ func main() {
 		fmt.Printf("Error creating watcher: %v\n", err)
 	}
 
+	// Create a watcher that sends HTTP requests to get the current time in London and Singapore
+	timeWatcher, err := wadjit.NewWatcher(
+		"my time watcher",
+		6*time.Second,
+		timeTasks(),
+	)
+	if err != nil {
+		fmt.Printf("Error creating watcher: %v\n", err)
+		return
+	}
 	// Add the watchers to the wadjit
-	err = manager.AddWatcher(timeWatcher)
+	// TODO: add multi-watcher add support
+	err = manager.AddWatcher(httpBinWatcher)
 	if err != nil {
 		fmt.Printf("Error adding watcher: %v\n", err)
 		return
 	}
-	// TODO: confirm example with this second watcher works
 	err = manager.AddWatcher(reflectWatcher)
+	if err != nil {
+		fmt.Printf("Error adding watcher: %v\n", err)
+		return
+	}
+	err = manager.AddWatcher(timeWatcher)
 	if err != nil {
 		fmt.Printf("Error adding watcher: %v\n", err)
 		return
@@ -68,9 +83,11 @@ func main() {
 		}
 		fmt.Printf("Data: %s\n", data)
 		fmt.Printf("Metadata:\n")
+		fmt.Printf("  Headers:     %v\n", resp.Metadata().Headers)
 		fmt.Printf("  Sent at:     %v\n", resp.Metadata().TimeSent)
 		fmt.Printf("  Received at: %v\n", resp.Metadata().TimeReceived)
 		fmt.Printf("  Latency:     %v\n", resp.Metadata().Latency)
+		fmt.Println()
 		fmt.Println()
 	}
 }
@@ -124,6 +141,49 @@ func timeTasks() []wadjit.WatcherTask {
 	}
 
 	tasks := wadjit.WatcherTasksToSlice(londonTimeTask, singaporeTimeTask)
+
+	return tasks
+}
+
+func httpBinTasks() []wadjit.WatcherTask {
+	getTask := &wadjit.HTTPEndpoint{
+		Header:  make(http.Header),
+		Method:  http.MethodGet,
+		Payload: nil,
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "httpbin.org",
+			Path:   "/get",
+		},
+	}
+
+	postHeader := make(http.Header)
+	postHeader.Add("Content-Type", "text/plain")
+	postTask := &wadjit.HTTPEndpoint{
+		Header:  postHeader,
+		Method:  http.MethodPost,
+		Payload: []byte("Hello, World!"),
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "httpbin.org",
+			Path:   "/post",
+		},
+	}
+
+	putHeader := make(http.Header)
+	putHeader.Add("Content-Type", "application/json")
+	putTask := &wadjit.HTTPEndpoint{
+		Header:  putHeader,
+		Method:  http.MethodPut,
+		Payload: []byte(`{"key":"value"}`),
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "httpbin.org",
+			Path:   "/put",
+		},
+	}
+
+	tasks := wadjit.WatcherTasksToSlice(getTask, postTask, putTask)
 
 	return tasks
 }
