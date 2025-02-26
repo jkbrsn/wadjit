@@ -2,6 +2,7 @@ package wadjit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -23,13 +24,25 @@ type Wadjit struct {
 }
 
 // AddWatcher adds a Watcher to the Wadjit.
-// Note: unless Start has been called, added Watchers will not be start their tasks.
+// Note: unless Start has been called, added Watchers will not start their tasks.
 func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	if err := watcher.Validate(); err != nil {
 		return fmt.Errorf("error validating watcher: %v", err)
 	}
 	w.newWatcherChan <- watcher
 	return nil
+}
+
+// AddWatchers adds multiple Watchers to the Wadjit.
+// Note: unless Start has been called, added Watchers will not start their tasks.
+func (w *Wadjit) AddWatchers(watchers ...*Watcher) error {
+	var errs error
+	for _, watcher := range watchers {
+		if err := w.AddWatcher(watcher); err != nil {
+			errs = errors.Join(errs, err)
+		}
+	}
+	return errs
 }
 
 // Close stops all Wadjit processes and closes the Wadjit.

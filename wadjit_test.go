@@ -152,13 +152,9 @@ func TestWadjitLifecycle(t *testing.T) {
 	}()
 
 	// Add watchers
-	err = w.AddWatcher(watcher1)
-	assert.NoError(t, err, "error adding watcher 1")
-	err = w.AddWatcher(watcher2)
-	assert.NoError(t, err, "error adding watcher 2")
-	err = w.AddWatcher(watcher3)
-	assert.NoError(t, err, "error adding watcher 3")
-	time.Sleep(4 * time.Millisecond) // Wait for watchers to be added
+	err = w.AddWatchers(watcher1, watcher2, watcher3)
+	assert.NoError(t, err, "error adding watchers")
+	time.Sleep(5 * time.Millisecond) // Wait for watchers to be added
 	assert.Equal(t, 3, syncMapLen(&w.watchers))
 
 	// Let the watchers run
