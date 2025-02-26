@@ -148,8 +148,8 @@ type httpRequestTimes struct {
 
 func traceRequest(times *httpRequestTimes) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
-		// The earliest guaranteed callback is usually ConnectStart, so we set the start time there
-		ConnectStart: func(_, _ string) {
+		// The earliest guaranteed callback is usually GetConn, so we set the start time there
+		GetConn: func(_ string) {
 			times.Start = time.Now()
 		},
 		GotFirstResponseByte: func() {
@@ -454,7 +454,11 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 							Payload:   taskResponse,
 						}
 						e.respChan <- response
+					} else {
+						e.respChan <- errorResponse(errors.New("unknown response ID"), e.id, e.URL)
 					}
+				} else {
+					e.respChan <- errorResponse(errors.New("empty JSON-RPC response"), e.id, e.URL)
 				}
 			} else {
 				// Send the message to the read channel
@@ -598,8 +602,9 @@ func (ll *wsPersistent) Execute() error {
 			// TODO: optimize this to only get the ID?
 			err := jsonRPCReq.UnmarshalJSON(ll.wsEndpoint.Payload)
 			if err != nil {
+				err = fmt.Errorf("failed to unmarshal JSON-RPC message: %w", err)
 				ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.id, ll.wsEndpoint.URL)
-				return fmt.Errorf("failed to unmarshal JSON-RPC message: %w", err)
+				return err
 			}
 		}
 
@@ -620,8 +625,9 @@ func (ll *wsPersistent) Execute() error {
 		// 4. Marshal the updated JSON-RPC interface back into text message
 		payload, err = sonic.Marshal(jsonRPCReq)
 		if err != nil {
+			err = fmt.Errorf("failed to marshal JSON-RPC message: %w", err)
 			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.id, ll.wsEndpoint.URL)
-			return fmt.Errorf("failed to marshal JSON-RPC message: %w", err)
+			return err
 		}
 		inflightMsg.timeSent = time.Now()
 
@@ -648,8 +654,9 @@ func (ll *wsPersistent) Execute() error {
 			ll.wsEndpoint.Close()
 
 			// Send an error response
+			err = fmt.Errorf("failed to write message: %w", err)
 			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.id, ll.wsEndpoint.URL)
-			return fmt.Errorf("failed to write message: %w", err)
+			return err
 		}
 	}
 
