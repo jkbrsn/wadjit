@@ -2,8 +2,6 @@
 
 ## v0.2.0
 
-- Validation:
-  - Test Wadjit example main.go with different URL:s and types of requests (GET, POST, PUT?)
 - Improve readme
 - Clear in-code TODOs
 
