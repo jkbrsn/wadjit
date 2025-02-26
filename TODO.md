@@ -4,7 +4,6 @@
 
 - Validation:
   - Test Wadjit example main.go with different URL:s and types of requests (GET, POST, PUT?)
-  - Confirm some measurement times with manual measurements (or wsstat)
 - Improve readme
 - Clear in-code TODOs
 

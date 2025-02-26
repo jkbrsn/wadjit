@@ -68,9 +68,9 @@ func main() {
 		}
 		fmt.Printf("Data: %s\n", data)
 		fmt.Printf("Metadata:\n")
-		//fmt.Printf("  Sent at:     %v\n", resp.Metadata().TimeSent)
+		fmt.Printf("  Sent at:     %v\n", resp.Metadata().TimeSent)
 		fmt.Printf("  Received at: %v\n", resp.Metadata().TimeReceived)
-		fmt.Printf("  Latency: %v\n", resp.Metadata().Latency)
+		fmt.Printf("  Latency:     %v\n", resp.Metadata().Latency)
 		fmt.Println()
 	}
 }
@@ -85,16 +85,16 @@ func refectTasks() []wadjit.WatcherTask {
 			Path:   "/raw",
 		},
 	}
-	chilkatTask := &wadjit.WSEndpoint{
-		Mode:    wadjit.OneHitText,
-		Payload: []byte("Hello, Chilkat"),
+	persistentRPCTask := &wadjit.WSEndpoint{
+		Mode:    wadjit.PersistentJSONRPC,
+		Payload: []byte(`{"jsonrpc":"2.0","id":1,"params":[],"method":"eth_chainId"}`),
 		URL: &url.URL{
 			Scheme: "wss",
-			Host:   "websockets.chilkat.io",
+			Host:   "ethereum-rpc.publicnode.com",
 		},
 	}
 
-	tasks := wadjit.WatcherTasksToSlice(postmanTask, chilkatTask)
+	tasks := wadjit.WatcherTasksToSlice(postmanTask, persistentRPCTask)
 
 	return tasks
 }
