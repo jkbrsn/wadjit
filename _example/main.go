@@ -45,18 +45,7 @@ func main() {
 		return
 	}
 	// Add the watchers to the wadjit
-	// TODO: add multi-watcher add support
-	err = manager.AddWatcher(httpBinWatcher)
-	if err != nil {
-		fmt.Printf("Error adding watcher: %v\n", err)
-		return
-	}
-	err = manager.AddWatcher(reflectWatcher)
-	if err != nil {
-		fmt.Printf("Error adding watcher: %v\n", err)
-		return
-	}
-	err = manager.AddWatcher(timeWatcher)
+	err = manager.AddWatchers(httpBinWatcher, reflectWatcher, timeWatcher)
 	if err != nil {
 		fmt.Printf("Error adding watcher: %v\n", err)
 		return
