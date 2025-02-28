@@ -49,7 +49,7 @@ func TestJSONRPCRequest_IsEmpty(t *testing.T) {
 func TestJSONRPCRequest_UnmarshalJSON(t *testing.T) {
 	t.Run("Valid JSON with int ID", func(t *testing.T) {
 		data := []byte(`{"jsonrpc":"2.0","method":"test","params":["0x123"],"id":99}`)
-		expected := JSONRPCRequest{JSONRPC: "2.0", Method: "test", Params: []interface{}{"0x123"}, ID: int64(99)}
+		expected := JSONRPCRequest{JSONRPC: "2.0", Method: "test", Params: []any{"0x123"}, ID: int64(99)}
 
 		var result JSONRPCRequest
 		err := result.UnmarshalJSON(data)
@@ -92,49 +92,64 @@ func TestJSONRPCRequest_UnmarshalJSON(t *testing.T) {
 		assert.NotNil(t, req.ID)
 		// If empty string, is still replaced with random int ID
 		_, ok := req.ID.(string)
-		require.False(t, ok)
+		assert.False(t, ok)
 		_, ok = req.ID.(int64)
-		require.True(t, ok)
+		assert.True(t, ok)
 		assert.Equal(t, "eth_chainId", req.Method)
 	})
 
-	t.Run("Invalid JSON => error", func(t *testing.T) {
+	t.Run("Invalid JSONRPC => error", func(t *testing.T) {
 		invalidJSONs := [][]byte{
-			[]byte(`{"jsonrpc":"2.0","id":,"method":"eth_chainId"}`),                         // Invalid ID
 			[]byte(`{"json":"2.0","id":1,"method":"eth_chainId"`),                            // Invalid JSONRPC field
-			[]byte(`{"json":"2.0","id":1,"method":15`),                                       // Invalid method
-			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[{"nested":}]}`), // Nested invalid JSON
-			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":"not_array"}`),   // Params not an array
+			[]byte(`{"jsonrpc":"2.0","id":,"method":"eth_chainId"}`),                         // Invalid ID: missing value
+			[]byte(`{"jsonrpc":"2.0","id":true,"method":"eth_chainId"}`),                     // Invalid ID: boolean
+			[]byte(`{"jsonrpc":"2.0","id":{},"method":"eth_chainId"}`),                       // Invalid ID: object
+			[]byte(`{"jsonrpc":"2.0","id":[],"method":"eth_chainId"}`),                       // Invalid ID: array
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":15`),                                    // Invalid method: number
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":""}`),                                   // Invalid method: empty string
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":{}}`),                                   // Invalid method: object
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":[]}`),                                   // Invalid method: array
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":true}`),                                 // Invalid method: boolean
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[{"nested":}]}`), // Invalid params: nested invalid JSON
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":"not_array"}`),   // Invalid params: simple string
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":15}`),            // Invalid params: number
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":}`),              // Invalid params: missing value
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":true}`),          // Invalid params: boolean
+			[]byte(`{"jsonrpc":"2.0","id":1,"params":[]}`),                                   // Missing method
+			[]byte(`{"jsonrpc":"2.0","id":1}`),                                               // Missing method field + params
+			[]byte(`{"0x123": "abs"}`),                                                       // Invalid JSONRPC request, but valid JSON
 			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]`),             // Missing closing bracket
-			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":}`),              // Undefined params
-			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":{}}`),            // Empty JSON object as params
+			[]byte(`{}`), // Empty JSON object
+			[]byte(``),   // Empty string
 		}
 
 		for _, data := range invalidJSONs {
 			var req JSONRPCRequest
 			err := req.UnmarshalJSON(data)
-			require.Error(t, err, "should fail to unmarshal invalid JSON: %s", data)
+			assert.Error(t, err, "should fail to unmarshal invalid JSON: %s", data)
 		}
 	})
 
-	// TODO: some of these are valid JSON but not valid JSONRPC requests - fix implementation?
-	t.Run("Valid JSON => no error", func(t *testing.T) {
+	t.Run("Valid JSONRPC => no error", func(t *testing.T) {
 		validJSONs := [][]byte{
-			[]byte(`{"jsonrpc":"2.0","id":2,"method":"eth_blockNumber","params":[]}`),                    // Empty params
-			[]byte(`{"jsonrpc":"2.0","id":3,"method":"eth_getBalance","params":["0x123456", "latest"]}`), // Multiple params
-			[]byte(`{"jsonrpc":"2.0","id":"one","method":"eth_chainId"}`),                                // id as string
-			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","extra":"field"}`),                    // Extra field
-			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId"}`),                                    // Missing params
-			[]byte(`{"jsonrpc":"2.0","id":1,"params":[]}`),                                               // Missing method
-			[]byte(`{"jsonrpc":"2.0","id":1}`),                                                           // Missing method field + params
-			[]byte(`{"0x123": "abs"}`),                                                                   // Invalid JSONRPC request, but valid JSON
-			[]byte(`{}`),                                                                                 // Empty JSON object
+			[]byte(`{"jsonrpc":"2.0","id":"one","method":"eth_chainId"}`),                                                   // string id
+			[]byte(`{"jsonrpc":"2.0","id":1.1,"method":"eth_chainId"}`),                                                     // float id
+			[]byte(`{"jsonrpc":"2.0","id":null,"method":"eth_chainId"}`),                                                    // null id
+			[]byte(`{"jsonrpc":"2.0","method":"eth_chainId","params":[]}`),                                                  // No ID (notification)
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","extra":"field"}`),                                       // Extra field
+			[]byte(`{"jsonrpc":"2.0","id":2,"method":"eth_blockNumber","params":[]}`),                                       // Empty list params
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":{}}`),                                           // Empty object params
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":{"key": "value"}}`),                             // Object params
+			[]byte(`{"jsonrpc":"2.0","id":3,"method":"eth_getBalance","params":["0x123456", "latest"]}`),                    // Multiple params
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":[{"address": "0x123", "block": "latest"}]}`), // Nested params
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId"}`),                                                       // Missing params
+			[]byte(`{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":null}`),                                         // Null params
 		}
 
 		for _, data := range validJSONs {
 			var req JSONRPCRequest
 			err := req.UnmarshalJSON(data)
-			require.NoError(t, err, "should successfully unmarshal valid JSON: %s", data)
+			assert.NoError(t, err, "should successfully unmarshal valid JSON: %s", data)
 		}
 	})
 }
@@ -147,7 +162,7 @@ func TestJSONRPCRequestFromBytes(t *testing.T) {
 		require.NotNil(t, req)
 		assert.Equal(t, "testMethod", req.Method)
 		assert.EqualValues(t, 1, req.ID)
-		assert.Equal(t, []interface{}{"0x123"}, req.Params)
+		assert.Equal(t, []any{"0x123"}, req.Params)
 	})
 
 	t.Run("Unmarshal error", func(t *testing.T) {
@@ -180,7 +195,7 @@ func TestJSONRPCResponse_ID(t *testing.T) {
 		err := resp.SetID("my-unique-id")
 		require.NoError(t, err, "SetID should succeed for string")
 
-		// Reading the ID should return the same interface{}
+		// Reading the ID should return the same 'any' value
 		got := resp.ID()
 		require.NotNil(t, got)
 		idStr, ok := got.(string)

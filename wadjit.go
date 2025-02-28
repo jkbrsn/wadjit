@@ -50,7 +50,7 @@ func (w *Wadjit) Close() {
 	w.cancel()
 	w.taskManager.Stop()
 
-	w.watchers.Range(func(key, value interface{}) bool {
+	w.watchers.Range(func(key, value any) bool {
 		watcher := value.(*Watcher)
 		watcher.close()
 		return true

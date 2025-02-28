@@ -262,7 +262,7 @@ func jsonRPCServer() *httptest.Server {
 
 func syncMapLen(m *sync.Map) int {
 	var length int
-	m.Range(func(key, value interface{}) bool {
+	m.Range(func(key, value any) bool {
 		length++
 		return true
 	})

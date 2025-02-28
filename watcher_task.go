@@ -213,7 +213,7 @@ const (
 // wsInflightMessage stores metadata about a message that is currently in-flight.
 type wsInflightMessage struct {
 	inflightID string
-	originalID interface{}
+	originalID any
 	timeSent   time.Time
 }
 
@@ -610,7 +610,7 @@ func (ll *wsPersistent) Execute() error {
 
 		// 2. Generate a random ID and extract the original ID from the JSON-RPC interface
 		inflightID := xid.New().String()
-		var originalID interface{}
+		var originalID any
 		if !jsonRPCReq.IsEmpty() {
 			originalID = jsonRPCReq.ID
 			jsonRPCReq.ID = inflightID

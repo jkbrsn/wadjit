@@ -3,6 +3,7 @@ package wadjit
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -19,20 +20,20 @@ type JSONRPCError struct {
 	Message string `json:"message,omitempty"`
 
 	// Errors might contain additional data, e.g. revert reason
-	Data interface{} `json:"data,omitempty"`
+	Data any `json:"data,omitempty"`
 }
 
 // JSONRPCRequest is a struct for JSON RPC requests.
 type JSONRPCRequest struct {
-	JSONRPC string        `json:"jsonrpc,omitempty"`
-	ID      interface{}   `json:"id,omitempty"`
-	Method  string        `json:"method"`
-	Params  []interface{} `json:"params"`
+	JSONRPC string `json:"jsonrpc,omitempty"`
+	ID      any    `json:"id,omitempty"`
+	Method  string `json:"method"`
+	Params  any    `json:"params"`
 }
 
 // JSONRPCResponse is a struct for JSON RPC responses.
 type JSONRPCResponse struct {
-	id      interface{}
+	id      any
 	idBytes []byte
 	muID    sync.RWMutex
 
@@ -50,7 +51,7 @@ type JSONRPCResponse struct {
 // separately from how it is marshaled and unmarshaled.
 type jsonRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      interface{}     `json:"id,omitempty"`
+	ID      any             `json:"id,omitempty"`
 	Error   *JSONRPCError   `json:"error,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 }
@@ -94,43 +95,75 @@ func (r *JSONRPCRequest) String() string {
 // - Sets the JSON RPC version to 2.0.
 // - Unmarshals the ID seprately, to handle both string and float64 types.
 func (r *JSONRPCRequest) UnmarshalJSON(data []byte) error {
-	type Alias JSONRPCRequest
-	aux := &struct {
-		*Alias
-		ID json.RawMessage `json:"id,omitempty"`
-	}{
-		Alias: (*Alias)(r),
+	// Define an auxiliary struct that maps directly to the JSON structure
+	type requestAux struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Method  string          `json:"method"`
+		Params  json.RawMessage `json:"params,omitempty"`
 	}
-	aux.JSONRPC = "2.0"
 
+	var aux requestAux
 	if err := sonic.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 
-	// Unmarshal the ID separately
-	if aux.ID != nil {
-		var id interface{}
-		if err := sonic.Unmarshal(aux.ID, &id); err != nil {
-			return err
-		}
-		switch v := id.(type) {
-		case float64:
-			r.ID = int64(v)
-		case string:
-			r.ID = v
-		}
+	if aux.JSONRPC != "2.0" {
+		return fmt.Errorf("invalid jsonrpc version: expected \"2.0\", got %q", aux.JSONRPC)
 	}
+	r.JSONRPC = aux.JSONRPC
 
-	// Set a random ID if none is provided
-	if r.ID == nil {
-		r.ID = randomJSONRPCID()
-	} else {
-		switch id := r.ID.(type) {
-		case string:
-			if id == "" {
-				r.ID = randomJSONRPCID()
+	if aux.Method == "" {
+		return errors.New("missing required field: method")
+	}
+	r.Method = aux.Method
+
+	// Unmarshal and validate the id field
+	if len(aux.ID) > 0 {
+		var id any
+		if err := sonic.Unmarshal(aux.ID, &id); err != nil {
+			return fmt.Errorf("invalid id field: %w", err)
+		}
+		// If the value is "null", id will be nil
+		if id == nil {
+			r.ID = nil
+		} else {
+			switch v := id.(type) {
+			case float64:
+				r.ID = int64(v)
+			case string:
+				if v == "" {
+					r.ID = nil
+				} else {
+					r.ID = v
+				}
+			default:
+				return errors.New("id field must be a string or a number")
 			}
 		}
+	}
+	if r.ID == nil {
+		// Set an ID to treat this as a call even though it might be a notification,
+		// as the ID field is required for some downstream services.
+		r.ID = randomJSONRPCID()
+	}
+
+	// Unmarshal the params field
+	if len(aux.Params) > 0 {
+		var rawParams any
+		if err := sonic.Unmarshal(aux.Params, &rawParams); err != nil {
+			return fmt.Errorf("invalid params field: %w", err)
+		}
+		// Accept only arrays or objects.
+		switch rawParams.(type) {
+		case []any, map[string]any, nil:
+			r.Params = rawParams
+		default:
+			return errors.New("params field must be either an array, an object, or nil")
+		}
+	} else {
+		// You may choose to set this to nil or an empty value.
+		r.Params = nil
 	}
 
 	return nil
@@ -154,7 +187,7 @@ func JSONRPCRequestFromBytes(data []byte) (*JSONRPCRequest, error) {
 //
 
 // ID returns the ID of the JSON RPC response.
-func (r *JSONRPCResponse) ID() interface{} {
+func (r *JSONRPCResponse) ID() any {
 	r.muID.RLock()
 
 	if r.id != nil {
@@ -374,7 +407,7 @@ func (r *JSONRPCResponse) ParseFromBytes(data []byte, expectedSize int) error {
 }
 
 // SetID sets the ID of the JSON RPC response, as interface and as bytes.
-func (r *JSONRPCResponse) SetID(id interface{}) error {
+func (r *JSONRPCResponse) SetID(id any) error {
 	r.muID.Lock()
 	defer r.muID.Unlock()
 

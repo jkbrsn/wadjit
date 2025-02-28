@@ -189,13 +189,13 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	wg.Wait()
 
 	length := 0
-	endpoint.inflightMsgs.Range(func(key, value interface{}) bool {
+	endpoint.inflightMsgs.Range(func(key, value any) bool {
 		length++
 		return true
 	})
 	assert.Equal(t, 1, length)
 	var inflightMsg wsInflightMessage
-	endpoint.inflightMsgs.Range(func(key, value interface{}) bool {
+	endpoint.inflightMsgs.Range(func(key, value any) bool {
 		inflightMsg = value.(wsInflightMessage)
 		return false // Stop after the first item
 	})
