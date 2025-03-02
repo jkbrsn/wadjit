@@ -410,7 +410,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 			if e.Mode == PersistentJSONRPC {
 				// 1. Unmarshal p into a JSON-RPC response interface
 				jsonRPCResp := &JSONRPCResponse{}
-				err = jsonRPCResp.ParseFromBytes(p, len(p))
+				err = jsonRPCResp.ParseFromBytes(p)
 				if err != nil {
 					// Send an error response
 					e.respChan <- errorResponse(err, e.id, e.URL)

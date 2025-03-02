@@ -361,11 +361,11 @@ func (r *JSONRPCResponse) ParseFromStream(reader io.Reader, expectedSize int) er
 		return err
 	}
 
-	return r.ParseFromBytes(data, expectedSize)
+	return r.ParseFromBytes(data)
 }
 
 // ParseFromBytes parses a JSON RPC response from a byte slice.
-func (r *JSONRPCResponse) ParseFromBytes(data []byte, expectedSize int) error {
+func (r *JSONRPCResponse) ParseFromBytes(data []byte) error {
 	// Parse the JSON data into an ast.Node
 	searcher := ast.NewSearcher(mem2Str(data))
 	searcher.CopyReturn = false

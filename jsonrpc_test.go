@@ -407,24 +407,57 @@ func TestJSONRPCResponse_ParseFromStream(t *testing.T) {
 	})
 }
 
-// TODO: more cases?
 func TestJSONRPCResponseFromStream(t *testing.T) {
-	t.Run("Nil body => error", func(t *testing.T) {
+	t.Run("Nil reader => error", func(t *testing.T) {
 		resp, err := JSONRPCResponseFromStream(nil, 0)
 		require.Error(t, err)
 		require.Nil(t, resp)
 	})
 
-	t.Run("Valid body => success", func(t *testing.T) {
-		raw := []byte(`{"jsonrpc":"2.0","id":42,"result":"OK"}`)
-		r := io.NopCloser(bytes.NewReader(raw))
+	// Content based test cases
+	// TODO: more cases, and make sure the parsing actually denies malformed JSON RPC responses
+	cases := []struct {
+		name       string
+		bytes      []byte
+		runtimeErr bool
+		expectErr  bool
+		expectRes  string
+	}{
+		{
+			name:       "nil bytes",
+			bytes:      nil,
+			runtimeErr: false,
+			expectErr:  true,
+			expectRes:  "",
+		}, {
+			name:       "valid basic",
+			bytes:      []byte(`{"jsonrpc":"2.0","id":42,"result":"OK"}`),
+			runtimeErr: false,
+			expectErr:  false,
+			expectRes:  `"OK"`,
+		}, {
+			name:       "nil bytes",
+			bytes:      []byte(`{"jsonrpc":"2.0","id":42,"result":{"key":"value"}}`),
+			runtimeErr: false,
+			expectErr:  false,
+			expectRes:  `{"key":"value"}`,
+		},
+	}
 
-		resp, err := JSONRPCResponseFromStream(r, len(raw))
-		require.NoError(t, err)
-		require.NotNil(t, resp)
-		assert.EqualValues(t, 42, resp.ID())
-		assert.Equal(t, json.RawMessage(`"OK"`), resp.Result)
-	})
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := io.NopCloser(bytes.NewReader(c.bytes))
+			resp, err := JSONRPCResponseFromStream(r, len(c.bytes))
+			if c.runtimeErr {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, resp)
+				assert.Equal(t, c.expectErr, resp.Error != nil)
+				assert.Equal(t, c.expectRes, string(resp.Result))
+			}
+		})
+	}
 }
 
 func TestJSONRPCResponse_SetID(t *testing.T) {
