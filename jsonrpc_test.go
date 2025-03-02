@@ -342,64 +342,126 @@ func TestJSONRPCResponse_ParseError(t *testing.T) {
 	})
 }
 
+func TestJSONRPCResponse_ParseFromBytes(t *testing.T) {
+	cases := []struct {
+		name       string
+		bytes      []byte
+		runtimeErr bool
+		errMessage string
+		respErr    *JSONRPCError
+		respID     any
+		respRes    json.RawMessage
+	}{
+		{
+			name:       "Has id and result",
+			bytes:      []byte(`{"jsonrpc":"2.0","id":1,"result":{"foo":"bar"}}`),
+			runtimeErr: false,
+			respID:     float64(1),
+			respRes:    []byte(`{"foo":"bar"}`),
+		},
+		{
+			name:       "Has id and correctly formed error 1",
+			bytes:      []byte(`{"jsonrpc":"2.0","id":"abc","error":{"code":-123,"message":"some msg"}}`),
+			runtimeErr: false,
+			respErr: &JSONRPCError{
+				Code:    -123,
+				Message: "some msg",
+			},
+			respID: "abc",
+		},
+		{
+			name:       "Has id and correctly formed error 2",
+			bytes:      []byte(`{"jsonrpc":"2.0","id":5,"error":{"code":-1234,"data":"some data"}}`),
+			runtimeErr: false,
+			respErr: &JSONRPCError{
+				Code: -1234,
+				Data: "some data",
+			},
+			respID: float64(5),
+		},
+		{
+			name:       "Has id and error with error string",
+			bytes:      []byte(`{"jsonrpc":"2.0","id":"abc","error":{"error":"some string"}}`),
+			runtimeErr: false,
+			respErr: &JSONRPCError{
+				Code:    ServerSideException,
+				Message: "some string",
+			},
+			respID: "abc",
+		},
+		{
+			name:       "Has id and malformed error",
+			bytes:      []byte(`{"jsonrpc":"2.0","id":"abc","error":"just a string"}`),
+			runtimeErr: false,
+			respErr: &JSONRPCError{
+				Code:    ServerSideException,
+				Message: `"just a string"`,
+			},
+			respID: "abc",
+		},
+		{
+			name:       "Neither error nor result",
+			bytes:      []byte(`{"jsonrpc":"2.0","id":2}`),
+			runtimeErr: true,
+			errMessage: "response must contain either result or error",
+		},
+		{
+			name:       "Both error and result",
+			bytes:      []byte(`{"jsonrpc":"2.0","id":2,"error":{"code":-123,"message":"some msg"},"result":{"foo":"bar"}}`),
+			runtimeErr: true,
+			errMessage: "response must not contain both result and error",
+		},
+		{
+			name:       "Invalid JSON",
+			bytes:      []byte(`{invalid-json`),
+			runtimeErr: true,
+			errMessage: "invalid char",
+		},
+		{
+			name:       "Empty JSON",
+			bytes:      []byte{},
+			runtimeErr: true,
+			errMessage: "input json is empty",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resp := &JSONRPCResponse{}
+			err := resp.ParseFromBytes(c.bytes)
+			if c.runtimeErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), c.errMessage)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, resp)
+				assert.Equal(t, c.respErr, resp.Error)
+				assert.Equal(t, c.respID, resp.ID())
+				assert.Equal(t, c.respRes, resp.Result)
+			}
+		})
+	}
+}
+
 func TestJSONRPCResponse_ParseFromStream(t *testing.T) {
-	t.Run("Has 'id' and 'result'", func(t *testing.T) {
-		raw := []byte(`{"jsonrpc":"2.0","id":1,"result":{"foo":"bar"}}`)
-		resp := &JSONRPCResponse{}
-		err := resp.ParseFromStream(bytes.NewReader(raw), len(raw))
-		require.NoError(t, err)
-
-		// Check ID
-		id := resp.ID()
-		assert.EqualValues(t, 1, id)
-
-		// Check Result
-		assert.Equal(t, json.RawMessage(`{"foo":"bar"}`), resp.Result)
-		assert.Nil(t, resp.Error)
-	})
-
-	t.Run("Has 'id' and 'error'", func(t *testing.T) {
-		raw := []byte(`{"jsonrpc":"2.0","id":"abc","error":{"code":-123,"message":"some msg"}}`)
-		resp := &JSONRPCResponse{}
-		err := resp.ParseFromStream(bytes.NewReader(raw), len(raw))
-		require.NoError(t, err)
-
-		// Check ID
-		id := resp.ID()
-		assert.Equal(t, "abc", id)
-
-		// Check Error
-		require.NotNil(t, resp.Error)
-		assert.Equal(t, -123, resp.Error.Code)
-		assert.Equal(t, "some msg", resp.Error.Message)
-		assert.Nil(t, resp.Result)
-	})
-
-	t.Run("No 'result' or 'error' => treat entire body as error", func(t *testing.T) {
-		raw := []byte(`{"jsonrpc":"2.0","id":2}`)
-		resp := &JSONRPCResponse{}
-		err := resp.ParseFromStream(bytes.NewReader(raw), len(raw))
-		require.NoError(t, err)
-		// Check that it fell back to ParseError() on entire body
-		require.NotNil(t, resp.Error)
-		assert.Equal(t, -32603, resp.Error.Code)
-		assert.Contains(t, resp.Error.Message, `"id":2`)
-	})
-
 	t.Run("Invalid JSON => error response", func(t *testing.T) {
-		// Note: since the stream parse hunts for specific fields, it will not necessarily
-		// return an error if the JSON is invalid.
 		raw := []byte(`{invalid-json`)
 		resp := &JSONRPCResponse{}
 		err := resp.ParseFromStream(bytes.NewReader(raw), len(raw))
-		require.NoError(t, err, "should succeed in parsing this particular invalid JSON")
-		assert.NotNil(t, resp.Error)
-		assert.Equal(t, -32603, resp.Error.Code)
-		// The whole body will be treated as the error message
-		assert.Contains(t, resp.Error.Message, "{invalid-json")
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "{invalid-json")
+		assert.Nil(t, resp.Error)
+		assert.Nil(t, resp.Result)
 	})
 
-	t.Run("Reader error => immediate return", func(t *testing.T) {
+	t.Run("Nil reader => error return", func(t *testing.T) {
+		resp := &JSONRPCResponse{}
+		err := resp.ParseFromStream(nil, 12)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cannot read from nil reader")
+	})
+
+	t.Run("Reader error => error return", func(t *testing.T) {
 		resp := &JSONRPCResponse{}
 		err := resp.ParseFromStream(errReader("some read error"), 100)
 		require.Error(t, err)
@@ -426,17 +488,17 @@ func TestJSONRPCResponseFromStream(t *testing.T) {
 		{
 			name:       "nil bytes",
 			bytes:      nil,
-			runtimeErr: false,
+			runtimeErr: true,
 			expectErr:  true,
 			expectRes:  "",
 		}, {
-			name:       "valid basic",
+			name:       "valid string",
 			bytes:      []byte(`{"jsonrpc":"2.0","id":42,"result":"OK"}`),
 			runtimeErr: false,
 			expectErr:  false,
 			expectRes:  `"OK"`,
 		}, {
-			name:       "nil bytes",
+			name:       "valid object",
 			bytes:      []byte(`{"jsonrpc":"2.0","id":42,"result":{"key":"value"}}`),
 			runtimeErr: false,
 			expectErr:  false,

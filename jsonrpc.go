@@ -8,11 +8,13 @@ import (
 	"io"
 	"math"
 	"math/rand"
+	"strings"
 	"sync"
 
 	"github.com/bytedance/sonic"
-	"github.com/bytedance/sonic/ast"
 )
+
+const ServerSideException = -32603
 
 // JSONRPCError represents a standard JSON RPC error.
 type JSONRPCError struct {
@@ -43,7 +45,6 @@ type JSONRPCResponse struct {
 
 	Result   json.RawMessage
 	muResult sync.RWMutex
-	astNode  *ast.Node
 }
 
 // jsonRPCResponse is an internal representation of a JSON RPC response.
@@ -95,15 +96,15 @@ func (r *JSONRPCRequest) String() string {
 // - Sets the JSON RPC version to 2.0.
 // - Unmarshals the ID seprately, to handle both string and float64 types.
 func (r *JSONRPCRequest) UnmarshalJSON(data []byte) error {
-	// Define an auxiliary struct that maps directly to the JSON structure
-	type requestAux struct {
+	// Define an auxiliary struct that maps directly to the JSON RPC request structure
+	type jsonRPCRequestAux struct {
 		JSONRPC string          `json:"jsonrpc"`
 		ID      json.RawMessage `json:"id"`
 		Method  string          `json:"method"`
 		Params  json.RawMessage `json:"params,omitempty"`
 	}
 
-	var aux requestAux
+	var aux jsonRPCRequestAux
 	if err := sonic.Unmarshal(data, &aux); err != nil {
 		return err
 	}
@@ -289,66 +290,66 @@ func (r *JSONRPCResponse) ParseError(raw string) error {
 	r.muErr.Lock()
 	defer r.muErr.Unlock()
 
+	// Clear previously stored error bytes
 	r.errBytes = nil
 
-	// First attempt to unmarshal the error as a typical JSON-RPC error
+	// Trim whitespace and check for null
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || trimmed == "null" {
+		r.Error = &JSONRPCError{
+			Code:    ServerSideException,
+			Message: "unexpected empty response from upstream endpoint",
+			Data:    "",
+		}
+		return nil
+	}
+
+	// 1. Unmarshal the error as a typical JSON RPC error
 	var rpcErr JSONRPCError
-	if err := sonic.UnmarshalString(raw, &rpcErr); err != nil {
-		// Special case: check for non-standard error structures in the raw data
-		if raw == "" || raw == "null" {
-			r.Error = &JSONRPCError{
-				int(-32603), // ServerSideException
-				"unexpected empty response from upstream endpoint",
-				"",
-			}
+	if err := sonic.UnmarshalString(raw, &rpcErr); err == nil {
+		// If at least one of Code or Message is set, consider a valid error
+		if rpcErr.Code != 0 || rpcErr.Message != "" {
+			r.Error = &rpcErr
+			r.errBytes = str2Mem(raw)
 			return nil
 		}
 	}
 
-	// Check if the error is well-formed and has necessary fields
-	if rpcErr.Code != 0 || rpcErr.Message != "" {
-		r.Error = &rpcErr
-		r.errBytes = str2Mem(raw)
-		return nil
-	}
-
-	// Handle case: numeric "code", "message", and "data"
-	caseNumerics := &struct {
+	// 2. Unmarshal an error with numeric code, message, and data
+	numericError := struct {
 		Code    int    `json:"code,omitempty"`
 		Message string `json:"message,omitempty"`
 		Data    string `json:"data,omitempty"`
 	}{}
-	if err := sonic.UnmarshalString(raw, caseNumerics); err == nil {
-		if caseNumerics.Code != 0 || caseNumerics.Message != "" || caseNumerics.Data != "" {
+	if err := sonic.UnmarshalString(raw, &numericError); err == nil {
+		if numericError.Code != 0 || numericError.Message != "" || numericError.Data != "" {
 			r.Error = &JSONRPCError{
-				caseNumerics.Code,
-				caseNumerics.Message,
-				caseNumerics.Data,
+				Code:    numericError.Code,
+				Message: numericError.Message,
+				Data:    numericError.Data,
 			}
-
 			return nil
 		}
 	}
 
-	// Handle case: only "error" field as a string
-	caseErrorStr := &struct {
+	// 3. Unmarshal an error providing only the "error" field as a string
+	errorStrWrapper := struct {
 		Error string `json:"error"`
 	}{}
-	if err := sonic.UnmarshalString(raw, caseErrorStr); err == nil && caseErrorStr.Error != "" {
+	if err := sonic.UnmarshalString(raw, &errorStrWrapper); err == nil && errorStrWrapper.Error != "" {
 		r.Error = &JSONRPCError{
-			int(-32603), // ServerSideException
-			caseErrorStr.Error,
-			"",
+			Code:    ServerSideException,
+			Message: errorStrWrapper.Error,
 		}
 		return nil
 	}
 
-	// Handle case: no match, treat the raw data as message string
+	// 4. Fallback: if none of the above cases match, treat the raw string as the error message
 	r.Error = &JSONRPCError{
-		int(-32603), // ServerSideException
-		raw,
-		"",
+		Code:    ServerSideException,
+		Message: raw,
 	}
+
 	return nil
 }
 
@@ -366,41 +367,49 @@ func (r *JSONRPCResponse) ParseFromStream(reader io.Reader, expectedSize int) er
 
 // ParseFromBytes parses a JSON RPC response from a byte slice.
 func (r *JSONRPCResponse) ParseFromBytes(data []byte) error {
-	// Parse the JSON data into an ast.Node
-	searcher := ast.NewSearcher(mem2Str(data))
-	searcher.CopyReturn = false
-	searcher.ConcurrentRead = false
-	searcher.ValidateJSON = false
-
-	// Extract the "id" field
-	if idNode, err := searcher.GetByPath("id"); err == nil {
-		if rawID, err := idNode.Raw(); err == nil {
-			r.muID.Lock()
-			defer r.muID.Unlock()
-			r.idBytes = str2Mem(rawID)
-		}
+	// Define an auxiliary struct that maps directly to the JSON RPC response structure
+	type jsonRPCResponseAux struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  json.RawMessage `json:"result,omitempty"`
+		Error   json.RawMessage `json:"error,omitempty"`
 	}
 
-	// Extract the "result" or "error" field
-	if resultNode, err := searcher.GetByPath("result"); err == nil {
-		if rawResult, err := resultNode.Raw(); err == nil {
-			r.muResult.Lock()
-			defer r.muResult.Unlock()
-			r.Result = str2Mem(rawResult)
-			r.astNode = &resultNode
-		} else {
-			return err
-		}
-	} else if errorNode, err := searcher.GetByPath("error"); err == nil {
-		if rawError, err := errorNode.Raw(); err == nil {
-			if err := r.ParseError(rawError); err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	} else if err := r.ParseError(mem2Str(data)); err != nil {
+	var aux jsonRPCResponseAux
+	if err := sonic.Unmarshal(data, &aux); err != nil {
 		return err
+	}
+
+	// Validate jsonrpc version
+	if aux.JSONRPC != "2.0" {
+		return errors.New("invalid jsonrpc version")
+	}
+
+	// Validate that either result or error is present
+	resultExists := len(aux.Result) > 0
+	errorExists := len(aux.Error) > 0
+
+	if !resultExists && !errorExists {
+		return errors.New("response must contain either result or error")
+	}
+	if resultExists && errorExists {
+		return errors.New("response must not contain both result and error")
+	}
+
+	// Process the id field
+	r.muID.Lock()
+	r.idBytes = aux.ID
+	r.muID.Unlock()
+
+	// Assign result or error accordingly
+	if aux.Result != nil {
+		r.muResult.Lock()
+		r.Result = aux.Result
+		r.muResult.Unlock()
+	} else {
+		if err := r.ParseError(string(aux.Error)); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -455,6 +464,10 @@ func randomJSONRPCID() int64 {
 
 // ReadAll reads all data from the given reader and returns it as a byte slice.
 func ReadAll(reader io.Reader, chunkSize int64, expectedSize int) ([]byte, error) {
+	if reader == nil {
+		return nil, errors.New("cannot read from nil reader")
+	}
+
 	// 16KB buffer by default
 	buffer := bytes.NewBuffer(make([]byte, 0, 16*1024))
 
