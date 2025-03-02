@@ -29,7 +29,7 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	endpoint := NewHTTPEndpoint(url, header, nil)
+	endpoint := NewHTTPEndpoint(url, http.MethodGet, header, nil)
 
 	assert.Equal(t, url, endpoint.URL)
 	assert.Equal(t, header, endpoint.Header)
@@ -51,7 +51,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 
 	header.Add("Content-Type", "application/json")
 
-	endpoint := NewHTTPEndpoint(url, header, []byte(`{"key":"value"}`))
+	endpoint := NewHTTPEndpoint(url, http.MethodGet, header, []byte(`{"key":"value"}`))
 
 	err = endpoint.Initialize("", responseChan)
 	assert.NoError(t, err)
@@ -92,7 +92,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 	header := make(http.Header)
 	payload := []byte(`{"key":"value"}`)
 
-	endpoint := NewHTTPEndpoint(url, header, payload)
+	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, payload)
 	require.NotNil(t, endpoint)
 
 	assert.Equal(t, url, endpoint.URL)

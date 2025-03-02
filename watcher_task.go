@@ -42,7 +42,7 @@ type WatcherTask interface {
 // WatcherTask interface and is meant for use in a Watcher.
 type HTTPEndpoint struct {
 	Header  http.Header
-	Method  string
+	Method  string // TODO: test support for varying methods
 	Payload []byte
 	URL     *url.URL
 
@@ -159,10 +159,15 @@ func traceRequest(times *httpRequestTimes) *httptrace.ClientTrace {
 }
 
 // NewHTTPEndpoint creates a new HTTPEndpoint with the given URL, header, and payload.
-func NewHTTPEndpoint(url *url.URL, header http.Header, payload []byte) *HTTPEndpoint {
+func NewHTTPEndpoint(
+	url *url.URL,
+	method string,
+	header http.Header,
+	payload []byte,
+) *HTTPEndpoint {
 	return &HTTPEndpoint{
 		Header:  header,
-		Method:  http.MethodGet, // TODO: support other methods
+		Method:  method,
 		Payload: payload,
 		URL:     url,
 	}
