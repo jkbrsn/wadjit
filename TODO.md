@@ -2,7 +2,6 @@
 
 ## v0.2.0
 
-- Improve readme
 - Clear in-code TODOs
 
 ## various ideas
