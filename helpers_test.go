@@ -2,6 +2,7 @@ package wadjit
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -105,13 +106,14 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-// echoServer creates a test server that echos back the payload sent to it.
+// echoServer creates a custom handled server that echoes back the payload sent to it,
+// if a payload is present.
 func echoServer() *httptest.Server {
-	// Create a test server with a custom handler
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+
+		// Handle WebSocket
 		case "/ws":
-			// Handle WebSocket upgrade
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
@@ -131,22 +133,41 @@ func echoServer() *httptest.Server {
 				}
 			}
 
+		// Handle HTTP
 		default:
-			// Read payload from the client
-			payload, err := io.ReadAll(r.Body)
-			if err != nil {
+			switch r.Method {
+			case http.MethodOptions:
+				fallthrough
+			case http.MethodDelete:
+				fallthrough
+			case http.MethodGet:
+				w.WriteHeader(http.StatusOK)
+				w.Write(fmt.Appendf(nil, "%s request received on path %s", r.Method, r.URL.Path))
+
+			case http.MethodPatch:
+				fallthrough
+			case http.MethodPost:
+				fallthrough
+			case http.MethodPut:
+				payload, err := io.ReadAll(r.Body)
+				if err != nil {
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("no payload found"))
+					return
+				}
+				// Mirror request's content type in the response
+				if _, ok := r.Header["Content-Type"]; ok {
+					w.Header().Set("Content-Type", r.Header.Get("Content-Type"))
+				}
+				w.WriteHeader(http.StatusOK)
+				// Echo payload back to the client
+				w.Write(payload)
+
+			default:
 				// Write harcoded message to the client
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("no payload found"))
-				return
+				w.Write([]byte("unsupported method"))
 			}
-			// Echo content type header back to the client
-			if r.Header.Get("Content-Type") == "application/json" {
-				w.Header().Set("Content-Type", "application/json")
-			}
-			w.WriteHeader(http.StatusOK)
-			// Echo payload back to the client
-			w.Write(payload)
 		}
 	}))
 

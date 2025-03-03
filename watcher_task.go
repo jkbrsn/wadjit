@@ -42,7 +42,7 @@ type WatcherTask interface {
 // WatcherTask interface and is meant for use in a Watcher.
 type HTTPEndpoint struct {
 	Header  http.Header
-	Method  string // TODO: test support for varying methods
+	Method  string
 	Payload []byte
 	URL     *url.URL
 

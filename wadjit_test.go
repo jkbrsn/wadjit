@@ -1,6 +1,7 @@
 package wadjit
 
 import (
+	"net/http"
 	"net/url"
 	"sync/atomic"
 	"testing"
@@ -96,7 +97,7 @@ func TestWadjitLifecycle(t *testing.T) {
 
 	// Create first watcher
 	id1 := xid.New().String()
-	tasks := append([]WatcherTask{}, &HTTPEndpoint{URL: url, Payload: []byte("first")})
+	tasks := append([]WatcherTask{}, &HTTPEndpoint{URL: url, Method: http.MethodPost, Payload: []byte("first")})
 	watcher1, err := NewWatcher(
 		id1,
 		5*time.Millisecond,
@@ -105,7 +106,7 @@ func TestWadjitLifecycle(t *testing.T) {
 	assert.NoError(t, err, "error creating watcher 1")
 	// Create second watcher
 	id2 := xid.New().String()
-	tasks = append([]WatcherTask{}, &HTTPEndpoint{URL: url, Payload: []byte("second")})
+	tasks = append([]WatcherTask{}, &HTTPEndpoint{URL: url, Method: http.MethodPost, Payload: []byte("second")})
 	watcher2, err := NewWatcher(
 		id2,
 		15*time.Millisecond,

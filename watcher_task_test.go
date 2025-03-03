@@ -51,7 +51,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 
 	header.Add("Content-Type", "application/json")
 
-	endpoint := NewHTTPEndpoint(url, http.MethodGet, header, []byte(`{"key":"value"}`))
+	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, []byte(`{"key":"value"}`))
 
 	err = endpoint.Initialize("", responseChan)
 	assert.NoError(t, err)
@@ -84,6 +84,78 @@ func TestHTTPEndpointExecute(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for response")
 	}
+}
+
+func TestHTTPEndpointExecuteMethods(t *testing.T) {
+	server := echoServer()
+	defer server.Close()
+
+	echoURL, err := url.Parse(server.URL)
+	assert.NoError(t, err, "failed to parse HTTP URL")
+	header := make(http.Header)
+	responseChan := make(chan WatcherResponse, 1)
+
+	cases := []struct {
+		method  string
+		path    string
+		payload []byte
+	}{
+		{http.MethodDelete, "/delete", nil},
+		{http.MethodGet, "/get", nil},
+		{http.MethodOptions, "/options", nil},
+		{http.MethodPatch, "/patch", []byte(`{"key":"value"}`)},
+		{http.MethodPost, "/post", []byte(`{"key":"value"}`)},
+		{http.MethodPut, "/put", []byte(`{"key":"value"}`)},
+	}
+
+	for _, c := range cases {
+		t.Run(c.method, func(t *testing.T) {
+			if c.payload != nil {
+				header.Add("Content-Type", "application/json")
+			}
+			echoURL.Path = c.path
+			endpoint := NewHTTPEndpoint(echoURL, c.method, header, c.payload)
+			err = endpoint.Initialize("", responseChan)
+			assert.NoError(t, err)
+
+			task := endpoint.Task()
+			assert.NotNil(t, task)
+
+			go func() {
+				err := task.Execute()
+				assert.NoError(t, err)
+			}()
+
+			select {
+			case resp := <-responseChan:
+				assert.NotNil(t, resp)
+				assert.Equal(t, "", resp.WatcherID)
+				assert.Equal(t, echoURL, resp.URL)
+				assert.NoError(t, resp.Err)
+
+				// Check the response metadata
+				metadata := resp.Metadata()
+				assert.NotNil(t, metadata)
+				assert.Greater(t, metadata.Latency, time.Duration(0))
+				assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+				if c.payload != nil {
+					assert.Equal(t, "application/json", metadata.Headers.Get("Content-Type"))
+				}
+
+				// Check the response data
+				data, err := resp.Data()
+				assert.NoError(t, err)
+				if c.payload != nil {
+					assert.JSONEq(t, `{"key":"value"}`, string(data))
+				} else {
+					assert.Contains(t, string(data), c.method)
+				}
+			case <-time.After(200 * time.Millisecond):
+				t.Fatal("timeout waiting for response")
+			}
+		})
+	}
+
 }
 
 func TestNewHTTPEndpoint(t *testing.T) {
