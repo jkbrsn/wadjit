@@ -1,10 +1,8 @@
 # todo
 
-## v0.2.1
+## v0.x
 
 - Clear in-code todo:s
-- Exchange JSON RPC structs for external package
-- Add go-pkg badge
 
 ## various ideas
 

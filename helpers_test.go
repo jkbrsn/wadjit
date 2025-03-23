@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gorilla/websocket"
+	"github.com/jakobilobi/go-jsonrpc"
 	"github.com/jakobilobi/go-taskman"
 )
 
@@ -198,12 +199,13 @@ func jsonRPCServer() *httptest.Server {
 					return
 				}
 				// Parse the message as a JSON-RPC request
-				var req JSONRPCRequest
+				var req jsonrpc.Request
 				err = req.UnmarshalJSON(message)
 				if err != nil {
 					// Respond with a parse error
-					resp := JSONRPCResponse{
-						Error: &JSONRPCError{
+					resp := jsonrpc.Response{
+						JSONRPC: "2.0",
+						Error: &jsonrpc.Error{
 							Code:    -32700,
 							Message: "Parse error",
 						},
@@ -216,10 +218,12 @@ func jsonRPCServer() *httptest.Server {
 					continue
 				}
 				// Echo the request back to the client
-				resp := JSONRPCResponse{
-					id:     req.ID,
-					Error:  nil,
-					Result: message,
+				fmt.Printf("THE ID: %v", req.ID)
+				resp := jsonrpc.Response{
+					JSONRPC: "2.0",
+					ID:      req.ID,
+					Error:   nil,
+					Result:  message,
 				}
 				respBytes, _ := resp.MarshalJSON()
 				err = conn.WriteMessage(mt, respBytes)
@@ -246,12 +250,13 @@ func jsonRPCServer() *httptest.Server {
 			}
 
 			// Parse the payload as a JSON-RPC request
-			var req JSONRPCRequest
+			var req jsonrpc.Request
 			err = req.UnmarshalJSON(payload)
 			if err != nil {
 				// Respond with a parse error
-				resp := JSONRPCResponse{
-					Error: &JSONRPCError{
+				resp := jsonrpc.Response{
+					JSONRPC: "2.0",
+					Error: &jsonrpc.Error{
 						Code:    -32700,
 						Message: "Parse error",
 					},
@@ -264,10 +269,11 @@ func jsonRPCServer() *httptest.Server {
 			}
 
 			// Build the response
-			resp := JSONRPCResponse{
-				id:     req.ID,
-				Error:  nil,
-				Result: payload,
+			resp := jsonrpc.Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   nil,
+				Result:  payload,
 			}
 			respBytes, _ := resp.MarshalJSON()
 

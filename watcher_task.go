@@ -14,6 +14,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
+	"github.com/jakobilobi/go-jsonrpc"
 	"github.com/jakobilobi/go-taskman"
 	"github.com/rs/xid"
 )
@@ -414,35 +415,34 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 
 			if e.Mode == PersistentJSONRPC {
 				// 1. Unmarshal p into a JSON-RPC response interface
-				jsonRPCResp := &JSONRPCResponse{}
+				jsonRPCResp := &jsonrpc.Response{}
 				err = jsonRPCResp.ParseFromBytes(p)
 				if err != nil {
 					// Send an error response
-					e.respChan <- errorResponse(err, e.id, e.URL)
+					e.respChan <- errorResponse(fmt.Errorf("failed parsing jsonrpc.Response from bytes: %w", err), e.id, e.URL)
 					return
 				}
 
 				// 2. Check the ID against the inflight messages map
 				if !jsonRPCResp.IsEmpty() {
-					responseID := jsonRPCResp.ID()
-					if responseID == nil {
+					responseID := jsonRPCResp.IDString()
+					if responseID == "" {
 						// Send an error response
-						e.respChan <- errorResponse(err, e.id, e.URL)
+						e.respChan <- errorResponse(fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.Result), e.id, e.URL)
 						return
 					}
-					responseIDStr := fmt.Sprintf("%v", responseID)
 
 					// 3. If the ID is known, get the inflight map metadata and delete the ID in the map
-					if inflightMsg, ok := e.inflightMsgs.Load(responseIDStr); ok {
+					if inflightMsg, ok := e.inflightMsgs.Load(responseID); ok {
 						inflightMsg := inflightMsg.(wsInflightMessage)
-						e.inflightMsgs.Delete(responseIDStr)
+						e.inflightMsgs.Delete(responseID)
 
 						// 4. Restore original ID and marshal the JSON-RPC interface back into a byte slice
-						jsonRPCResp.id = inflightMsg.originalID
+						jsonRPCResp.ID = inflightMsg.originalID
 						p, err = jsonRPCResp.MarshalJSON()
 						if err != nil {
 							// Send an error response
-							e.respChan <- errorResponse(err, e.id, e.URL)
+							e.respChan <- errorResponse(fmt.Errorf("failed re-marshalling JSON-RPC response: %w", err), e.id, e.URL)
 							return
 						}
 						// 5. set metadata to the taskresponse: original id, duration between time sent and time received
@@ -460,7 +460,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 						}
 						e.respChan <- response
 					} else {
-						e.respChan <- errorResponse(errors.New("unknown response ID"), e.id, e.URL)
+						e.respChan <- errorResponse(errors.New("unknown response ID: "+jsonRPCResp.IDString()), e.id, e.URL)
 					}
 				} else {
 					e.respChan <- errorResponse(errors.New("empty JSON-RPC response"), e.id, e.URL)
@@ -602,7 +602,7 @@ func (ll *wsPersistent) Execute() error {
 		var err error
 
 		// 1. Unmarshal the msg into a JSON-RPC interface
-		jsonRPCReq := &JSONRPCRequest{}
+		jsonRPCReq := &jsonrpc.Request{}
 		if len(ll.wsEndpoint.Payload) > 0 {
 			// TODO: optimize this to only get the ID?
 			err := jsonRPCReq.UnmarshalJSON(ll.wsEndpoint.Payload)

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jakobilobi/go-jsonrpc"
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -236,12 +237,12 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	responseChan := make(chan WatcherResponse, 2)
 
 	originalID := xid.New().String()
-	payload := `{"id":"` + originalID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`
+	payload := []byte(`{"id":"` + originalID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
 	endpoint := &WSEndpoint{
 		URL:     url,
 		Header:  header,
 		Mode:    PersistentJSONRPC,
-		Payload: []byte(payload),
+		Payload: payload,
 	}
 
 	err = endpoint.Initialize("", responseChan)
@@ -273,19 +274,20 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	})
 	assert.Equal(t, originalID, inflightMsg.originalID)
 	expectedResult := []byte(`{"id":"` + inflightMsg.inflightID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
-	resp := JSONRPCResponse{
-		id:     originalID,
-		Result: expectedResult,
+	resp := jsonrpc.Response{
+		JSONRPC: "2.0",
+		ID:      originalID,
+		Result:  expectedResult,
 	}
 	expectedResp, err := resp.MarshalJSON()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	select {
 	case resp := <-responseChan:
 		assert.NotNil(t, resp)
 		assert.Equal(t, "", resp.WatcherID)
 		assert.Equal(t, url, resp.URL)
-		assert.NoError(t, resp.Err)
+		require.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
 		// Check the response metadata
 		metadata := resp.Metadata()
