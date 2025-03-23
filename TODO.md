@@ -1,8 +1,9 @@
 # todo
 
-## v0.2.0
+## v0.2.1
 
-- Clear in-code TODOs
+- Clear in-code todo:s
+- Exchange JSON RPC structs for external package
 
 ## various ideas
 
