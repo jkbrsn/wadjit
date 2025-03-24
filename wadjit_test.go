@@ -174,4 +174,15 @@ func TestWadjitLifecycle(t *testing.T) {
 	// Try adding the same Watcher again
 	err = w.AddWatcher(watcher1)
 	assert.Error(t, err, "expected error adding a closed watcher")
+
+	// Try adding a new Watcher, but with the ID of the removed Watcher
+	tasks = append([]WatcherTask{}, &HTTPEndpoint{URL: url, Method: http.MethodPost, Payload: []byte("first")})
+	watcher4, err := NewWatcher(
+		id1,
+		5*time.Millisecond,
+		tasks,
+	)
+	assert.NoError(t, err, "error creating watcher 4")
+	err = w.AddWatcher(watcher4)
+	assert.NoError(t, err)
 }
