@@ -3,6 +3,7 @@
 ## v0.x
 
 - Clear in-code todo:s
+- Implement Wadjit function to get info on held watchers, perhaps a []string with ID:s
 
 ## various ideas
 
