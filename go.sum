@@ -19,8 +19,8 @@ github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+l
 github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
 github.com/jakobilobi/go-jsonrpc v0.5.1 h1:i5EGd0fmbgWUDsGmIKfJa8kWpKpKlOFR6l7J9MwPMqM=
 github.com/jakobilobi/go-jsonrpc v0.5.1/go.mod h1:vkPRT8BvqQSyfaGTW3m3z0zFrSvnvexm1Rp7KQOEsKQ=
-github.com/jakobilobi/go-taskman v0.2.2 h1:6GVXPBj4b6Hk95VpdMfItlqs1Y/w4T2a+QjjGLNTUSE=
-github.com/jakobilobi/go-taskman v0.2.2/go.mod h1:F+YgiG7dBpPDteadXknHAc8QjQcx1NaVU9WtsbrTUDc=
+github.com/jakobilobi/go-taskman v0.2.3 h1:TlUioJ1EuayLODuvkzYRklE7VxFVEm/aQLoRbxLASPY=
+github.com/jakobilobi/go-taskman v0.2.3/go.mod h1:F+YgiG7dBpPDteadXknHAc8QjQcx1NaVU9WtsbrTUDc=
 github.com/klauspost/cpuid/v2 v2.0.9 h1:lgaqFMSdTdQYdZ04uHyN2d/eKdOMyi2YLSvlQIBFYa4=
 github.com/klauspost/cpuid/v2 v2.0.9/go.mod h1:FInQzS24/EEf25PyTYn52gqo7WaD8xa0213Md/qVLRg=
 github.com/knz/go-libedit v1.10.1/go.mod h1:MZTVkCWyz0oBc7JOWP3wNAzd002ZbM/5hgShxwh4x8M=
