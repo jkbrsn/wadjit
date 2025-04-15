@@ -26,7 +26,7 @@ type WatcherTask interface {
 	Close() error
 
 	// Initialize sets up the WatcherTask to be ready to watch an endpoint.
-	Initialize(id string, respChan chan<- WatcherResponse) error
+	Initialize(watcherID string, respChan chan<- WatcherResponse) error
 
 	// Task returns a taskman.Task that sends requests and messages to the endpoint.
 	Task() taskman.Task
@@ -46,10 +46,11 @@ type HTTPEndpoint struct {
 	Method  string
 	Payload []byte
 	URL     *url.URL
+	ID      string
 
 	// Set by Initialize
-	id       string
-	respChan chan<- WatcherResponse
+	watcherID string
+	respChan  chan<- WatcherResponse
 }
 
 // Close closes the HTTP endpoint.
@@ -58,8 +59,8 @@ func (e *HTTPEndpoint) Close() error {
 }
 
 // Initialize sets up the HTTP endpoint to be able to send on its responses.
-func (e *HTTPEndpoint) Initialize(id string, responseChannel chan<- WatcherResponse) error {
-	e.id = id
+func (e *HTTPEndpoint) Initialize(watcherID string, responseChannel chan<- WatcherResponse) error {
+	e.watcherID = watcherID
 	e.respChan = responseChannel
 	// TODO: set mode based on payload, e.g. JSON RPC, text ete.
 	return nil
@@ -84,6 +85,10 @@ func (e *HTTPEndpoint) Validate() error {
 		// Set empty header if nil
 		e.Header = make(http.Header)
 	}
+	if e.ID == "" {
+		// Set random ID if nil
+		e.ID = xid.New().String()
+	}
 	return nil
 }
 
@@ -100,7 +105,7 @@ type httpRequest struct {
 func (r httpRequest) Execute() error {
 	request, err := http.NewRequest(r.method, r.endpoint.URL.String(), bytes.NewReader(r.data))
 	if err != nil {
-		r.respChan <- errorResponse(err, r.endpoint.id, r.endpoint.URL)
+		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, r.endpoint.URL)
 		return err
 	}
 
@@ -120,7 +125,7 @@ func (r httpRequest) Execute() error {
 	// Send the request
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		r.respChan <- errorResponse(err, r.endpoint.id, r.endpoint.URL)
+		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, r.endpoint.URL)
 		return err
 	}
 
@@ -132,7 +137,8 @@ func (r httpRequest) Execute() error {
 
 	// Send the response on the channel
 	r.respChan <- WatcherResponse{
-		WatcherID: r.endpoint.id,
+		TaskID:    r.endpoint.ID,
+		WatcherID: r.endpoint.watcherID,
 		URL:       r.endpoint.URL,
 		Err:       nil,
 		Payload:   taskResponse,
@@ -159,18 +165,20 @@ func traceRequest(times *httpRequestTimes) *httptrace.ClientTrace {
 	}
 }
 
-// NewHTTPEndpoint creates a new HTTPEndpoint with the given URL, header, and payload.
+// NewHTTPEndpoint creates a new HTTPEndpoint with the given attributes.
 func NewHTTPEndpoint(
 	url *url.URL,
 	method string,
 	header http.Header,
 	payload []byte,
+	id string,
 ) *HTTPEndpoint {
 	return &HTTPEndpoint{
 		Header:  header,
 		Method:  method,
 		Payload: payload,
 		URL:     url,
+		ID:      id,
 	}
 }
 
@@ -187,6 +195,7 @@ type WSEndpoint struct {
 	Mode    WSEndpointMode
 	Payload []byte
 	URL     *url.URL
+	ID      string
 
 	// Set internally
 	conn         *websocket.Conn
@@ -194,10 +203,10 @@ type WSEndpoint struct {
 	wg           sync.WaitGroup
 
 	// Set by Initialize
-	id       string
-	respChan chan<- WatcherResponse
-	ctx      context.Context
-	cancel   context.CancelFunc
+	watcherID string
+	respChan  chan<- WatcherResponse
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 // WSEndpointMode is an enum for the mode of the WebSocket endpoint.
@@ -256,9 +265,9 @@ func (e *WSEndpoint) Close() error {
 // Initialize prepares the WSEndpoint to be able to send messages to the target endpoint.
 // If configured as one of the persistent connection modes, e.g. JSON RPC, this function will
 // establish a long-lived connection to the endpoint.
-func (e *WSEndpoint) Initialize(id string, responseChannel chan<- WatcherResponse) error {
+func (e *WSEndpoint) Initialize(watcherID string, responseChannel chan<- WatcherResponse) error {
 	e.mu.Lock()
-	e.id = id
+	e.watcherID = watcherID
 	e.respChan = responseChannel
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.mu.Unlock()
@@ -309,6 +318,10 @@ func (e *WSEndpoint) Validate() error {
 	if e.Header == nil {
 		// Set empty header if nil
 		e.Header = make(http.Header)
+	}
+	if e.ID == "" {
+		// Set random ID if nil
+		e.ID = xid.New().String()
 	}
 	return nil
 }
@@ -419,7 +432,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 				err = jsonRPCResp.ParseFromBytes(p)
 				if err != nil {
 					// Send an error response
-					e.respChan <- errorResponse(fmt.Errorf("failed parsing jsonrpc.Response from bytes: %w", err), e.id, e.URL)
+					e.respChan <- errorResponse(fmt.Errorf("failed parsing jsonrpc.Response from bytes: %w", err), e.ID, e.watcherID, e.URL)
 					return
 				}
 
@@ -428,7 +441,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 					responseID := jsonRPCResp.IDString()
 					if responseID == "" {
 						// Send an error response
-						e.respChan <- errorResponse(fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.Result), e.id, e.URL)
+						e.respChan <- errorResponse(fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.Result), e.ID, e.watcherID, e.URL)
 						return
 					}
 
@@ -442,7 +455,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 						p, err = jsonRPCResp.MarshalJSON()
 						if err != nil {
 							// Send an error response
-							e.respChan <- errorResponse(fmt.Errorf("failed re-marshalling JSON-RPC response: %w", err), e.id, e.URL)
+							e.respChan <- errorResponse(fmt.Errorf("failed re-marshalling JSON-RPC response: %w", err), e.ID, e.watcherID, e.URL)
 							return
 						}
 						// 5. set metadata to the taskresponse: original id, duration between time sent and time received
@@ -453,22 +466,24 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 
 						// Send the message to the read channel
 						response := WatcherResponse{
-							WatcherID: e.id,
+							TaskID:    e.ID,
+							WatcherID: e.watcherID,
 							URL:       e.URL,
 							Err:       nil,
 							Payload:   taskResponse,
 						}
 						e.respChan <- response
 					} else {
-						e.respChan <- errorResponse(errors.New("unknown response ID: "+jsonRPCResp.IDString()), e.id, e.URL)
+						e.respChan <- errorResponse(errors.New("unknown response ID: "+jsonRPCResp.IDString()), e.ID, e.watcherID, e.URL)
 					}
 				} else {
-					e.respChan <- errorResponse(errors.New("empty JSON-RPC response"), e.id, e.URL)
+					e.respChan <- errorResponse(errors.New("empty JSON-RPC response"), e.ID, e.watcherID, e.URL)
 				}
 			} else {
 				// Send the message to the read channel
 				response := WatcherResponse{
-					WatcherID: e.id,
+					TaskID:    e.ID,
+					WatcherID: e.watcherID,
 					URL:       e.URL,
 					Err:       nil,
 					Payload:   NewWSTaskResponse(p),
@@ -507,7 +522,7 @@ func (oh *wsOneHit) Execute() error {
 		conn, _, err := websocket.DefaultDialer.Dial(oh.wsEndpoint.URL.String(), oh.wsEndpoint.Header)
 		if err != nil {
 			err = fmt.Errorf("failed to dial: %w", err)
-			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.id, oh.wsEndpoint.URL)
+			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, oh.wsEndpoint.URL)
 			return err
 		}
 		defer conn.Close()
@@ -517,7 +532,7 @@ func (oh *wsOneHit) Execute() error {
 		if err := conn.WriteMessage(websocket.TextMessage, oh.wsEndpoint.Payload); err != nil {
 			// An error is unexpected, since the connection was just established
 			err = fmt.Errorf("failed to write message: %w", err)
-			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.id, oh.wsEndpoint.URL)
+			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, oh.wsEndpoint.URL)
 			return err
 		}
 
@@ -526,7 +541,7 @@ func (oh *wsOneHit) Execute() error {
 		if err != nil {
 			// An error is unexpected, since the connection was just established
 			err = fmt.Errorf("failed to read message: %w", err)
-			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.id, oh.wsEndpoint.URL)
+			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, oh.wsEndpoint.URL)
 			return err
 		}
 		messageRTT := time.Since(writeStart)
@@ -539,7 +554,8 @@ func (oh *wsOneHit) Execute() error {
 
 		// 5. Send the response message on the channel
 		oh.wsEndpoint.respChan <- WatcherResponse{
-			WatcherID: oh.wsEndpoint.id,
+			TaskID:    oh.wsEndpoint.ID,
+			WatcherID: oh.wsEndpoint.watcherID,
 			URL:       oh.wsEndpoint.URL,
 			Err:       nil,
 			Payload:   taskResponse,
@@ -608,7 +624,7 @@ func (ll *wsPersistent) Execute() error {
 			err := jsonRPCReq.UnmarshalJSON(ll.wsEndpoint.Payload)
 			if err != nil {
 				err = fmt.Errorf("failed to unmarshal JSON-RPC message: %w", err)
-				ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.id, ll.wsEndpoint.URL)
+				ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, ll.wsEndpoint.URL)
 				return err
 			}
 		}
@@ -631,7 +647,7 @@ func (ll *wsPersistent) Execute() error {
 		payload, err = sonic.Marshal(jsonRPCReq)
 		if err != nil {
 			err = fmt.Errorf("failed to marshal JSON-RPC message: %w", err)
-			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.id, ll.wsEndpoint.URL)
+			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, ll.wsEndpoint.URL)
 			return err
 		}
 		inflightMsg.timeSent = time.Now()
@@ -660,7 +676,7 @@ func (ll *wsPersistent) Execute() error {
 
 			// Send an error response
 			err = fmt.Errorf("failed to write message: %w", err)
-			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.id, ll.wsEndpoint.URL)
+			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, ll.wsEndpoint.URL)
 			return err
 		}
 	}
@@ -668,25 +684,28 @@ func (ll *wsPersistent) Execute() error {
 	return nil
 }
 
-// NewWSEndpoint creates a new WSEndpoint with the given URL, header, mode, and payload.
+// NewWSEndpoint creates a new WSEndpoint with the given attributes.
 func NewWSEndpoint(
 	url *url.URL,
 	header http.Header,
 	mode WSEndpointMode,
 	payload []byte,
+	id string,
 ) *WSEndpoint {
 	return &WSEndpoint{
 		Header:  header,
 		Mode:    mode,
 		Payload: payload,
 		URL:     url,
+		ID:      id,
 	}
 }
 
 // errorResponse is a helper to create a WatcherResponse with an error.
-func errorResponse(err error, id string, url *url.URL) WatcherResponse {
+func errorResponse(err error, taskID, watcherID string, url *url.URL) WatcherResponse {
 	return WatcherResponse{
-		WatcherID: id,
+		TaskID:    taskID,
+		WatcherID: watcherID,
 		URL:       url,
 		Err:       err,
 		Payload:   nil,

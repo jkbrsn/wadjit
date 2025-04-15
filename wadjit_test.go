@@ -196,12 +196,12 @@ func TestWadjitWatcherIDs(t *testing.T) {
 
 	// Add watchers
 	url1, _ := url.Parse("http://example.com/1")
-	task1 := NewHTTPEndpoint(url1, http.MethodGet, nil, nil)
+	task1 := NewHTTPEndpoint(url1, http.MethodGet, nil, nil, "")
 	w1, err := NewWatcher("watcher-1", 1*time.Second, WatcherTasksToSlice(task1))
 	require.NoError(t, err, "error creating watcher 1")
 
 	url2, _ := url.Parse("http://example.com/2")
-	task2 := NewHTTPEndpoint(url2, http.MethodGet, nil, nil)
+	task2 := NewHTTPEndpoint(url2, http.MethodGet, nil, nil, "")
 	w2, err := NewWatcher("watcher-2", 1*time.Second, WatcherTasksToSlice(task2))
 	require.NoError(t, err, "error creating watcher 2")
 

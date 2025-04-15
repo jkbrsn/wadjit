@@ -71,8 +71,8 @@ func TestWatcherExecution(t *testing.T) {
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
 	var tasks []WatcherTask
-	tasks = append(tasks, &HTTPEndpoint{URL: httpURL, Method: http.MethodPost, Header: header, Payload: payload})
-	tasks = append(tasks, &WSEndpoint{URL: wsURL, Header: header, Payload: payload})
+	tasks = append(tasks, &HTTPEndpoint{URL: httpURL, Method: http.MethodPost, Header: header, Payload: payload, ID: "an-id"})
+	tasks = append(tasks, &WSEndpoint{URL: wsURL, Header: header, Payload: payload, ID: "another-id"})
 	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err)
 
@@ -85,12 +85,12 @@ func TestWatcherExecution(t *testing.T) {
 	}
 
 	// Listen for responses on the watcherResponses channel
-	for i := 0; i < len(watcher.Tasks); i++ {
+	for range watcher.Tasks {
 		response := <-watcherResponses
 		assert.NotNil(t, response)
+		assert.Equal(t, id, response.WatcherID)
 		assert.NotNil(t, response.URL)
 		assert.Nil(t, response.Err)
-		assert.Equal(t, id, response.WatcherID)
 		assert.NotNil(t, response.Payload)
 		responsePayload, err := response.Payload.Data()
 		assert.NoError(t, err)
@@ -98,9 +98,11 @@ func TestWatcherExecution(t *testing.T) {
 		if response.URL.Scheme == "http" {
 			_, ok := response.Payload.(*HTTPTaskResponse)
 			assert.True(t, ok, "response.Payload is not of type HTTPTaskResponse")
+			assert.Equal(t, "an-id", response.TaskID)
 		} else if response.URL.Scheme == "ws" {
 			_, ok := response.Payload.(*WSTaskResponse)
 			assert.True(t, ok, "response.Payload is not of type WSTaskResponse")
+			assert.Equal(t, "another-id", response.TaskID)
 		} else {
 			t.Fail()
 		}
@@ -124,6 +126,7 @@ func TestWatcherExecution_Error(t *testing.T) {
 		URL:             httpURL,
 		Header:          header,
 		ErrTaskResponse: fmt.Errorf("mock error"),
+		ID:              "an-id",
 	})
 	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err)
@@ -142,6 +145,7 @@ func TestWatcherExecution_Error(t *testing.T) {
 	assert.NotNil(t, response.URL)
 	assert.NotNil(t, response.Err)
 	assert.Contains(t, response.Err.Error(), "mock error")
+	assert.Equal(t, "an-id", response.TaskID)
 	assert.Equal(t, id, response.WatcherID)
 	assert.Nil(t, response.Payload)
 }

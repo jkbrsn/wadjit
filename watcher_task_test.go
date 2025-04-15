@@ -30,15 +30,17 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	endpoint := NewHTTPEndpoint(url, http.MethodGet, header, nil)
+	endpoint := NewHTTPEndpoint(url, http.MethodGet, header, nil, "an-id")
 
 	assert.Equal(t, url, endpoint.URL)
 	assert.Equal(t, header, endpoint.Header)
+	assert.Equal(t, "an-id", endpoint.ID)
 	assert.Nil(t, endpoint.respChan)
 
-	err := endpoint.Initialize("", responseChan)
+	err := endpoint.Initialize("a-watcher-id", responseChan)
 	assert.NoError(t, err)
 	assert.NotNil(t, endpoint.respChan)
+	assert.Equal(t, "a-watcher-id", endpoint.watcherID)
 }
 
 func TestHTTPEndpointExecute(t *testing.T) {
@@ -52,9 +54,9 @@ func TestHTTPEndpointExecute(t *testing.T) {
 
 	header.Add("Content-Type", "application/json")
 
-	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, []byte(`{"key":"value"}`))
+	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, []byte(`{"key":"value"}`), "an-id")
 
-	err = endpoint.Initialize("", responseChan)
+	err = endpoint.Initialize("some-watcher-id", responseChan)
 	assert.NoError(t, err)
 
 	task := endpoint.Task()
@@ -68,7 +70,8 @@ func TestHTTPEndpointExecute(t *testing.T) {
 	select {
 	case resp := <-responseChan:
 		assert.NotNil(t, resp)
-		assert.Equal(t, "", resp.WatcherID)
+		assert.Equal(t, endpoint.ID, resp.TaskID)
+		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 		assert.Equal(t, url, resp.URL)
 		assert.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
@@ -115,8 +118,8 @@ func TestHTTPEndpointExecuteMethods(t *testing.T) {
 				header.Add("Content-Type", "application/json")
 			}
 			echoURL.Path = c.path
-			endpoint := NewHTTPEndpoint(echoURL, c.method, header, c.payload)
-			err = endpoint.Initialize("", responseChan)
+			endpoint := NewHTTPEndpoint(echoURL, c.method, header, c.payload, "an-id")
+			err = endpoint.Initialize("some-watcher-id", responseChan)
 			assert.NoError(t, err)
 
 			task := endpoint.Task()
@@ -130,7 +133,8 @@ func TestHTTPEndpointExecuteMethods(t *testing.T) {
 			select {
 			case resp := <-responseChan:
 				assert.NotNil(t, resp)
-				assert.Equal(t, "", resp.WatcherID)
+				assert.Equal(t, endpoint.ID, resp.TaskID)
+				assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 				assert.Equal(t, echoURL, resp.URL)
 				assert.NoError(t, resp.Err)
 
@@ -165,7 +169,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 	header := make(http.Header)
 	payload := []byte(`{"key":"value"}`)
 
-	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, payload)
+	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, payload, "")
 	require.NotNil(t, endpoint)
 
 	assert.Equal(t, url, endpoint.URL)
@@ -198,7 +202,7 @@ func TestWSConnInitialize(t *testing.T) {
 		assert.Equal(t, header, conn.Header)
 		assert.Nil(t, conn.respChan)
 
-		err = conn.Initialize("", responseChan)
+		err = conn.Initialize("some-watcher-id", responseChan)
 		assert.NoError(t, err)
 		assert.NotNil(t, conn.respChan)
 		assert.NotNil(t, conn.conn)
@@ -217,7 +221,7 @@ func TestWSConnInitialize(t *testing.T) {
 		assert.Equal(t, header, conn.Header)
 		assert.Nil(t, conn.respChan)
 
-		err = conn.Initialize("", responseChan)
+		err = conn.Initialize("some-watcher-id", responseChan)
 		assert.NoError(t, err)
 		assert.NotNil(t, conn.respChan)
 		assert.Nil(t, conn.conn) // no connection should be established since wsOneHit is used
@@ -243,9 +247,10 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		Header:  header,
 		Mode:    PersistentJSONRPC,
 		Payload: payload,
+		ID:      "an-id",
 	}
 
-	err = endpoint.Initialize("", responseChan)
+	err = endpoint.Initialize("some-watcher-id", responseChan)
 	assert.NoError(t, err)
 
 	task := endpoint.Task()
@@ -285,7 +290,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	select {
 	case resp := <-responseChan:
 		assert.NotNil(t, resp)
-		assert.Equal(t, "", resp.WatcherID)
+		assert.Equal(t, endpoint.ID, resp.TaskID)
+		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 		assert.Equal(t, url, resp.URL)
 		require.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
@@ -323,6 +329,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	select {
 	case resp := <-responseChan:
 		assert.NotNil(t, resp)
+		assert.Equal(t, endpoint.ID, resp.TaskID)
+		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 		assert.NotNil(t, resp.Payload)
 		assert.NoError(t, resp.Err)
 		assert.Equal(t, url, resp.URL)
@@ -352,9 +360,10 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		Header:  header,
 		Mode:    OneHitText,
 		Payload: []byte(`{"key":"value"}`),
+		ID:      "an-id",
 	}
 
-	err = endpoint.Initialize("", responseChan)
+	err = endpoint.Initialize("some-watcher-id", responseChan)
 	assert.NoError(t, err)
 
 	task := endpoint.Task()
@@ -368,7 +377,8 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 	select {
 	case resp := <-responseChan:
 		assert.NotNil(t, resp)
-		assert.Equal(t, "", resp.WatcherID)
+		assert.Equal(t, endpoint.ID, resp.TaskID)
+		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 		assert.Equal(t, url, resp.URL)
 		assert.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
@@ -405,7 +415,7 @@ func TestWSConnReconnect(t *testing.T) {
 		Mode:   PersistentJSONRPC,
 	}
 
-	err = conn.Initialize("", responseChan)
+	err = conn.Initialize("some-watcher-id", responseChan)
 	assert.NoError(t, err)
 
 	err = conn.connect()
@@ -422,7 +432,7 @@ func TestNewWSEndpoint(t *testing.T) {
 	payload := []byte(`{"key":"value"}`)
 
 	t.Run("ModeUnknown mode", func(t *testing.T) {
-		endpoint := NewWSEndpoint(url, header, ModeUnknown, payload)
+		endpoint := NewWSEndpoint(url, header, ModeUnknown, payload, "")
 		require.NotNil(t, endpoint)
 
 		assert.Equal(t, url, endpoint.URL)
@@ -431,12 +441,12 @@ func TestNewWSEndpoint(t *testing.T) {
 		assert.Equal(t, ModeUnknown, endpoint.Mode)
 
 		// Initialize should set the mode to default mode OneHitText
-		endpoint.Initialize("", make(chan WatcherResponse))
+		endpoint.Initialize("some-watcher-id", make(chan WatcherResponse))
 		assert.Equal(t, OneHitText, endpoint.Mode)
 	})
 
 	t.Run("OneHitText mode", func(t *testing.T) {
-		endpoint := NewWSEndpoint(url, header, OneHitText, payload)
+		endpoint := NewWSEndpoint(url, header, OneHitText, payload, "")
 		require.NotNil(t, endpoint)
 
 		assert.Equal(t, url, endpoint.URL)
@@ -446,7 +456,7 @@ func TestNewWSEndpoint(t *testing.T) {
 	})
 
 	t.Run("PersistentJSONRPC mode", func(t *testing.T) {
-		endpoint := NewWSEndpoint(url, header, PersistentJSONRPC, payload)
+		endpoint := NewWSEndpoint(url, header, PersistentJSONRPC, payload, "")
 		require.NotNil(t, endpoint)
 
 		assert.Equal(t, url, endpoint.URL)

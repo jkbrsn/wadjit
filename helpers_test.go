@@ -28,10 +28,11 @@ type MockTask struct {
 
 func (t *MockTask) Execute() error {
 	if t.mwt.ErrTaskResponse != nil {
-		t.respChan <- errorResponse(t.mwt.ErrTaskResponse, t.mwt.id, t.mwt.URL)
+		t.respChan <- errorResponse(t.mwt.ErrTaskResponse, t.mwt.ID, t.mwt.watcherID, t.mwt.URL)
 	} else {
 		t.respChan <- WatcherResponse{
-			WatcherID: t.mwt.id,
+			TaskID:    t.mwt.ID,
+			WatcherID: t.mwt.watcherID,
 			URL:       t.mwt.URL,
 			Err:       nil,
 			Payload:   &MockTaskResponse{data: t.Payload},
@@ -40,6 +41,8 @@ func (t *MockTask) Execute() error {
 	return t.mwt.ErrTaskResponse
 }
 
+// MockTaskResponse is a mock implementation of the TaskResponse interface
+// used for testing. It holds the response data as a byte slice.
 type MockTaskResponse struct {
 	data []byte
 }
@@ -60,19 +63,20 @@ type MockWatcherTask struct {
 	URL     *url.URL
 	Header  http.Header
 	Payload []byte
+	ID      string
 
 	ErrTaskResponse error // Set to return a task that errors
 
-	id       string
-	respChan chan<- WatcherResponse
+	watcherID string
+	respChan  chan<- WatcherResponse
 }
 
 func (m *MockWatcherTask) Close() error {
 	return nil
 }
 
-func (m *MockWatcherTask) Initialize(id string, responseChan chan<- WatcherResponse) error {
-	m.id = id
+func (m *MockWatcherTask) Initialize(watcherID string, responseChan chan<- WatcherResponse) error {
+	m.watcherID = watcherID
 	m.respChan = responseChan
 	return nil
 }

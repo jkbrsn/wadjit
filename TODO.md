@@ -3,7 +3,6 @@
 ## v0.x
 
 - Clear in-code todo:s
-- Ability attach appData to request tasks, to track responses more easily (shared response channel)
 
 ## various ideas
 

@@ -18,6 +18,7 @@ import (
 
 // WatcherResponse represents a response from a watcher.
 type WatcherResponse struct {
+	TaskID    string       // ID of the task that generated the response
 	WatcherID string       // ID of the watcher that generated the response
 	URL       *url.URL     // URL of the response's target
 	Err       error        // Error that occurred during the request, if nil the request was successful
