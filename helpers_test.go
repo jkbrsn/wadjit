@@ -218,7 +218,6 @@ func jsonRPCServer() *httptest.Server {
 					continue
 				}
 				// Echo the request back to the client
-				fmt.Printf("THE ID: %v", req.ID)
 				resp := jsonrpc.Response{
 					JSONRPC: "2.0",
 					ID:      req.ID,
