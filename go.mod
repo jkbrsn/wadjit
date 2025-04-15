@@ -7,7 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/jakobilobi/go-jsonrpc v0.5.1
-	github.com/jakobilobi/go-taskman v0.2.3
+	github.com/jakobilobi/go-taskman v0.2.4
 	github.com/rs/xid v1.6.0
 )
 
