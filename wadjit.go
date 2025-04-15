@@ -82,6 +82,16 @@ func (w *Wadjit) Start() <-chan WatcherResponse {
 	return w.respExportChan
 }
 
+// WatcherIDs returns a slice of strings containing the IDs of all active watchers.
+func (w *Wadjit) WatcherIDs() []string {
+	var ids []string
+	w.watchers.Range(func(key, value any) bool {
+		ids = append(ids, key.(string))
+		return true
+	})
+	return ids
+}
+
 // listenForResponses consumes the channel where Watchers send responses from their monitoring jobs
 // and forwards those responses to the externally facing channel.
 func (w *Wadjit) listenForResponses() {

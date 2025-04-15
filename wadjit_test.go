@@ -186,3 +186,52 @@ func TestWadjitLifecycle(t *testing.T) {
 	err = w.AddWatcher(watcher4)
 	assert.NoError(t, err)
 }
+
+func TestWadjitWatcherIDs(t *testing.T) {
+	w := New()
+
+	// Initial state: no watchers
+	initialIDs := w.WatcherIDs()
+	assert.Zero(t, len(initialIDs), "expected 0 watcher IDs initially")
+
+	// Add watchers
+	url1, _ := url.Parse("http://example.com/1")
+	task1 := NewHTTPEndpoint(url1, http.MethodGet, nil, nil)
+	w1, err := NewWatcher("watcher-1", 1*time.Second, WatcherTasksToSlice(task1))
+	require.NoError(t, err, "error creating watcher 1")
+
+	url2, _ := url.Parse("http://example.com/2")
+	task2 := NewHTTPEndpoint(url2, http.MethodGet, nil, nil)
+	w2, err := NewWatcher("watcher-2", 1*time.Second, WatcherTasksToSlice(task2))
+	require.NoError(t, err, "error creating watcher 2")
+
+	w.AddWatchers(w1, w2)
+
+	// Start Wadjit in a range to drain the response channel
+	go func() {
+		for range w.Start() {
+		}
+	}()
+
+	// Allow time for watchers to be set up
+	time.Sleep(10 * time.Millisecond)
+
+	// Check IDs after adding
+	idsAfterAdd := w.WatcherIDs()
+	assert.Equal(t, 2, len(idsAfterAdd), "expected 2 watcher IDs after adding")
+	// Use a map for easier checking regardless of order
+	idsMap := make(map[string]bool)
+	for _, id := range idsAfterAdd {
+		idsMap[id] = true
+	}
+	assert.True(t, idsMap["watcher-1"] && idsMap["watcher-2"], "expected IDs 'watcher-1' and 'watcher-2', got %v", idsAfterAdd)
+
+	// Remove a watcher and check IDs after removal
+	w.RemoveWatcher("watcher-1")
+
+	idsAfterRemove := w.WatcherIDs()
+	assert.Equal(t, 1, len(idsAfterRemove), "expected 1 watcher ID after removal")
+	assert.Equal(t, "watcher-2", idsAfterRemove[0], "expected remaining ID 'watcher-2', got %v", idsAfterRemove[0])
+
+	w.Close()
+}
