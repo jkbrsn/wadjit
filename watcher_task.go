@@ -445,7 +445,8 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 					// This is not an unknown situation, handle gracefully
 				} else {
 					// This is unexpected
-					// TODO: add custom handling here?
+					// TODO: consider returning an error response, though the channel may not be available
+					//e.respChan <- errorResponse(fmt.Errorf("unexpected websocket read error: %w", err), e.ID, e.watcherID, e.URL)
 				}
 
 				// If there was an error, close the connection
@@ -693,18 +694,19 @@ func (ll *wsPersistent) Execute() error {
 		if err := ll.wsEndpoint.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				// This is an expected situation, handle gracefully
+				err = fmt.Errorf("websocket write failed (connection closed): %w", err)
 			} else if strings.Contains(err.Error(), "websocket: close sent") {
 				// This is an expected situation, handle gracefully
+				err = fmt.Errorf("websocket write failed (connection closed): %w", err)
 			} else {
 				// This is unexpected
-				// TODO: add custom handling here?
+				err = fmt.Errorf("unexpected websocket write error: %w", err)
 			}
 
-			// If there was an error, close the connection
-			ll.wsEndpoint.Close()
+			// Close the connection
+			ll.wsEndpoint.closeConn()
 
 			// Send an error response
-			err = fmt.Errorf("failed to write message: %w", err)
 			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, ll.wsEndpoint.URL)
 			return err
 		}
