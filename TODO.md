@@ -1,14 +1,13 @@
 # todo
 
-## v0.x
+## v0.4.0
 
-- Clear in-code todo:s
+- Add metrics for stats like `Watcher` timing accuracy, and `Watcher` error rates
 
 ## various ideas
 
 - Create a new type of `Watcher`, to watch WS subscriptions
   - WS subscriptions do not fit into the current `Watcher` model, which is based on polling
-- Add metrics for stats like `Watcher` timing accuracy, and `Watcher` error rates
 - Add configuration options, e.g. for buffer sizes, timeouts, metrics on/off etc.
 - WS reconnect strategy evaluation
   - Change for an active reconnect, with exponential backoff, would also include keep-alive measures
