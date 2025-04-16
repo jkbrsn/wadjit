@@ -250,99 +250,201 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		ID:      "an-id",
 	}
 
+	resp := jsonrpc.Response{
+		JSONRPC: "2.0",
+		ID:      originalID,
+		Result:  payload,
+	}
+	expectedResp, err := resp.MarshalJSON()
+	require.NoError(t, err)
+
 	err = endpoint.Initialize("some-watcher-id", responseChan)
 	assert.NoError(t, err)
 
 	task := endpoint.Task()
 	assert.NotNil(t, task)
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		err := task.Execute()
-		assert.NoError(t, err)
-		wg.Done()
-	}()
+	t.Run("Inflight message", func(t *testing.T) {
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			err := task.Execute()
+			assert.NoError(t, err)
+			wg.Done()
+		}()
+		wg.Wait()
 
-	wg.Wait()
+		length := 0
+		endpoint.inflightMsgs.Range(func(key, value any) bool {
+			length++
+			return true
+		})
+		assert.Equal(t, 1, length)
+		var inflightMsg wsInflightMessage
+		endpoint.inflightMsgs.Range(func(key, value any) bool {
+			inflightMsg = value.(wsInflightMessage)
+			return false // Stop after the first item
+		})
+		assert.Equal(t, originalID, inflightMsg.originalID)
+		expectedResult := []byte(`{"id":"` + inflightMsg.inflightID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
+		resp := jsonrpc.Response{
+			JSONRPC: "2.0",
+			ID:      originalID,
+			Result:  expectedResult,
+		}
+		expectedResp, err := resp.MarshalJSON()
+		require.NoError(t, err)
 
-	length := 0
-	endpoint.inflightMsgs.Range(func(key, value any) bool {
-		length++
-		return true
+		select {
+		case resp := <-responseChan:
+			assert.NotNil(t, resp)
+			assert.Equal(t, endpoint.ID, resp.TaskID)
+			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
+			assert.Equal(t, url, resp.URL)
+			require.NoError(t, resp.Err)
+			assert.NotNil(t, resp.Payload)
+			// Check the response metadata
+			metadata := resp.Metadata()
+			assert.NotNil(t, metadata)
+			assert.Nil(t, metadata.Headers)
+			assert.Zero(t, metadata.StatusCode)
+			assert.Equal(t, len(expectedResp), int(metadata.Size))
+			assert.Greater(t, metadata.Latency, time.Duration(0))
+			assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+			// Check the response data
+			data, err := resp.Data()
+			assert.NoError(t, err)
+			assert.JSONEq(t, string(expectedResp), string(data))
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for response")
+		}
 	})
-	assert.Equal(t, 1, length)
-	var inflightMsg wsInflightMessage
-	endpoint.inflightMsgs.Range(func(key, value any) bool {
-		inflightMsg = value.(wsInflightMessage)
-		return false // Stop after the first item
+
+	t.Run("Reconnect after client side close", func(t *testing.T) {
+		err = endpoint.closeConn()
+		assert.NoError(t, err)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			err := task.Execute()
+			assert.NoError(t, err)
+			wg.Done()
+		}()
+		wg.Wait()
+
+		resp := jsonrpc.Response{
+			JSONRPC: "2.0",
+			ID:      originalID,
+			Result:  payload,
+		}
+		expectedResp, err := resp.MarshalJSON()
+		require.NoError(t, err)
+
+		select {
+		case resp := <-responseChan:
+			assert.NotNil(t, resp)
+			assert.Equal(t, endpoint.ID, resp.TaskID)
+			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
+			assert.NotNil(t, resp.Payload)
+			assert.NoError(t, resp.Err)
+			assert.Equal(t, url, resp.URL)
+
+			assert.NotNil(t, endpoint.conn)
+
+			metadata := resp.Metadata()
+			assert.NotNil(t, metadata)
+			assert.Equal(t, len(expectedResp), int(metadata.Size)) // Payload size should match
+			assert.Greater(t, metadata.Latency, time.Duration(0))
+			assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for response")
+		}
 	})
-	assert.Equal(t, originalID, inflightMsg.originalID)
-	expectedResult := []byte(`{"id":"` + inflightMsg.inflightID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
-	resp := jsonrpc.Response{
-		JSONRPC: "2.0",
-		ID:      originalID,
-		Result:  expectedResult,
-	}
-	expectedResp, err := resp.MarshalJSON()
-	require.NoError(t, err)
 
-	select {
-	case resp := <-responseChan:
-		assert.NotNil(t, resp)
-		assert.Equal(t, endpoint.ID, resp.TaskID)
-		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
-		assert.Equal(t, url, resp.URL)
-		require.NoError(t, resp.Err)
-		assert.NotNil(t, resp.Payload)
-		// Check the response metadata
-		metadata := resp.Metadata()
-		assert.NotNil(t, metadata)
-		assert.Nil(t, metadata.Headers)
-		assert.Zero(t, metadata.StatusCode)
-		assert.Equal(t, len(expectedResp), int(metadata.Size))
-		assert.Greater(t, metadata.Latency, time.Duration(0))
-		assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
-		// Check the response data
-		data, err := resp.Data()
+	t.Run("Reconnect after server side close", func(t *testing.T) {
+		server := jsonRPCServerWithServerDisconnect()
+		defer server.Close()
+
+		wsURL := "ws" + server.URL[4:] + "/ws"
+		url, err := url.Parse(wsURL)
+		assert.NoError(t, err, "failed to parse URL")
+		responseChan := make(chan WatcherResponse, 2)
+
+		endpoint := &WSEndpoint{
+			URL:     url,
+			Header:  header,
+			Mode:    PersistentJSONRPC,
+			Payload: payload,
+			ID:      "another-id",
+		}
+
+		err = endpoint.Initialize("some-watcher-id", responseChan)
 		assert.NoError(t, err)
-		assert.JSONEq(t, string(expectedResp), string(data))
-	case <-time.After(1 * time.Second):
-		t.Fatal("timeout waiting for response")
-	}
 
-	// Close the endpoint's internal connection and try to execute again
-	err = endpoint.conn.Close()
-	assert.NoError(t, err)
-	endpoint.conn = nil
-	// TODO: also test the case where the connection is closed by the server
+		task := endpoint.Task()
+		assert.NotNil(t, task)
 
-	wg.Add(1)
-	go func() {
-		err := task.Execute()
-		assert.NoError(t, err)
-		wg.Done()
-	}()
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			err := task.Execute()
+			assert.NoError(t, err)
+			wg.Done()
+		}()
+		wg.Wait()
 
-	wg.Wait()
+		select {
+		case resp := <-responseChan:
+			assert.NotNil(t, resp)
+			assert.Equal(t, endpoint.ID, resp.TaskID)
+			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
+			assert.NotNil(t, resp.Payload)
+			assert.NoError(t, resp.Err)
+			assert.Equal(t, url, resp.URL)
 
-	select {
-	case resp := <-responseChan:
-		assert.NotNil(t, resp)
-		assert.Equal(t, endpoint.ID, resp.TaskID)
-		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
-		assert.NotNil(t, resp.Payload)
-		assert.NoError(t, resp.Err)
-		assert.Equal(t, url, resp.URL)
+			//assert.NotNil(t, endpoint.conn)
 
-		assert.NotNil(t, endpoint.conn)
+			metadata := resp.Metadata()
+			assert.NotNil(t, metadata)
+			assert.Equal(t, len(expectedResp), int(metadata.Size)) // Payload size should match
+			assert.Greater(t, metadata.Latency, time.Duration(0))
+			assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for response")
+		}
 
-		metadata := resp.Metadata()
-		assert.NotNil(t, metadata)
-		assert.Equal(t, len(expectedResp), int(metadata.Size))
-	case <-time.After(1 * time.Second):
-		t.Fatal("timeout waiting for response")
-	}
+		time.Sleep(5 * time.Millisecond)
+		// Connection should now have closed, try again
+
+		wg.Add(1)
+		go func() {
+			err := task.Execute()
+			assert.NoError(t, err)
+			wg.Done()
+		}()
+		wg.Wait()
+
+		select {
+		case resp := <-responseChan:
+			assert.NotNil(t, resp)
+			assert.Equal(t, endpoint.ID, resp.TaskID)
+			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
+			assert.NotNil(t, resp.Payload)
+			assert.NoError(t, resp.Err)
+			assert.Equal(t, url, resp.URL)
+
+			//assert.NotNil(t, endpoint.conn)
+
+			metadata := resp.Metadata()
+			assert.NotNil(t, metadata)
+			assert.Equal(t, len(expectedResp), int(metadata.Size)) // Payload size should match
+			assert.Greater(t, metadata.Latency, time.Duration(0))
+			assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+		case <-time.After(1 * time.Second):
+			t.Fatal("timeout waiting for response")
+		}
+	})
 }
 
 func TestWSEndpointExecutewsOneHit(t *testing.T) {

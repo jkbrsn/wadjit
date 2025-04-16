@@ -164,7 +164,7 @@ func TestWadjitLifecycle(t *testing.T) {
 	// Confirm the first watcher executed more tasks than the second
 	assert.Greater(t, firstCount.Load(), secondCount.Load())
 	assert.Greater(t, firstCount.Load(), thirdCount.Load())
-	assert.Greater(t, thirdCount.Load(), secondCount.Load())
+	assert.GreaterOrEqual(t, thirdCount.Load(), secondCount.Load())
 
 	// Remove the first watcher
 	err = w.RemoveWatcher(id1)

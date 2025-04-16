@@ -326,6 +326,20 @@ func (e *WSEndpoint) Validate() error {
 	return nil
 }
 
+// closeConn closes the WebSocket connection without closing the context.
+func (e *WSEndpoint) closeConn() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.conn != nil {
+		err := e.conn.Close()
+		e.conn = nil
+		return err
+	}
+
+	return nil
+}
+
 // connect establishes a connection to the WebSocket endpoint. If already connected,
 // this function does nothing.
 func (e *WSEndpoint) connect() error {
@@ -354,16 +368,25 @@ func (e *WSEndpoint) connect() error {
 	return nil
 }
 
+// nilConn checks if the WebSocket connection is nil or closed.
+func (e *WSEndpoint) nilConn() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if e.conn == nil || e.conn.NetConn() == nil {
+		return true
+	}
+	return false
+}
+
 // reconnect closes the current connection and establishes a new one.
 func (e *WSEndpoint) reconnect() error {
 	if e.Mode != PersistentJSONRPC {
 		return errors.New("can only reconnect for long-lived connections")
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
 
 	// Close the current connection, if it exists
-	if e.conn != nil {
+	if !e.nilConn() {
 		if err := e.conn.Close(); err != nil {
 			return fmt.Errorf("failed to close connection: %w", err)
 		}
@@ -371,6 +394,10 @@ func (e *WSEndpoint) reconnect() error {
 
 	// Wait for the read pump to finish
 	e.wg.Wait()
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	e.conn = nil
 
 	// Establish a new connection
@@ -422,6 +449,8 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 				}
 
 				// If there was an error, close the connection
+				e.closeConn()
+
 				return
 			}
 			timeRead := time.Now()
@@ -599,7 +628,7 @@ func (ll *wsPersistent) Execute() error {
 	}
 
 	// If the connection is closed, try to reconnect
-	if ll.wsEndpoint.conn == nil || ll.wsEndpoint.conn.UnderlyingConn() == nil {
+	if ll.wsEndpoint.nilConn() {
 		if err := ll.wsEndpoint.reconnect(); err != nil {
 			return err
 		}

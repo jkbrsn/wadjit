@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/jakobilobi/go-jsonrpc"
@@ -287,6 +288,74 @@ func jsonRPCServer() *httptest.Server {
 		}
 	}))
 
+	return server
+}
+
+// jsonRPCServerWithServerDisconnect creates a test server that responds to a single
+// JSON-RPC request and then closes the WebSocket connection from the server side.
+func jsonRPCServerWithServerDisconnect() *httptest.Server {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ws":
+			// Handle WebSocket upgrade
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
+				return
+			}
+
+			// Handle only the first message
+			mt, message, err := conn.ReadMessage()
+			if err != nil {
+				conn.Close() // Close on read error
+				return
+			}
+
+			// Parse the message as a JSON-RPC request
+			var req jsonrpc.Request
+			err = req.UnmarshalJSON(message)
+			if err != nil {
+				// Respond with a parse error
+				resp := jsonrpc.Response{
+					JSONRPC: "2.0",
+					Error: &jsonrpc.Error{
+						Code:    -32700,
+						Message: "Parse error",
+					},
+				}
+				respBytes, _ := resp.MarshalJSON()
+				// Try to write error response, then close
+				_ = conn.WriteMessage(mt, respBytes)
+				conn.Close()
+				return
+			}
+
+			// Echo the request back to the client
+			resp := jsonrpc.Response{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Error:   nil,
+				Result:  message, // Echo the original message as result
+			}
+			respBytes, _ := resp.MarshalJSON()
+			err = conn.WriteMessage(mt, respBytes)
+			if err != nil {
+				conn.Close() // Close on write error
+				return
+			}
+
+			// Close the connection after successful write
+			_ = conn.WriteControl(
+				websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+				time.Now().Add(3*time.Second))
+			_ = conn.Close()
+
+		default:
+			// Handle other paths (e.g., HTTP requests if needed)
+			http.NotFound(w, r)
+		}
+	}))
 	return server
 }
 
