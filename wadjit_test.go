@@ -20,7 +20,7 @@ func TestNewWadjit(t *testing.T) {
 	assert.NotNil(t, w.taskManager)
 }
 
-func TestAddWatcher(t *testing.T) {
+func TestWadjit_AddWatcher(t *testing.T) {
 	w := New()
 	defer w.Close()
 
@@ -50,7 +50,7 @@ func TestAddWatcher(t *testing.T) {
 	assert.Equal(t, watcher, loaded)
 }
 
-func TestRemoveWatcher(t *testing.T) {
+func TestWadjit_RemoveWatcher(t *testing.T) {
 	w := New()
 	defer w.Close()
 
@@ -82,7 +82,7 @@ func TestRemoveWatcher(t *testing.T) {
 	assert.False(t, ok)
 }
 
-func TestWadjitLifecycle(t *testing.T) {
+func TestWadjit_Lifecycle(t *testing.T) {
 	w := New()
 	server := echoServer()
 	defer func() {
@@ -187,8 +187,9 @@ func TestWadjitLifecycle(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestWadjitWatcherIDs(t *testing.T) {
+func TestWadjit_WatcherIDs(t *testing.T) {
 	w := New()
+	defer w.Close()
 
 	// Initial state: no watchers
 	initialIDs := w.WatcherIDs()
@@ -232,6 +233,4 @@ func TestWadjitWatcherIDs(t *testing.T) {
 	idsAfterRemove := w.WatcherIDs()
 	assert.Equal(t, 1, len(idsAfterRemove), "expected 1 watcher ID after removal")
 	assert.Equal(t, "watcher-2", idsAfterRemove[0], "expected remaining ID 'watcher-2', got %v", idsAfterRemove[0])
-
-	w.Close()
 }
