@@ -91,6 +91,11 @@ func (w *Wadjit) Close() error {
 	return w.closeErr
 }
 
+// Metrics returns metrics from the Wadjit's internal task manager.
+func (w *Wadjit) Metrics() taskman.TaskManagerMetrics {
+	return w.taskManager.Metrics()
+}
+
 // RemoveWatcher removes a Watcher from the Wadjit.
 func (w *Wadjit) RemoveWatcher(id string) error {
 	watcher, ok := w.watchers.LoadAndDelete(id)
