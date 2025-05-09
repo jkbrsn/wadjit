@@ -48,13 +48,28 @@ func (w *Wadjit) AddWatchers(watchers ...*Watcher) error {
 // Close stops all Wadjit processes and closes the Wadjit.
 func (w *Wadjit) Close() {
 	w.cancel()
-	w.taskManager.Stop()
 
 	w.watchers.Range(func(key, value any) bool {
 		watcher := value.(*Watcher)
 		watcher.close()
 		return true
 	})
+
+	w.taskManager.Stop()
+
+	// Close channels
+	if w.newWatcherChan != nil {
+		close(w.newWatcherChan)
+	}
+	if w.respGatherChan != nil {
+		close(w.respGatherChan)
+	}
+	if w.respExportChan != nil {
+		close(w.respExportChan)
+	}
+	if w.wadjitStarted != nil {
+		close(w.wadjitStarted)
+	}
 }
 
 // RemoveWatcher removes a Watcher from the Wadjit.
@@ -98,6 +113,11 @@ func (w *Wadjit) listenForResponses() {
 	for {
 		select {
 		case response := <-w.respGatherChan:
+			if w.ctx.Err() != nil {
+				// Context is cancelled, don't process responses
+				return
+			}
+
 			// Send the response to the external facing channel
 			// TODO: consider adding Watcher response metrics here
 			w.respExportChan <- response
@@ -114,6 +134,10 @@ func (w *Wadjit) listenForWatchers() {
 	for {
 		select {
 		case watcher := <-w.newWatcherChan:
+			if w.ctx.Err() != nil {
+				// Context is cancelled, don't start new watchers
+				return
+			}
 			err := watcher.start(w.respGatherChan)
 			if err != nil {
 				fmt.Printf("error starting watcher: %v\n", err)
