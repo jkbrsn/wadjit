@@ -21,6 +21,10 @@ type Wadjit struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	closeErr  error
+	closeOnce sync.Once // Ensures idempotency of the Close method
+	closeWG   sync.WaitGroup
 }
 
 // AddWatcher adds a Watcher to the Wadjit.
@@ -46,30 +50,45 @@ func (w *Wadjit) AddWatchers(watchers ...*Watcher) error {
 }
 
 // Close stops all Wadjit processes and closes the Wadjit.
-func (w *Wadjit) Close() {
-	w.cancel()
+func (w *Wadjit) Close() error {
+	w.closeOnce.Do(func() {
+		// 1. Cancel in-flight work
+		w.cancel()
 
-	w.watchers.Range(func(key, value any) bool {
-		watcher := value.(*Watcher)
-		watcher.close()
-		return true
+		// 2. Remove remaining watchers, stop tasks
+		ids := w.WatcherIDs() // Get watcher IDs first to avoid concurrent map iteration
+		var errs error
+		for _, id := range ids {
+			err := w.RemoveWatcher(id)
+			if err != nil {
+				errs = errors.Join(errs, err)
+			}
+		}
+		w.taskManager.Stop()
+
+		// 3. Shut down the input channels to prevent new work entering the system
+		if w.respGatherChan != nil {
+			close(w.respGatherChan)
+		}
+
+		// 4. Wait for goroutines to finish and stop writing
+		w.closeWG.Wait()
+
+		// 5. Close remaining channels
+		if w.respExportChan != nil {
+			close(w.respExportChan)
+		}
+		if w.newWatcherChan != nil {
+			close(w.newWatcherChan)
+		}
+		if w.wadjitStarted != nil {
+			close(w.wadjitStarted)
+		}
+
+		w.closeErr = errs
 	})
 
-	w.taskManager.Stop()
-
-	// Close channels
-	if w.newWatcherChan != nil {
-		close(w.newWatcherChan)
-	}
-	if w.respGatherChan != nil {
-		close(w.respGatherChan)
-	}
-	if w.respExportChan != nil {
-		close(w.respExportChan)
-	}
-	if w.wadjitStarted != nil {
-		close(w.wadjitStarted)
-	}
+	return w.closeErr
 }
 
 // RemoveWatcher removes a Watcher from the Wadjit.
@@ -90,7 +109,7 @@ func (w *Wadjit) RemoveWatcher(id string) error {
 }
 
 // Start starts the Wadjit by unblocking Watcher initialization. After calling this function it
-// is assumed that responsed sent on the returned channel will be consumed, and that failing to
+// is assumed that responses sent on the returned channel will be consumed, and that failing to
 // do so might produce a block.
 func (w *Wadjit) Start() <-chan WatcherResponse {
 	w.wadjitStarted <- struct{}{}
@@ -112,15 +131,17 @@ func (w *Wadjit) WatcherIDs() []string {
 func (w *Wadjit) listenForResponses() {
 	for {
 		select {
-		case response := <-w.respGatherChan:
+		case resp, ok := <-w.respGatherChan:
+			if !ok {
+				return // Channel closed
+			}
 			if w.ctx.Err() != nil {
-				// Context is cancelled, don't process responses
-				return
+				return // Context cancelled
 			}
 
 			// Send the response to the external facing channel
 			// TODO: consider adding Watcher response metrics here
-			w.respExportChan <- response
+			w.respExportChan <- resp
 		case <-w.ctx.Done():
 			return
 		}
@@ -128,16 +149,25 @@ func (w *Wadjit) listenForResponses() {
 }
 
 // listenForWatchers consumes Watchers sent on the newWatcherChan and starts the Jobs defined by
-// them when a Watcher is received. Blocks until the caller starts the Wadjit.
+// them when a Watcher is received. Blocks until the Wadjit is started or closed.
 func (w *Wadjit) listenForWatchers() {
-	<-w.wadjitStarted
+	select {
+	case <-w.wadjitStarted:
+		// Do nothing
+	case <-w.ctx.Done():
+		return
+	}
+
 	for {
 		select {
-		case watcher := <-w.newWatcherChan:
-			if w.ctx.Err() != nil {
-				// Context is cancelled, don't start new watchers
-				return
+		case watcher, ok := <-w.newWatcherChan:
+			if !ok {
+				return // Channel closed
 			}
+			if w.ctx.Err() != nil {
+				return // Context cancelled
+			}
+
 			err := watcher.start(w.respGatherChan)
 			if err != nil {
 				fmt.Printf("error starting watcher: %v\n", err)
@@ -170,8 +200,15 @@ func New() *Wadjit {
 		cancel:         cancel,
 	}
 
-	go w.listenForResponses()
-	go w.listenForWatchers()
+	w.closeWG.Add(2)
+	go func() {
+		w.listenForResponses()
+		w.closeWG.Done()
+	}()
+	go func() {
+		w.listenForWatchers()
+		w.closeWG.Done()
+	}()
 
 	return w
 }

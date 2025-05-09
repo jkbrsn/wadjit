@@ -14,7 +14,10 @@ import (
 
 func TestNewWadjit(t *testing.T) {
 	w := New()
-	defer w.Close()
+	defer func() {
+		err := w.Close()
+		assert.NoError(t, err, "error closing Wadjit")
+	}()
 
 	assert.NotNil(t, w)
 	assert.NotNil(t, w.taskManager)
@@ -22,7 +25,10 @@ func TestNewWadjit(t *testing.T) {
 
 func TestWadjit_AddWatcher(t *testing.T) {
 	w := New()
-	defer w.Close()
+	defer func() {
+		err := w.Close()
+		assert.NoError(t, err, "error closing Wadjit")
+	}()
 
 	// Create a watcher
 	id := xid.New().String()
@@ -52,7 +58,10 @@ func TestWadjit_AddWatcher(t *testing.T) {
 
 func TestWadjit_RemoveWatcher(t *testing.T) {
 	w := New()
-	defer w.Close()
+	defer func() {
+		err := w.Close()
+		assert.NoError(t, err, "error closing Wadjit")
+	}()
 
 	// Create a watcher
 	id := xid.New().String()
@@ -82,12 +91,110 @@ func TestWadjit_RemoveWatcher(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestWadjit_Close(t *testing.T) {
+	t.Run("Normal Close", func(t *testing.T) {
+		w := New()
+
+		// Create a watcher with a long-running task
+		id := xid.New().String()
+		cadence := 100 * time.Millisecond
+		httpTasks := []HTTPEndpoint{{
+			URL:     &url.URL{Scheme: "http", Host: "localhost:8080"},
+			Payload: []byte("test payload"),
+		}}
+		var tasks []WatcherTask
+		for _, task := range httpTasks {
+			tasks = append(tasks, &task)
+		}
+		watcher, err := NewWatcher(id, cadence, tasks)
+		assert.NoError(t, err, "error creating watcher")
+
+		// Add and start the watcher
+		err = w.AddWatcher(watcher)
+		assert.NoError(t, err, "error adding watcher")
+		w.Start()
+
+		// Give it some time to start running
+		time.Sleep(5 * time.Millisecond)
+
+		// Close the Wadjit
+		err = w.Close()
+		assert.NoError(t, err, "error closing Wadjit")
+
+		// Verify all channels are closed
+		_, open := <-w.newWatcherChan
+		assert.False(t, open, "newWatcherChan should be closed")
+
+		_, open = <-w.respGatherChan
+		assert.False(t, open, "respGatherChan should be closed")
+
+		_, open = <-w.respExportChan
+		assert.False(t, open, "respExportChan should be closed")
+
+		_, open = <-w.wadjitStarted
+		assert.False(t, open, "wadjitStarted should be closed")
+
+		// Verify no watchers remain
+		assert.Equal(t, 0, syncMapLen(&w.watchers), "all watchers should be removed")
+
+		// Verify double close doesn't panic
+		err = w.Close()
+		assert.NoError(t, err, "error on second close")
+	})
+
+	t.Run("With Pending Responses", func(t *testing.T) {
+		w := New()
+		server := echoServer()
+		defer server.Close()
+
+		// Set up URLs
+		url, err := url.Parse(server.URL)
+		assert.NoError(t, err, "failed to parse HTTP URL")
+
+		// Create a watcher with a very short cadence
+		id := xid.New().String()
+		cadence := 1 * time.Millisecond
+		httpTasks := []HTTPEndpoint{{
+			URL:     url,
+			Payload: []byte("test payload"),
+		}}
+		var tasks []WatcherTask
+		for _, task := range httpTasks {
+			tasks = append(tasks, &task)
+		}
+		watcher, err := NewWatcher(id, cadence, tasks)
+		assert.NoError(t, err, "error creating watcher")
+
+		// Add and start the watcher
+		err = w.AddWatcher(watcher)
+		assert.NoError(t, err, "error adding watcher")
+		responses := w.Start()
+
+		// Give it time to generate some responses
+		time.Sleep(10 * time.Millisecond)
+
+		// Close the Wadjit
+		err = w.Close()
+		assert.NoError(t, err, "error closing Wadjit")
+
+		// Verify we can still read responses from the channel
+		// (they should be drained before closing)
+		responseCount := 0
+		for response := range responses {
+			responseCount++
+			assert.NoError(t, response.Err)
+		}
+		assert.Greater(t, responseCount, 0, "should have received responses before close")
+	})
+}
+
 func TestWadjit_Lifecycle(t *testing.T) {
 	w := New()
 	server := echoServer()
 	defer func() {
 		// Make sure the Wadjit is closed before the server closes
-		w.Close()
+		err := w.Close()
+		assert.NoError(t, err, "error closing Wadjit")
 		server.Close()
 	}()
 
@@ -189,7 +296,10 @@ func TestWadjit_Lifecycle(t *testing.T) {
 
 func TestWadjit_WatcherIDs(t *testing.T) {
 	w := New()
-	defer w.Close()
+	defer func() {
+		err := w.Close()
+		assert.NoError(t, err, "error closing Wadjit")
+	}()
 
 	// Initial state: no watchers
 	initialIDs := w.WatcherIDs()
