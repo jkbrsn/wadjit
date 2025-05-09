@@ -64,6 +64,9 @@ func (wr WatcherResponse) Reader() (io.ReadCloser, error) {
 
 // TaskResponse is a common interface for different types of responses (HTTP or WebSocket).
 type TaskResponse interface {
+	// Close closes the underlying source, e.g. the HTTP response body.
+	Close() error
+
 	// Data reads the entire payload into memory *exactly once*. Closes the underlying source.
 	// Subsequent calls either return the cached data.
 	Data() ([]byte, error)
@@ -139,6 +142,13 @@ type HTTPTaskResponse struct {
 
 func NewHTTPTaskResponse(r *http.Response) *HTTPTaskResponse {
 	return &HTTPTaskResponse{resp: r}
+}
+
+func (h *HTTPTaskResponse) Close() error {
+	if h.resp.Body == nil {
+		return nil
+	}
+	return h.resp.Body.Close()
 }
 
 // Data reads the entire HTTP response body into memory exactly once and then closes the body.
@@ -237,6 +247,10 @@ type WSTaskResponse struct {
 // NewWSTaskResponse can store an incoming WS message as a byte slice.
 func NewWSTaskResponse(data []byte) *WSTaskResponse {
 	return &WSTaskResponse{data: data}
+}
+
+func (w *WSTaskResponse) Close() error {
+	return nil
 }
 
 // Data returns the WS message of the response.

@@ -10,6 +10,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestHTTPTaskResponse_Close(t *testing.T) {
+	server := echoServer()
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	taskResp := NewHTTPTaskResponse(resp)
+	require.NoError(t, taskResp.Close())
+}
+
 func TestHTTPTaskResponse_Data_Success(t *testing.T) {
 	server := echoServer()
 	defer server.Close()
@@ -19,10 +31,11 @@ func TestHTTPTaskResponse_Data_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Call Data() to read the entire body
 	taskResp := NewHTTPTaskResponse(resp)
-	data, err := taskResp.Data()
+	defer taskResp.Close()
 
+	// Call Data() to read the entire body
+	data, err := taskResp.Data()
 	require.NoError(t, err)
 	require.Equal(t, payload, data)
 
@@ -40,8 +53,10 @@ func TestHTTPTaskResponse_Data_AfterReaderFails(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// First, get the Reader
 	taskResp := NewHTTPTaskResponse(resp)
+	defer taskResp.Close()
+
+	// First, get the Reader
 	r, err := taskResp.Reader()
 	require.NoError(t, err)
 	require.NotNil(t, r)
@@ -63,8 +78,10 @@ func TestHTTPTaskResponse_Reader_AfterDataReturnsMemory(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	// Call Data() first
 	taskResp := NewHTTPTaskResponse(resp)
+	defer taskResp.Close()
+
+	// Call Data() first
 	data, err := taskResp.Data()
 	require.NoError(t, err)
 	require.Equal(t, payload, data)
@@ -89,6 +106,7 @@ func TestHTTPTaskResponse_NilBody(t *testing.T) {
 	}
 
 	taskResp := NewHTTPTaskResponse(resp)
+	defer taskResp.Close()
 
 	// Data() should return error
 	data, err := taskResp.Data()
@@ -113,6 +131,7 @@ func TestHTTPTaskResponse_Metadata(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	taskResp := NewHTTPTaskResponse(resp)
+	defer taskResp.Close()
 
 	md := taskResp.Metadata()
 	require.Equal(t, http.StatusTeapot, md.StatusCode)
@@ -122,6 +141,7 @@ func TestHTTPTaskResponse_Metadata(t *testing.T) {
 func TestWSTaskResponse_DataAndReader(t *testing.T) {
 	wsData := []byte("hello from websocket")
 	wsResp := NewWSTaskResponse(wsData)
+	defer wsResp.Close()
 
 	data, err := wsResp.Data()
 	require.NoError(t, err)

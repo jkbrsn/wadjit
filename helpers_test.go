@@ -48,6 +48,10 @@ type MockTaskResponse struct {
 	data []byte
 }
 
+func (m *MockTaskResponse) Close() error {
+	return nil
+}
+
 func (m *MockTaskResponse) Data() ([]byte, error) {
 	return m.data, nil
 }
