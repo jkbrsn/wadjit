@@ -103,7 +103,27 @@ func TestMockWatcherTaskImplementsWatcherTask(t *testing.T) {
 }
 
 //
-// Helper functions
+// General helpers
+//
+
+// getHTTPWatcher creates a new Watcher with the given values and returns it.
+func getHTTPWatcher(id string, cadence time.Duration, payload []byte) (*Watcher, error) {
+	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
+	var tasks []WatcherTask
+	for _, task := range httpTasks {
+		tasks = append(tasks, &task)
+	}
+
+	watcher, err := NewWatcher(id, cadence, tasks)
+	if err != nil {
+		return nil, err
+	}
+
+	return watcher, nil
+}
+
+//
+// Helper servers
 //
 
 // upgrader is used to upgrade the connection to a WebSocket.

@@ -1,6 +1,7 @@
 package wadjit
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"sync/atomic"
@@ -25,6 +26,7 @@ func TestNewWadjit(t *testing.T) {
 
 func TestWadjit_AddWatcher(t *testing.T) {
 	w := New()
+	w.Start()
 	defer func() {
 		err := w.Close()
 		assert.NoError(t, err, "error closing Wadjit")
@@ -32,28 +34,50 @@ func TestWadjit_AddWatcher(t *testing.T) {
 
 	// Create a watcher
 	id := xid.New().String()
-	cadence := 1 * time.Second
-	payload := []byte("test payload")
-	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
-	var tasks []WatcherTask
-	for _, task := range httpTasks {
-		tasks = append(tasks, &task)
-	}
-	watcher, err := NewWatcher(id, cadence, tasks)
+	watcher, err := getHTTPWatcher(id, 1*time.Second, []byte("test payload"))
 	assert.NoError(t, err, "error creating watcher")
 
-	// Add the watcher
-	err = w.AddWatcher(watcher)
-	assert.NoError(t, err, "error adding watcher")
-	w.Start()
-	time.Sleep(5 * time.Millisecond) // wait for watcher to be added
+	t.Run("add watcher", func(t *testing.T) {
+		// Add the watcher
+		err = w.AddWatcher(watcher)
+		assert.NoError(t, err, "error adding watcher")
+		time.Sleep(5 * time.Millisecond) // wait for watcher to be added
 
-	// Check that the watcher was added correctly
-	assert.Equal(t, 1, syncMapLen(&w.watchers))
-	loaded, _ := w.watchers.Load(id)
-	assert.NotNil(t, loaded)
-	loaded = loaded.(*Watcher)
-	assert.Equal(t, watcher, loaded)
+		// Check that the watcher was added correctly
+		assert.Equal(t, 1, syncMapLen(&w.watchers))
+		loaded, _ := w.watchers.Load(id)
+		assert.NotNil(t, loaded)
+		loaded = loaded.(*Watcher)
+		assert.Equal(t, watcher, loaded)
+	})
+
+	t.Run("add duplicate", func(t *testing.T) {
+		// Add the same watcher again
+		err = w.AddWatcher(watcher)
+		assert.Error(t, err, "expected error adding duplicate watcher")
+
+		// Add new watcher with the same ID
+		newWatcher, err := getHTTPWatcher(id, 2*time.Second, []byte("another payload"))
+		assert.NoError(t, err, "error creating new watcher")
+		err = w.AddWatcher(newWatcher)
+		assert.Error(t, err, "expected error adding duplicate watcher")
+	})
+
+	t.Run("add watchers", func(t *testing.T) {
+		// Add multiple watchers
+		watchers := []*Watcher{}
+		for i := range 10 {
+			id := xid.New().String()
+			watcher, err := getHTTPWatcher(id, 1*time.Second, []byte(fmt.Sprintf("test payload %d", i)))
+			assert.NoError(t, err, "error creating watcher")
+			watchers = append(watchers, watcher)
+		}
+		err = w.AddWatchers(watchers...)
+		assert.NoError(t, err, "error adding watchers")
+
+		// Check that the watchers were added correctly
+		assert.Equal(t, 11, syncMapLen(&w.watchers))
+	})
 }
 
 func TestWadjit_RemoveWatcher(t *testing.T) {

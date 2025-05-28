@@ -33,6 +33,12 @@ func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	if err := watcher.Validate(); err != nil {
 		return fmt.Errorf("error validating watcher: %v", err)
 	}
+
+	// Check for existing watcher with the same ID
+	if _, loaded := w.watchers.LoadOrStore(watcher.ID, watcher); loaded {
+		return fmt.Errorf("watcher with ID %q already exists", watcher.ID)
+	}
+
 	w.newWatcherChan <- watcher
 	return nil
 }
