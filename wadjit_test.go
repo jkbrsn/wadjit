@@ -82,6 +82,22 @@ func TestWadjit_AddWatcher(t *testing.T) {
 		// Check that the watchers were added correctly
 		assert.Equal(t, 11, syncMapLen(&w.watchers))
 	})
+
+	t.Run("nil watcher", func(t *testing.T) {
+		err := w.AddWatcher(nil)
+		assert.Error(t, err, "expected error adding nil watcher")
+	})
+
+	t.Run("invalid watcher", func(t *testing.T) {
+		// Create a watcher with invalid configuration
+		id := xid.New().String()
+		watcher, err := getHTTPWatcher(id, 1*time.Second, []byte("test payload"))
+		assert.NoError(t, err, "error creating watcher")
+		watcher.Cadence = 0
+
+		err = w.AddWatcher(watcher)
+		assert.Error(t, err, "expected error removing invalid watcher")
+	})
 }
 
 func TestWadjit_RemoveWatcher(t *testing.T) {
