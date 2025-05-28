@@ -26,7 +26,6 @@ func TestNewWadjit(t *testing.T) {
 
 func TestWadjit_AddWatcher(t *testing.T) {
 	w := New()
-	w.Start()
 	defer func() {
 		err := w.Close()
 		assert.NoError(t, err, "error closing Wadjit")
@@ -41,7 +40,8 @@ func TestWadjit_AddWatcher(t *testing.T) {
 		// Add the watcher
 		err = w.AddWatcher(watcher)
 		assert.NoError(t, err, "error adding watcher")
-		time.Sleep(5 * time.Millisecond) // wait for watcher to be added
+		// Give watcher time to start up
+		time.Sleep(3 * time.Millisecond)
 
 		// Check that the watcher was added correctly
 		assert.Equal(t, 1, syncMapLen(&w.watchers))
@@ -55,6 +55,8 @@ func TestWadjit_AddWatcher(t *testing.T) {
 		// Add the same watcher again
 		err = w.AddWatcher(watcher)
 		assert.Error(t, err, "expected error adding duplicate watcher")
+		// Give watcher time to start up
+		time.Sleep(3 * time.Millisecond)
 
 		// Add new watcher with the same ID
 		newWatcher, err := getHTTPWatcher(id, 2*time.Second, []byte("another payload"))
@@ -74,6 +76,8 @@ func TestWadjit_AddWatcher(t *testing.T) {
 		}
 		err = w.AddWatchers(watchers...)
 		assert.NoError(t, err, "error adding watchers")
+		// Give watchers time to start up
+		time.Sleep(10 * time.Millisecond)
 
 		// Check that the watchers were added correctly
 		assert.Equal(t, 11, syncMapLen(&w.watchers))
@@ -101,8 +105,8 @@ func TestWadjit_RemoveWatcher(t *testing.T) {
 
 	err = w.AddWatcher(watcher)
 	assert.NoError(t, err, "error adding watcher")
-	w.Start()
-	time.Sleep(5 * time.Millisecond) // Wait for watcher to be added
+	// Give watcher time to start up
+	time.Sleep(3 * time.Millisecond)
 
 	assert.Equal(t, 1, syncMapLen(&w.watchers))
 
@@ -133,30 +137,20 @@ func TestWadjit_Close(t *testing.T) {
 		watcher, err := NewWatcher(id, cadence, tasks)
 		assert.NoError(t, err, "error creating watcher")
 
-		// Add and start the watcher
 		err = w.AddWatcher(watcher)
 		assert.NoError(t, err, "error adding watcher")
-		w.Start()
-
 		// Give it some time to start running
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(3 * time.Millisecond)
 
 		// Close the Wadjit
 		err = w.Close()
 		assert.NoError(t, err, "error closing Wadjit")
 
-		// Verify all channels are closed
-		_, open := <-w.newWatcherChan
-		assert.False(t, open, "newWatcherChan should be closed")
-
-		_, open = <-w.respGatherChan
+		_, open := <-w.respGatherChan
 		assert.False(t, open, "respGatherChan should be closed")
 
 		_, open = <-w.respExportChan
 		assert.False(t, open, "respExportChan should be closed")
-
-		_, open = <-w.wadjitStarted
-		assert.False(t, open, "wadjitStarted should be closed")
 
 		// Verify no watchers remain
 		assert.Equal(t, 0, syncMapLen(&w.watchers), "all watchers should be removed")
@@ -189,12 +183,10 @@ func TestWadjit_Close(t *testing.T) {
 		watcher, err := NewWatcher(id, cadence, tasks)
 		assert.NoError(t, err, "error creating watcher")
 
-		// Add and start the watcher
 		err = w.AddWatcher(watcher)
 		assert.NoError(t, err, "error adding watcher")
-		responses := w.Start()
 
-		// Give it time to generate some responses
+		// Give time to generate some responses
 		time.Sleep(10 * time.Millisecond)
 
 		// Close the Wadjit
@@ -204,6 +196,7 @@ func TestWadjit_Close(t *testing.T) {
 		// Verify we can still read responses from the channel
 		// (they should be drained before closing)
 		responseCount := 0
+		responses := w.Responses()
 		for response := range responses {
 			responseCount++
 			assert.NoError(t, response.Err)
@@ -258,14 +251,13 @@ func TestWadjit_Lifecycle(t *testing.T) {
 	assert.NoError(t, err, "error creating watcher 3")
 
 	// Consume responses
-	responses := w.Start()
 	firstCount := atomic.Int32{}
 	secondCount := atomic.Int32{}
 	thirdCount := atomic.Int32{}
 	go func() {
 		for {
 			select {
-			case response := <-responses:
+			case response := <-w.Responses():
 				assert.NoError(t, response.Err)
 				require.NotNil(t, response.Payload)
 				data, err := response.Payload.Data()
@@ -342,9 +334,9 @@ func TestWadjit_WatcherIDs(t *testing.T) {
 
 	w.AddWatchers(w1, w2)
 
-	// Start Wadjit in a range to drain the response channel
+	// Drain responses
 	go func() {
-		for range w.Start() {
+		for range w.Responses() {
 		}
 	}()
 
