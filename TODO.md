@@ -1,8 +1,9 @@
 # todo
 
-## v0.4.0
+## v0.6.0
 
 - Add metrics for stats like `Watcher` timing accuracy, and `Watcher` error rates
+- (maybe) Support for concurrent add/remove of watchers
 
 ## various ideas
 
