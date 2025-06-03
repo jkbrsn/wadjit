@@ -3,6 +3,7 @@
 ## v0.6.0
 
 - Add metrics for stats like `Watcher` timing accuracy, and `Watcher` error rates
+- Improve readme; add more (real) implementation examples, mention WS support, show response handling more
 - (maybe) Support for concurrent add/remove of watchers
 
 ## various ideas

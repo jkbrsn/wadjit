@@ -24,15 +24,15 @@ manager := wadjit.New()
 defer manager.Close()
 
 // Add watcher with name, cadence, and tasks
-myWatcher, err := wadjit.NewWatcher(
+myWatcher := wadjit.NewWatcher(
     "My watcher",
     5*time.Second,
     someTasks(),
 )
-err = manager.AddWatcher(myWatcher)
+manager.AddWatcher(myWatcher)
 
-// Start manager and consume responses
-respChannel := manager.Start()
+// Start consuming responses, unless we do this the jobs will block when the channel is full
+respChannel := manager.Responses()
 for {
     resp, ok := <-respChannel
     // Handle resp data
@@ -44,6 +44,28 @@ For a detailed example of how to use this package, have a look at [_example/main
 ```bash
 go run _example/main.go
 ```
+
+## API Reference
+
+### Wadjit
+
+- `New() *Wadjit`: Creates a new Wadjit instance
+- `AddWatcher(watcher *Watcher) error`: Adds a watcher to the manager
+- `AddWatchers(watchers ...*Watcher) error`: Adds multiple watchers at once
+- `RemoveWatcher(id string) error`: Removes a watcher by ID
+- `Responses() <-chan WatcherResponse`: Returns a channel for receiving responses
+- `Metrics() TaskManagerMetrics`: Returns metrics about the task manager
+- `Close() error`: Stops all watchers and cleans up resources
+
+### Watcher
+
+- `NewWatcher(id string, cadence time.Duration, tasks []WatcherTask) (*Watcher, error)`: Creates a new watcher
+- `Validate() error`: Validates the watcher configuration
+
+### Task Types
+
+- `HTTPEndpoint`: For making HTTP/HTTPS requests
+- `WSEndpoint`: For WebSocket connections (both one-time and persistent)
 
 ## Contributing
 
