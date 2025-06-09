@@ -62,6 +62,25 @@ func (w *Wadjit) AddWatchers(watchers ...*Watcher) error {
 	return errs
 }
 
+// Clear stops and removes all watchers from the Wadjit instance while keeping it running. This
+// function is not atomic with respect to other operations.
+func (w *Wadjit) Clear() error {
+	var errs error
+
+	// Get all watcher IDs (avoid concurrent map iteration)
+	ids := w.WatcherIDs()
+
+	// Remove each watcher
+	for _, id := range ids {
+		err := w.RemoveWatcher(id)
+		if err != nil {
+			errs = errors.Join(errs, fmt.Errorf("error removing watcher %q: %w", id, err))
+		}
+	}
+
+	return errs
+}
+
 // Close stops all Wadjit processes and closes the Wadjit.
 func (w *Wadjit) Close() error {
 	w.closeOnce.Do(func() {
@@ -103,7 +122,7 @@ func (w *Wadjit) Metrics() taskman.TaskManagerMetrics {
 	return w.taskManager.Metrics()
 }
 
-// RemoveWatcher removes a Watcher from the Wadjit.
+// RemoveWatcher closes and removes a Watcher from the Wadjit.
 func (w *Wadjit) RemoveWatcher(id string) error {
 	watcher, ok := w.watchers.LoadAndDelete(id)
 	if !ok {

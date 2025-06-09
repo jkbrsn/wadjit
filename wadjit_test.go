@@ -135,6 +135,37 @@ func TestWadjit_RemoveWatcher(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestWadjit_Clear(t *testing.T) {
+	w := New()
+	defer func() {
+		err := w.Close()
+		assert.NoError(t, err, "error closing Wadjit")
+	}()
+
+	// Add multiple watchers
+	watchers := []*Watcher{}
+	for i := range 10 {
+		id := xid.New().String()
+		watcher, err := getHTTPWatcher(id, 1*time.Second, []byte(fmt.Sprintf("test payload %d", i)))
+		assert.NoError(t, err, "error creating watcher")
+		watchers = append(watchers, watcher)
+	}
+	err := w.AddWatchers(watchers...)
+	assert.NoError(t, err, "error adding watchers")
+	// Give watchers time to start up
+	time.Sleep(5 * time.Millisecond)
+
+	// Check that the watchers were added correctly
+	assert.Equal(t, 10, syncMapLen(&w.watchers))
+
+	// Clear the Wadjit
+	err = w.Clear()
+	assert.NoError(t, err, "error clearing Wadjit")
+
+	// Check that all watchers were cleared
+	assert.Equal(t, 0, syncMapLen(&w.watchers))
+}
+
 func TestWadjit_Close(t *testing.T) {
 	t.Run("Normal Close", func(t *testing.T) {
 		w := New()
