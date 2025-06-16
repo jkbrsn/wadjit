@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jakobilobi/go-jsonrpc"
+	"github.com/jkbrsn/go-jsonrpc"
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -1,6 +1,6 @@
 # wadjit [![Go Documentation](http://img.shields.io/badge/go-documentation-blue.svg?style=flat-square)][godocs]
 
-[godocs]: http://godoc.org/github.com/jakobilobi/go-wadjit
+[godocs]: http://godoc.org/github.com/jkbrsn/go-wadjit
 
 Wadjit (pronounced /ˈwɒdʒɪt/, or "watch it") is a program for endpoint monitoring and analysis.
 
@@ -11,7 +11,7 @@ Wadjit (pronounced /ˈwɒdʒɪt/, or "watch it") is a program for endpoint monit
 ## Installation
 
 ```bash
-go get -u github.com/jakobilobi/go-wadjit@latest
+go get -u github.com/jkbrsn/go-wadjit@latest
 ```
 
 ## Usage

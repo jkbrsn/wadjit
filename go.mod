@@ -1,13 +1,13 @@
-module github.com/jakobilobi/go-wadjit
+module github.com/jkbrsn/go-wadjit
 
-go 1.24.1
+go 1.24.3
 
 require (
 	github.com/bytedance/sonic v1.13.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/go-multierror v1.1.1
-	github.com/jakobilobi/go-jsonrpc v0.5.1
-	github.com/jakobilobi/go-taskman v0.3.2
+	github.com/jkbrsn/go-jsonrpc v0.5.2
+	github.com/jkbrsn/go-taskman v0.3.3
 	github.com/rs/xid v1.6.0
 )
 

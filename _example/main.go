@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/jakobilobi/go-wadjit"
+	"github.com/jkbrsn/go-wadjit"
 )
 
 func main() {

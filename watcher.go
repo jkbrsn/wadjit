@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/go-multierror"
-	"github.com/jakobilobi/go-taskman"
+	"github.com/jkbrsn/go-taskman"
 	"github.com/rs/xid"
 )
 

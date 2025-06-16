@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/jakobilobi/go-taskman"
+	"github.com/jkbrsn/go-taskman"
 )
 
 // Wadjit is a struct that manages a collection of endpoint watchers.
