@@ -139,6 +139,25 @@ func NewHTTPTaskResponse(r *http.Response) *HTTPTaskResponse {
 	return &HTTPTaskResponse{resp: r}
 }
 
+// readBody reads the HTTP response body into memory exactly once and then closes the body.
+func (h *HTTPTaskResponse) readBody() {
+	if h.resp.Body == nil {
+		h.dataErr = errors.New("http.Response.Body is nil")
+		return
+	}
+	defer h.resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(h.resp.Body)
+	if err != nil {
+		h.dataErr = err
+		return
+	}
+	h.data = bodyBytes
+	h.dataOnce.Store(true)
+	h.timestamps.dataDone = time.Now()
+}
+
+// Close closes the HTTP response body.
 func (h *HTTPTaskResponse) Close() error {
 	if h.resp.Body == nil {
 		return nil
@@ -155,20 +174,7 @@ func (h *HTTPTaskResponse) Data() ([]byte, error) {
 	}
 
 	h.once.Do(func() {
-		if h.resp.Body == nil {
-			h.dataErr = errors.New("http.Response.Body is nil")
-			return
-		}
-		defer h.resp.Body.Close()
-
-		bodyBytes, err := io.ReadAll(h.resp.Body)
-		if err != nil {
-			h.dataErr = err
-			return
-		}
-		h.data = bodyBytes
-		h.dataOnce.Store(true)
-		h.timestamps.dataDone = time.Now()
+		h.readBody()
 	})
 
 	return h.data, h.dataErr

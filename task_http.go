@@ -22,6 +22,12 @@ type HTTPEndpoint struct {
 	URL     *url.URL
 	ID      string
 
+	// OptReadFast is a flag that, when set, makes the task execution read the response body into
+	// memory and close the connection as soon as the response is received. This completes the
+	// request faster but buffers the body into memory.
+	// TODO: consider introducing a max-length option to limit this option for large responses.
+	OptReadFast bool
+
 	// Set by Initialize
 	watcherID string
 	respChan  chan<- WatcherResponse
@@ -106,6 +112,9 @@ func (r httpRequest) Execute() error {
 	// Create a task response
 	taskResponse := NewHTTPTaskResponse(response)
 	taskResponse.timestamps = *timestamps
+	if r.endpoint.OptReadFast {
+		taskResponse.readBody()
+	}
 
 	// Send the response on the channel
 	r.respChan <- WatcherResponse{
