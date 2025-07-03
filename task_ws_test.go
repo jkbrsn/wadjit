@@ -328,8 +328,8 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		assert.Equal(t, len(endpoint.Payload), int(metadata.Size))
 		assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
 		assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
-		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))    // Data is fully read when received
-		assert.Greater(t, metadata.TimeData.RequestTimeTotal, time.Duration(0)) // Data is fully read when received
+		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))     // Data is fully read when received
+		assert.Greater(t, *metadata.TimeData.RequestTimeTotal, time.Duration(0)) // Data is fully read when received
 		// Check the response data
 		data, err := resp.Data()
 		assert.NoError(t, err)

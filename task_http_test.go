@@ -84,7 +84,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 		// Reload metadata to get updated timings
 		metadata = resp.Metadata()
 		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))
-		assert.Greater(t, metadata.TimeData.RequestTimeTotal, time.Duration(0))
+		assert.Greater(t, *metadata.TimeData.RequestTimeTotal, time.Duration(0))
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for response")
 	}

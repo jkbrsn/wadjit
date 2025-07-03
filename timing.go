@@ -33,15 +33,14 @@ type RequestTimes struct {
 	// For WS, this is the time from inital Dial to the first 101 response for a new conn, or
 	// the time from sending a message to receiving a response on an existing connection.
 	Latency time.Duration
-	// Total time taken for a request, including full data transfer
-	RequestTimeTotal time.Duration
 
 	// Optional durations, nil when not applicable
-	DNSLookup        *time.Duration
-	TCPConnect       *time.Duration
-	TLSHandshake     *time.Duration
-	ServerProcessing *time.Duration
-	DataTransfer     *time.Duration
+	RequestTimeTotal *time.Duration // Total time taken for a request, including full data transfer
+	DNSLookup        *time.Duration // DNS lookup duration
+	TCPConnect       *time.Duration // TCP connection duration
+	TLSHandshake     *time.Duration // TLS handshake duration
+	ServerProcessing *time.Duration // Server processing duration
+	DataTransfer     *time.Duration // Data transfer duration
 }
 
 // ptr returns a pointer to the given value.
@@ -74,7 +73,7 @@ func TimeDataFromTimestamps(t requestTimestamps) RequestTimes {
 		req.DataTransfer = ptr(t.dataDone.Sub(t.firstByte))
 	}
 	if !t.dataDone.IsZero() && !t.start.IsZero() {
-		req.RequestTimeTotal = t.dataDone.Sub(t.start)
+		req.RequestTimeTotal = ptr(t.dataDone.Sub(t.start))
 	}
 
 	return req
