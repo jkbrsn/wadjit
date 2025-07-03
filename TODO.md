@@ -13,7 +13,11 @@
 ## v0.7.0
 
 - (maybe) Support for concurrent add/remove of watchers
-- Expose opt-in configuration (buffer sizes, metric sink, deadline times) via functional options
+- Expose opt-in configuration via functional options, some option ideas:
+  - Buffer sizes
+  - Metric sink
+  - Deadline times
+  - Read upon response received, to avoid adding lag to the timing of DataTransferTime or RequestTimeTotal
 - Improve readme; add more (real) implementation examples, mention WS support, show response handling more
 
 ## various ideas
