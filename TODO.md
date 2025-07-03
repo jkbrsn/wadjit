@@ -1,6 +1,6 @@
 # todo
 
-## v0.6.0
+## v0.7.0
 
 - Add `Watcher` metrics (per watcher and/or overall)
   - Timing accuracy/skew
@@ -8,10 +8,6 @@
   - Response times (?)
   - Backlog size
   - Channel pressure
-- Improve metadata carry in tasks/responses
-
-## v0.7.0
-
 - (maybe) Support for concurrent add/remove of watchers
 - Expose opt-in configuration via functional options, some option ideas:
   - Buffer sizes
@@ -19,9 +15,11 @@
   - Deadline times
   - Read upon response received, to avoid adding lag to the timing of DataTransferTime or RequestTimeTotal
 - Improve readme; add more (real) implementation examples, mention WS support, show response handling more
+- Add golangci-lint config + make command
 
 ## various ideas
 
+- Improve metadata carry in tasks/responses (`Watcher.ID` only current metadata)
 - Create a new type of `Watcher`, to watch WS subscriptions
   - WS subscriptions do not fit into the current `Watcher` model, which is based on polling
 - Add configuration options, e.g. for buffer sizes, timeouts, metrics on/off etc.
