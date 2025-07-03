@@ -2,9 +2,20 @@
 
 ## v0.6.0
 
-- Add metrics for stats like `Watcher` timing accuracy, and `Watcher` error rates
-- Improve readme; add more (real) implementation examples, mention WS support, show response handling more
+- Add `Watcher` metrics (per watcher and/or overall)
+  - Timing accuracy/skew
+  - Error/success rates
+  - Response times (?)
+  - Backlog size
+  - Channel pressure
+- Remove multierror dependency
+- Improve metadata carry in tasks/responses
+
+## v0.7.0
+
 - (maybe) Support for concurrent add/remove of watchers
+- Expose opt-in configuration (buffer sizes, metric sink, deadline times) via functional options
+- Improve readme; add more (real) implementation examples, mention WS support, show response handling more
 
 ## various ideas
 
