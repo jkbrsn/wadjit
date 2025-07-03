@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hashicorp/go-multierror"
 	"github.com/jkbrsn/go-taskman"
 	"github.com/rs/xid"
 )
@@ -26,22 +25,22 @@ func (w *Watcher) Validate() error {
 		return errors.New("watcher is nil")
 	}
 
-	var result *multierror.Error
+	var errs error
 	if w.ID == "" {
-		result = multierror.Append(result, errors.New("var ID must not be nil"))
+		errs = errors.Join(errs, errors.New("var ID must not be nil"))
 	}
 	if w.Cadence <= 0 {
-		result = multierror.Append(result, errors.New("var Cadence must be greater than 0"))
+		errs = errors.Join(errs, errors.New("var Cadence must be greater than 0"))
 	}
 	if len(w.Tasks) == 0 {
-		result = multierror.Append(result, errors.New("var Tasks must not be nil or empty"))
+		errs = errors.Join(errs, errors.New("var Tasks must not be nil or empty"))
 	}
 	if w.doneChan == nil {
-		result = multierror.Append(result, errors.New("doneChan must not be nil"))
+		errs = errors.Join(errs, errors.New("doneChan must not be nil"))
 	} else {
 		select {
 		case <-w.doneChan:
-			result = multierror.Append(result, errors.New("doneChan must not be closed"))
+			errs = errors.Join(errs, errors.New("doneChan must not be closed"))
 		default:
 			// doneChan is not closed
 		}
@@ -50,11 +49,11 @@ func (w *Watcher) Validate() error {
 	for i := range w.Tasks {
 		err := w.Tasks[i].Validate()
 		if err != nil {
-			result = multierror.Append(result, err)
+			errs = errors.Join(errs, err)
 		}
 	}
 
-	return result.ErrorOrNil()
+	return errs
 }
 
 // Close closes the HTTP watcher.
@@ -63,14 +62,14 @@ func (w *Watcher) close() error {
 	close(w.doneChan)
 
 	// Close all WS connections
-	var result *multierror.Error
+	var errs error
 	for i := range w.Tasks {
 		err := w.Tasks[i].Close()
 		if err != nil {
-			result = multierror.Append(result, err)
+			errs = errors.Join(errs, err)
 		}
 	}
-	return result.ErrorOrNil()
+	return errs
 }
 
 // job returns a taskman.Job that executes the Watcher's tasks.
@@ -91,11 +90,11 @@ func (w *Watcher) job() taskman.Job {
 
 // Start sets up the Watcher to start listening for responses, and initializes its tasks.
 func (w *Watcher) start(responseChan chan WatcherResponse) error {
-	var result *multierror.Error
+	var errs error
 
 	// If the response channel is nil, the watcher cannot function
 	if responseChan == nil {
-		result = multierror.Append(result, errors.New("response channel is nil"))
+		errs = errors.Join(errs, errors.New("response channel is nil"))
 	}
 
 	// Set up the Watcher's channels if they are nil
@@ -107,11 +106,11 @@ func (w *Watcher) start(responseChan chan WatcherResponse) error {
 	for i := range w.Tasks {
 		err := w.Tasks[i].Initialize(w.ID, responseChan)
 		if err != nil {
-			result = multierror.Append(result, err)
+			errs = errors.Join(errs, err)
 		}
 	}
 
-	return result.ErrorOrNil()
+	return errs
 }
 
 // NewWatcher creates and validates a new Watcher. If a nil ID is set to the Watcher, a randomized

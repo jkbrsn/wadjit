@@ -5,7 +5,6 @@ go 1.24.3
 require (
 	github.com/bytedance/sonic v1.13.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/hashicorp/go-multierror v1.1.1
 	github.com/jkbrsn/go-jsonrpc v0.5.2
 	github.com/jkbrsn/go-taskman v0.3.3
 	github.com/rs/xid v1.6.0
@@ -15,7 +14,6 @@ require (
 	github.com/bytedance/sonic/loader v0.2.4 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/hashicorp/errwrap v1.0.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rs/zerolog v1.33.0 // indirect

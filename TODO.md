@@ -8,7 +8,6 @@
   - Response times (?)
   - Backlog size
   - Channel pressure
-- Remove multierror dependency
 - Improve metadata carry in tasks/responses
 
 ## v0.7.0
