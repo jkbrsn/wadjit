@@ -3,6 +3,7 @@ package wadjit
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/http"
@@ -110,8 +111,8 @@ func (r httpRequest) Execute() error {
 	}
 
 	// Add tracing to the request
-	timings := &httpRequestTimes{}
-	trace := traceRequest(timings)
+	timestamps := &requestTimestamps{}
+	trace := traceRequest(timestamps)
 	ctx := httptrace.WithClientTrace(request.Context(), trace)
 	request = request.WithContext(ctx)
 
@@ -131,9 +132,7 @@ func (r httpRequest) Execute() error {
 
 	// Create a task response
 	taskResponse := NewHTTPTaskResponse(response)
-	taskResponse.latency = timings.FirstResponseByte.Sub(timings.Start)
-	taskResponse.receivedAt = time.Now()
-	taskResponse.sentAt = timings.Start
+	taskResponse.timestamps = *timestamps
 
 	// Send the response on the channel
 	r.respChan <- WatcherResponse{
@@ -147,21 +146,19 @@ func (r httpRequest) Execute() error {
 	return nil
 }
 
-// httpRequestTimes stores the timestamps of an HTTP request used to calculate the latency.
-type httpRequestTimes struct {
-	Start             time.Time
-	FirstResponseByte time.Time
-}
-
-func traceRequest(times *httpRequestTimes) *httptrace.ClientTrace {
+// traceRequest traces the HTTP request and stores the timestamps in the provided times.
+func traceRequest(times *requestTimestamps) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		// The earliest guaranteed callback is usually GetConn, so we set the start time there
-		GetConn: func(_ string) {
-			times.Start = time.Now()
-		},
-		GotFirstResponseByte: func() {
-			times.FirstResponseByte = time.Now()
-		},
+		GetConn:              func(string) { times.start = time.Now() },
+		DNSStart:             func(httptrace.DNSStartInfo) { times.dnsStart = time.Now() },
+		DNSDone:              func(httptrace.DNSDoneInfo) { times.dnsDone = time.Now() },
+		ConnectStart:         func(_, _ string) { times.connStart = time.Now() },
+		ConnectDone:          func(_, _ string, _ error) { times.connDone = time.Now() },
+		TLSHandshakeStart:    func() { times.tlsStart = time.Now() },
+		TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) { times.tlsDone = time.Now() },
+		WroteRequest:         func(httptrace.WroteRequestInfo) { times.wroteDone = time.Now() },
+		GotFirstResponseByte: func() { times.firstByte = time.Now() },
 	}
 }
 
@@ -436,6 +433,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 			// Endpoint shutting down
 			return
 		default:
+
 			// Read message from connection
 			_, p, err := e.conn.ReadMessage()
 			if err != nil {
@@ -454,7 +452,10 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 
 				return
 			}
-			timeRead := time.Now()
+			// Register first byte timestamp
+			timestamps := requestTimestamps{
+				firstByte: time.Now(),
+			}
 
 			if e.Mode == PersistentJSONRPC {
 				// 1. Unmarshal p into a JSON-RPC response interface
@@ -480,6 +481,9 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 						inflightMsg := inflightMsg.(wsInflightMessage)
 						e.inflightMsgs.Delete(responseID)
 
+						// Get start time from inflight message
+						timestamps.start = inflightMsg.timeSent
+
 						// 4. Restore original ID and marshal the JSON-RPC interface back into a byte slice
 						jsonRPCResp.ID = inflightMsg.originalID
 						p, err = jsonRPCResp.MarshalJSON()
@@ -490,9 +494,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 						}
 						// 5. set metadata to the taskresponse: original id, duration between time sent and time received
 						taskResponse := NewWSTaskResponse(p)
-						taskResponse.latency = timeRead.Sub(inflightMsg.timeSent)
-						taskResponse.receivedAt = timeRead
-						taskResponse.sentAt = inflightMsg.timeSent
+						taskResponse.timestamps = timestamps
 
 						// Send the message to the read channel
 						response := WatcherResponse{
@@ -548,7 +550,14 @@ func (oh *wsOneHit) Execute() error {
 		// Endpoint shutting down, do nothing
 		return nil
 	default:
+		timestamps := requestTimestamps{}
+
 		// 1. Establish a new connection
+		timestamps.start = time.Now()
+		// TODO: move DNS, conn and TLS timings into the dialer, perhaps reuse wsstat library?
+		timestamps.dnsStart = time.Now()
+		timestamps.connStart = time.Now()
+		timestamps.tlsStart = time.Now()
 		conn, _, err := websocket.DefaultDialer.Dial(oh.wsEndpoint.URL.String(), oh.wsEndpoint.Header)
 		if err != nil {
 			err = fmt.Errorf("failed to dial: %w", err)
@@ -556,15 +565,18 @@ func (oh *wsOneHit) Execute() error {
 			return err
 		}
 		defer conn.Close()
+		timestamps.dnsDone = time.Now()
+		timestamps.connDone = time.Now()
+		timestamps.tlsDone = time.Now()
 
 		// 2. Write message to connection
-		writeStart := time.Now()
 		if err := conn.WriteMessage(websocket.TextMessage, oh.wsEndpoint.Payload); err != nil {
 			// An error is unexpected, since the connection was just established
 			err = fmt.Errorf("failed to write message: %w", err)
 			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, oh.wsEndpoint.URL)
 			return err
 		}
+		timestamps.wroteDone = time.Now()
 
 		// 3. Read exactly one response
 		_, message, err := conn.ReadMessage()
@@ -574,13 +586,12 @@ func (oh *wsOneHit) Execute() error {
 			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, oh.wsEndpoint.URL)
 			return err
 		}
-		messageRTT := time.Since(writeStart)
+		timestamps.firstByte = time.Now() // TODO: can we properly get this at the first byte instead of after read?
+		timestamps.dataDone = time.Now()
 
 		// 4. Create a task response
 		taskResponse := NewWSTaskResponse(message)
-		taskResponse.latency = messageRTT
-		taskResponse.receivedAt = time.Now()
-		taskResponse.sentAt = writeStart
+		taskResponse.timestamps = timestamps
 
 		// 5. Send the response message on the channel
 		oh.wsEndpoint.respChan <- WatcherResponse{

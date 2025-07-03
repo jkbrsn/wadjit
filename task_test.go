@@ -79,12 +79,23 @@ func TestHTTPEndpointExecute(t *testing.T) {
 		metadata := resp.Metadata()
 		assert.NotNil(t, metadata)
 		assert.Equal(t, "application/json", metadata.Headers.Get("Content-Type"))
-		assert.Greater(t, metadata.Latency, time.Duration(0))
-		assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+		// Timings
+		assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
+		assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
+		assert.Nil(t, metadata.TimeData.DNSLookup) // No DNS lookup in this test
+		assert.Greater(t, *metadata.TimeData.TCPConnect, time.Duration(0))
+		assert.Zero(t, metadata.TimeData.TLSHandshake) // No TLS in this test
+		assert.Greater(t, *metadata.TimeData.ServerProcessing, time.Duration(0))
+		assert.Nil(t, metadata.TimeData.DataTransfer)      // Data not yet read
+		assert.Zero(t, metadata.TimeData.RequestTimeTotal) // Data not yet read
 		// Check the response data
 		data, err := resp.Data()
 		assert.NoError(t, err)
 		assert.JSONEq(t, `{"key":"value"}`, string(data))
+		// Reload metadata to get updated timings
+		metadata = resp.Metadata()
+		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))
+		assert.Greater(t, metadata.TimeData.RequestTimeTotal, time.Duration(0))
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for response")
 	}
@@ -141,8 +152,8 @@ func TestHTTPEndpointExecuteMethods(t *testing.T) {
 				// Check the response metadata
 				metadata := resp.Metadata()
 				assert.NotNil(t, metadata)
-				assert.Greater(t, metadata.Latency, time.Duration(0))
-				assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+				assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
+				assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
 				if c.payload != nil {
 					assert.Equal(t, "application/json", metadata.Headers.Get("Content-Type"))
 				}
@@ -309,8 +320,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			assert.Nil(t, metadata.Headers)
 			assert.Zero(t, metadata.StatusCode)
 			assert.Equal(t, len(expectedResp), int(metadata.Size))
-			assert.Greater(t, metadata.Latency, time.Duration(0))
-			assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+			assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
+			assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
 			// Check the response data
 			data, err := resp.Data()
 			assert.NoError(t, err)
@@ -355,8 +366,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			metadata := resp.Metadata()
 			assert.NotNil(t, metadata)
 			assert.Equal(t, len(expectedResp), int(metadata.Size)) // Payload size should match
-			assert.Greater(t, metadata.Latency, time.Duration(0))
-			assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+			assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
+			assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
 		case <-time.After(1 * time.Second):
 			t.Fatal("timeout waiting for response")
 		}
@@ -408,8 +419,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			metadata := resp.Metadata()
 			assert.NotNil(t, metadata)
 			assert.Equal(t, len(expectedResp), int(metadata.Size)) // Payload size should match
-			assert.Greater(t, metadata.Latency, time.Duration(0))
-			assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+			assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
+			assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
 		case <-time.After(1 * time.Second):
 			t.Fatal("timeout waiting for response")
 		}
@@ -439,8 +450,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			metadata := resp.Metadata()
 			assert.NotNil(t, metadata)
 			assert.Equal(t, len(expectedResp), int(metadata.Size)) // Payload size should match
-			assert.Greater(t, metadata.Latency, time.Duration(0))
-			assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+			assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
+			assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
 		case <-time.After(1 * time.Second):
 			t.Fatal("timeout waiting for response")
 		}
@@ -490,8 +501,10 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		assert.Nil(t, metadata.Headers)
 		assert.Zero(t, metadata.StatusCode)
 		assert.Equal(t, len(endpoint.Payload), int(metadata.Size))
-		assert.Greater(t, metadata.Latency, time.Duration(0))
-		assert.Greater(t, metadata.TimeReceived, metadata.TimeSent)
+		assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
+		assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
+		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))    // Data is fully read when received
+		assert.Greater(t, metadata.TimeData.RequestTimeTotal, time.Duration(0)) // Data is fully read when received
 		// Check the response data
 		data, err := resp.Data()
 		assert.NoError(t, err)

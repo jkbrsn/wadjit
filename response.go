@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -86,17 +87,11 @@ type TaskResponseMetadata struct {
 	StatusCode int
 	Headers    http.Header
 
-	// Latency is the time it took to receive the very first byte of the response.
-	// For HTTP, this is the time from request send to receiving the first byte of the response.
-	// For WS, this is the time from inital Dial to the first 101 response for a new conn, or
-	// the time from sending a message to receiving a response on an existing connection.
-	Latency time.Duration
 	// Size is the size of the response body, or message, in bytes.
 	Size int64
-	// TimeReceived is the time the response was received.
-	TimeReceived time.Time
-	// TimeSent is the time the request or message was sent.
-	TimeSent time.Time
+
+	// TimeData contains the timing information for the request.
+	TimeData RequestTimes
 }
 
 func (m TaskResponseMetadata) String() string {
@@ -116,9 +111,10 @@ func (m TaskResponseMetadata) String() string {
 	return "TaskResponseMetadata{" +
 		"StatusCode: " + strconv.Itoa(m.StatusCode) + ", " +
 		"Headers: " + buffer.String() + ", " +
-		"Latency: " + m.Latency.String() + ", " +
 		"Size: " + strconv.Itoa(int(m.Size)) + ", " +
-		"TimeReceived: " + m.TimeReceived.String() + "}"
+		"Latency: " + m.TimeData.Latency.String() + ", " +
+		"TimeSent: " + m.TimeData.SentAt.String() + ", " +
+		"TimeReceived: " + m.TimeData.ReceivedAt.String() + "}"
 }
 
 //
@@ -129,13 +125,12 @@ func (m TaskResponseMetadata) String() string {
 type HTTPTaskResponse struct {
 	resp *http.Response
 
-	once       sync.Once   // ensures Data() is only processed once
-	dataOnce   atomic.Bool // new flag to track if once was done
-	data       []byte
-	dataErr    error
-	latency    time.Duration
-	receivedAt time.Time
-	sentAt     time.Time
+	once     sync.Once   // ensures Data() is only processed once
+	dataOnce atomic.Bool // new flag to track if once was done
+	data     []byte
+	dataErr  error
+
+	timestamps requestTimestamps
 
 	usedReader atomic.Bool // flags if we returned a Reader
 }
@@ -173,6 +168,7 @@ func (h *HTTPTaskResponse) Data() ([]byte, error) {
 		}
 		h.data = bodyBytes
 		h.dataOnce.Store(true)
+		h.timestamps.dataDone = time.Now()
 	})
 
 	return h.data, h.dataErr
@@ -203,7 +199,16 @@ func (h *HTTPTaskResponse) Reader() (io.ReadCloser, error) {
 		return nil, errors.New("http.Response.Body is nil")
 	}
 
-	return h.resp.Body, nil
+	// Return custom readcloser that records when the stream is finished
+	return &timedReadCloser{
+		rc: h.resp.Body,
+		doneFn: func() {
+			// Only set the timestamp if it hasn't been set yet
+			if h.timestamps.dataDone.IsZero() {
+				h.timestamps.dataDone = time.Now()
+			}
+		},
+	}, nil
 }
 
 // Metadata returns the HTTP status code and headers.
@@ -213,16 +218,12 @@ func (h *HTTPTaskResponse) Metadata() TaskResponseMetadata {
 	}
 
 	md := TaskResponseMetadata{
-		StatusCode:   h.resp.StatusCode,
-		Headers:      http.Header{},
-		Latency:      h.latency,
-		Size:         h.resp.ContentLength,
-		TimeReceived: h.receivedAt,
-		TimeSent:     h.sentAt,
+		StatusCode: h.resp.StatusCode,
+		Headers:    http.Header{},
+		Size:       h.resp.ContentLength,
+		TimeData:   TimeDataFromTimestamps(h.timestamps),
 	}
-	for k, v := range h.resp.Header {
-		md.Headers[k] = v
-	}
+	maps.Copy(md.Headers, h.resp.Header)
 
 	return md
 }
@@ -239,9 +240,7 @@ func (h *HTTPTaskResponse) dataDone() bool {
 // WSTaskResponse is a TaskResponse for WebSocket responses.
 type WSTaskResponse struct {
 	data       []byte
-	latency    time.Duration
-	receivedAt time.Time
-	sentAt     time.Time
+	timestamps requestTimestamps
 }
 
 // NewWSTaskResponse can store an incoming WS message as a byte slice.
@@ -266,9 +265,7 @@ func (w *WSTaskResponse) Reader() (io.ReadCloser, error) {
 // Metadata returns metadata connected to the response.
 func (w *WSTaskResponse) Metadata() TaskResponseMetadata {
 	return TaskResponseMetadata{
-		Latency:      w.latency,
-		Size:         int64(len(w.data)),
-		TimeReceived: w.receivedAt,
-		TimeSent:     w.sentAt,
+		Size:     int64(len(w.data)),
+		TimeData: TimeDataFromTimestamps(w.timestamps),
 	}
 }
