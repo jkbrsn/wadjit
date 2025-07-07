@@ -15,6 +15,8 @@ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aN
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/jkbrsn/go-jsonrpc v0.5.2 h1:elfEsLJxEecJUhiLr4AMBv/sY5LJGJTwr0tKjXgZg+k=
 github.com/jkbrsn/go-jsonrpc v0.5.2/go.mod h1:3rsj7I1oyKAB1RmyjpzHJpcJgeIJ6xLTOsHYSKOS7iU=
+github.com/jkbrsn/go-jsonrpc v0.6.0 h1:797IcCXdDRAOzI55+vJ88WrLRv4ZesG0bBrWuONlCCs=
+github.com/jkbrsn/go-jsonrpc v0.6.0/go.mod h1:3rsj7I1oyKAB1RmyjpzHJpcJgeIJ6xLTOsHYSKOS7iU=
 github.com/jkbrsn/go-taskman v0.3.3 h1:aPqlFMGsl9xHDQksCLPBr8WX2YiZsAguZuiGf/laH1o=
 github.com/jkbrsn/go-taskman v0.3.3/go.mod h1:ic87VJVhZ5MopnNYyHUloPGycf1fraXViOFTTkEDEZc=
 github.com/klauspost/cpuid/v2 v2.0.9 h1:lgaqFMSdTdQYdZ04uHyN2d/eKdOMyi2YLSvlQIBFYa4=

@@ -5,7 +5,7 @@ go 1.24.3
 require (
 	github.com/bytedance/sonic v1.13.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/jkbrsn/go-jsonrpc v0.5.2
+	github.com/jkbrsn/go-jsonrpc v0.6.0
 	github.com/jkbrsn/go-taskman v0.3.3
 	github.com/rs/xid v1.6.0
 )
