@@ -268,6 +268,9 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 			return
 		default:
 
+			// Clone the URL to avoid downstream mutation
+			urlClone := *e.URL
+
 			// Read message from connection
 			_, p, err := e.conn.ReadMessage()
 			if err != nil {
@@ -278,7 +281,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 				} else {
 					// This is unexpected
 					// TODO: consider returning an error response, though the channel may not be available
-					//e.respChan <- errorResponse(fmt.Errorf("unexpected websocket read error: %w", err), e.ID, e.watcherID, e.URL)
+					//e.respChan <- errorResponse(fmt.Errorf("unexpected websocket read error: %w", err), e.ID, e.watcherID, &urlClone)
 				}
 
 				// If there was an error, close the connection
@@ -296,7 +299,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 				jsonRPCResp, err := jsonrpc.DecodeResponse(p)
 				if err != nil {
 					// Send an error response
-					e.respChan <- errorResponse(fmt.Errorf("failed parsing jsonrpc.Response from bytes: %w", err), e.ID, e.watcherID, e.URL)
+					e.respChan <- errorResponse(fmt.Errorf("failed parsing jsonrpc.Response from bytes: %w", err), e.ID, e.watcherID, &urlClone)
 					return
 				}
 
@@ -305,7 +308,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 					responseID := jsonRPCResp.IDString()
 					if responseID == "" {
 						// Send an error response
-						e.respChan <- errorResponse(fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.Result), e.ID, e.watcherID, e.URL)
+						e.respChan <- errorResponse(fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.Result), e.ID, e.watcherID, &urlClone)
 						return
 					}
 
@@ -322,7 +325,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 						p, err = jsonRPCResp.MarshalJSON()
 						if err != nil {
 							// Send an error response
-							e.respChan <- errorResponse(fmt.Errorf("failed re-marshalling JSON-RPC response: %w", err), e.ID, e.watcherID, e.URL)
+							e.respChan <- errorResponse(fmt.Errorf("failed re-marshalling JSON-RPC response: %w", err), e.ID, e.watcherID, &urlClone)
 							return
 						}
 						// 5. set metadata to the taskresponse: original id, duration between time sent and time received
@@ -333,23 +336,23 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 						response := WatcherResponse{
 							TaskID:    e.ID,
 							WatcherID: e.watcherID,
-							URL:       e.URL,
+							URL:       &urlClone,
 							Err:       nil,
 							Payload:   taskResponse,
 						}
 						e.respChan <- response
 					} else {
-						e.respChan <- errorResponse(errors.New("unknown response ID: "+jsonRPCResp.IDString()), e.ID, e.watcherID, e.URL)
+						e.respChan <- errorResponse(errors.New("unknown response ID: "+jsonRPCResp.IDString()), e.ID, e.watcherID, &urlClone)
 					}
 				} else {
-					e.respChan <- errorResponse(errors.New("empty JSON-RPC response"), e.ID, e.watcherID, e.URL)
+					e.respChan <- errorResponse(errors.New("empty JSON-RPC response"), e.ID, e.watcherID, &urlClone)
 				}
 			} else {
 				// Send the message to the read channel
 				response := WatcherResponse{
 					TaskID:    e.ID,
 					WatcherID: e.watcherID,
-					URL:       e.URL,
+					URL:       &urlClone,
 					Err:       nil,
 					Payload:   NewWSTaskResponse(p),
 				}
@@ -378,6 +381,9 @@ func (oh *wsOneHit) Execute() error {
 	oh.wsEndpoint.lock()
 	defer oh.wsEndpoint.unlock()
 
+	// Clone the URL to avoid downstream mutation
+	urlClone := *oh.wsEndpoint.URL
+
 	select {
 	case <-oh.wsEndpoint.ctx.Done():
 		// Endpoint shutting down, do nothing
@@ -391,10 +397,10 @@ func (oh *wsOneHit) Execute() error {
 		timestamps.dnsStart = time.Now()
 		timestamps.connStart = time.Now()
 		timestamps.tlsStart = time.Now()
-		conn, _, err := websocket.DefaultDialer.Dial(oh.wsEndpoint.URL.String(), oh.wsEndpoint.Header)
+		conn, _, err := websocket.DefaultDialer.Dial(urlClone.String(), oh.wsEndpoint.Header)
 		if err != nil {
 			err = fmt.Errorf("failed to dial: %w", err)
-			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, oh.wsEndpoint.URL)
+			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, &urlClone)
 			return err
 		}
 		defer conn.Close()
@@ -406,7 +412,7 @@ func (oh *wsOneHit) Execute() error {
 		if err := conn.WriteMessage(websocket.TextMessage, oh.wsEndpoint.Payload); err != nil {
 			// An error is unexpected, since the connection was just established
 			err = fmt.Errorf("failed to write message: %w", err)
-			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, oh.wsEndpoint.URL)
+			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, &urlClone)
 			return err
 		}
 		timestamps.wroteDone = time.Now()
@@ -416,7 +422,7 @@ func (oh *wsOneHit) Execute() error {
 		if err != nil {
 			// An error is unexpected, since the connection was just established
 			err = fmt.Errorf("failed to read message: %w", err)
-			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, oh.wsEndpoint.URL)
+			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, &urlClone)
 			return err
 		}
 		timestamps.firstByte = time.Now() // TODO: can we properly get this at the first byte instead of after read?
@@ -430,7 +436,7 @@ func (oh *wsOneHit) Execute() error {
 		oh.wsEndpoint.respChan <- WatcherResponse{
 			TaskID:    oh.wsEndpoint.ID,
 			WatcherID: oh.wsEndpoint.watcherID,
-			URL:       oh.wsEndpoint.URL,
+			URL:       &urlClone,
 			Err:       nil,
 			Payload:   taskResponse,
 		}
@@ -482,6 +488,9 @@ func (ll *wsPersistent) Execute() error {
 	ll.wsEndpoint.lock()
 	defer ll.wsEndpoint.unlock()
 
+	// Clone the URL to avoid downstream mutation
+	urlClone := *ll.wsEndpoint.URL
+
 	select {
 	case <-ll.wsEndpoint.ctx.Done():
 		// Endpoint shutting down, do nothing
@@ -498,7 +507,7 @@ func (ll *wsPersistent) Execute() error {
 			err := jsonRPCReq.UnmarshalJSON(ll.wsEndpoint.Payload)
 			if err != nil {
 				err = fmt.Errorf("failed to unmarshal JSON-RPC message: %w", err)
-				ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, ll.wsEndpoint.URL)
+				ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, &urlClone)
 				return err
 			}
 		}
@@ -521,7 +530,7 @@ func (ll *wsPersistent) Execute() error {
 		payload, err = sonic.Marshal(jsonRPCReq)
 		if err != nil {
 			err = fmt.Errorf("failed to marshal JSON-RPC message: %w", err)
-			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, ll.wsEndpoint.URL)
+			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, &urlClone)
 			return err
 		}
 		inflightMsg.timeSent = time.Now()
@@ -551,7 +560,7 @@ func (ll *wsPersistent) Execute() error {
 			ll.wsEndpoint.closeConn()
 
 			// Send an error response
-			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, ll.wsEndpoint.URL)
+			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, &urlClone)
 			return err
 		}
 	}

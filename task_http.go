@@ -83,9 +83,12 @@ type httpRequest struct {
 
 // Execute sends an HTTP request to the endpoint.
 func (r httpRequest) Execute() error {
-	request, err := http.NewRequest(r.method, r.endpoint.URL.String(), bytes.NewReader(r.data))
+	// Clone the URL to avoid downstream mutation
+	urlClone := *r.endpoint.URL
+
+	request, err := http.NewRequest(r.method, urlClone.String(), bytes.NewReader(r.data))
 	if err != nil {
-		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, r.endpoint.URL)
+		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, &urlClone)
 		return err
 	}
 
@@ -105,7 +108,7 @@ func (r httpRequest) Execute() error {
 	// Send the request
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, r.endpoint.URL)
+		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, &urlClone)
 		return err
 	}
 
@@ -120,7 +123,7 @@ func (r httpRequest) Execute() error {
 	r.respChan <- WatcherResponse{
 		TaskID:    r.endpoint.ID,
 		WatcherID: r.endpoint.watcherID,
-		URL:       r.endpoint.URL,
+		URL:       &urlClone,
 		Err:       nil,
 		Payload:   taskResponse,
 	}
