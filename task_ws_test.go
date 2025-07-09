@@ -151,6 +151,12 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			data, err := resp.Data()
 			assert.NoError(t, err)
 			assert.JSONEq(t, string(expectedResp), string(data))
+			// Mutating the response URL must not affect the endpoint’s URL.
+			origPath := endpoint.URL.Path // remember original
+			resp.URL.Path = "/tampered"   // mutate the copy
+			assert.NotEqual(t, resp.URL, endpoint.URL, "pointers should differ")
+			assert.Equal(t, origPath, endpoint.URL.Path, "endpoint URL must stay unchanged")
+			assert.Equal(t, "/tampered", resp.URL.Path)
 		case <-time.After(1 * time.Second):
 			t.Fatal("timeout waiting for response")
 		}
@@ -334,6 +340,12 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		data, err := resp.Data()
 		assert.NoError(t, err)
 		assert.JSONEq(t, `{"key":"value"}`, string(data))
+		// Mutating the response URL must not affect the endpoint’s URL.
+		origPath := endpoint.URL.Path // remember original
+		resp.URL.Path = "/tampered"   // mutate the copy
+		assert.NotEqual(t, resp.URL, endpoint.URL, "pointers should differ")
+		assert.Equal(t, origPath, endpoint.URL.Path, "endpoint URL must stay unchanged")
+		assert.Equal(t, "/tampered", resp.URL.Path)
 	case <-time.After(1 * time.Second):
 		t.Fatal("timeout waiting for response")
 	}

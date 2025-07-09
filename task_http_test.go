@@ -81,6 +81,12 @@ func TestHTTPEndpointExecute(t *testing.T) {
 		data, err := resp.Data()
 		assert.NoError(t, err)
 		assert.JSONEq(t, `{"key":"value"}`, string(data))
+		// Mutating the response URL must not affect the endpoint’s URL.
+		origPath := endpoint.URL.Path // remember original
+		resp.URL.Path = "/tampered"   // mutate the copy
+		assert.NotEqual(t, resp.URL, endpoint.URL, "pointers should differ")
+		assert.Equal(t, origPath, endpoint.URL.Path, "endpoint URL must stay unchanged")
+		assert.Equal(t, "/tampered", resp.URL.Path)
 		// Reload metadata to get updated timings
 		metadata = resp.Metadata()
 		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))
