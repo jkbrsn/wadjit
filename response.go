@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -83,6 +84,8 @@ type TaskResponse interface {
 
 // TaskResponseMetadata is optional metadata that HTTP or WS might provide.
 type TaskResponseMetadata struct {
+	RemoteAddr net.Addr
+
 	// HTTP metadata
 	StatusCode int
 	Headers    http.Header
@@ -123,7 +126,8 @@ func (m TaskResponseMetadata) String() string {
 
 // HTTPTaskResponse is a TaskResponse for HTTP responses.
 type HTTPTaskResponse struct {
-	resp *http.Response
+	remoteAddr net.Addr
+	resp       *http.Response
 
 	once     sync.Once   // ensures Data() is only processed once
 	dataOnce atomic.Bool // new flag to track if once was done
@@ -135,8 +139,8 @@ type HTTPTaskResponse struct {
 	usedReader atomic.Bool // flags if we returned a Reader
 }
 
-func NewHTTPTaskResponse(r *http.Response) *HTTPTaskResponse {
-	return &HTTPTaskResponse{resp: r}
+func NewHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *HTTPTaskResponse {
+	return &HTTPTaskResponse{remoteAddr: remoteAddr, resp: r}
 }
 
 // readBody reads the HTTP response body into memory exactly once and then closes the body.
@@ -224,6 +228,7 @@ func (h *HTTPTaskResponse) Metadata() TaskResponseMetadata {
 	}
 
 	md := TaskResponseMetadata{
+		RemoteAddr: h.remoteAddr,
 		StatusCode: h.resp.StatusCode,
 		Headers:    http.Header{},
 		Size:       h.resp.ContentLength,
@@ -245,13 +250,14 @@ func (h *HTTPTaskResponse) dataDone() bool {
 
 // WSTaskResponse is a TaskResponse for WebSocket responses.
 type WSTaskResponse struct {
+	remoteAddr net.Addr
 	data       []byte
 	timestamps requestTimestamps
 }
 
 // NewWSTaskResponse can store an incoming WS message as a byte slice.
-func NewWSTaskResponse(data []byte) *WSTaskResponse {
-	return &WSTaskResponse{data: data}
+func NewWSTaskResponse(remoteAddr net.Addr, data []byte) *WSTaskResponse {
+	return &WSTaskResponse{remoteAddr: remoteAddr, data: data}
 }
 
 func (w *WSTaskResponse) Close() error {
@@ -271,7 +277,8 @@ func (w *WSTaskResponse) Reader() (io.ReadCloser, error) {
 // Metadata returns metadata connected to the response.
 func (w *WSTaskResponse) Metadata() TaskResponseMetadata {
 	return TaskResponseMetadata{
-		Size:     int64(len(w.data)),
-		TimeData: TimeDataFromTimestamps(w.timestamps),
+		RemoteAddr: w.remoteAddr,
+		Size:       int64(len(w.data)),
+		TimeData:   TimeDataFromTimestamps(w.timestamps),
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"net/url"
@@ -94,7 +95,8 @@ func (r httpRequest) Execute() error {
 
 	// Add tracing to the request
 	timestamps := &requestTimestamps{}
-	trace := traceRequest(timestamps)
+	var remoteAddr net.Addr
+	trace := traceRequest(timestamps, remoteAddr)
 	ctx := httptrace.WithClientTrace(request.Context(), trace)
 	request = request.WithContext(ctx)
 
@@ -113,7 +115,7 @@ func (r httpRequest) Execute() error {
 	}
 
 	// Create a task response
-	taskResponse := NewHTTPTaskResponse(response)
+	taskResponse := NewHTTPTaskResponse(remoteAddr, response)
 	taskResponse.timestamps = *timestamps
 	if r.endpoint.OptReadFast {
 		taskResponse.readBody()
@@ -132,10 +134,15 @@ func (r httpRequest) Execute() error {
 }
 
 // traceRequest traces the HTTP request and stores the timestamps in the provided times.
-func traceRequest(times *requestTimestamps) *httptrace.ClientTrace {
+func traceRequest(times *requestTimestamps, addr net.Addr) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		// The earliest guaranteed callback is usually GetConn, so we set the start time there
-		GetConn:              func(string) { times.start = time.Now() },
+		GetConn: func(string) { times.start = time.Now() },
+		GotConn: func(info httptrace.GotConnInfo) {
+			if info.Conn != nil {
+				addr = info.Conn.RemoteAddr()
+			}
+		},
 		DNSStart:             func(httptrace.DNSStartInfo) { times.dnsStart = time.Now() },
 		DNSDone:              func(httptrace.DNSDoneInfo) { times.dnsDone = time.Now() },
 		ConnectStart:         func(_, _ string) { times.connStart = time.Now() },

@@ -3,6 +3,7 @@ package wadjit
 import (
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,7 +19,7 @@ func TestHTTPTaskResponse_Close(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	taskResp := NewHTTPTaskResponse(resp)
+	taskResp := NewHTTPTaskResponse(nil, resp)
 	require.NoError(t, taskResp.Close())
 }
 
@@ -31,7 +32,7 @@ func TestHTTPTaskResponse_Data_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	taskResp := NewHTTPTaskResponse(resp)
+	taskResp := NewHTTPTaskResponse(server.Listener.Addr(), resp)
 	defer taskResp.Close()
 
 	// Call Data() to read the entire body
@@ -43,6 +44,13 @@ func TestHTTPTaskResponse_Data_Success(t *testing.T) {
 	data2, err2 := taskResp.Data()
 	require.NoError(t, err2)
 	require.Equal(t, data, data2)
+
+	// Metadata should be correct
+	md := taskResp.Metadata()
+	require.Equal(t, http.StatusOK, md.StatusCode)
+	require.Equal(t, "text/plain", md.Headers.Get("Content-Type"))
+	require.Equal(t, int64(len(payload)), md.Size)
+	require.Equal(t, server.Listener.Addr(), md.RemoteAddr)
 }
 
 func TestHTTPTaskResponse_Data_AfterReaderFails(t *testing.T) {
@@ -53,7 +61,7 @@ func TestHTTPTaskResponse_Data_AfterReaderFails(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	taskResp := NewHTTPTaskResponse(resp)
+	taskResp := NewHTTPTaskResponse(nil, resp)
 	defer taskResp.Close()
 
 	// First, get the Reader
@@ -78,7 +86,7 @@ func TestHTTPTaskResponse_Reader_AfterDataReturnsMemory(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	taskResp := NewHTTPTaskResponse(resp)
+	taskResp := NewHTTPTaskResponse(nil, resp)
 	defer taskResp.Close()
 
 	// Call Data() first
@@ -105,7 +113,7 @@ func TestHTTPTaskResponse_NilBody(t *testing.T) {
 		Body:       nil,
 	}
 
-	taskResp := NewHTTPTaskResponse(resp)
+	taskResp := NewHTTPTaskResponse(nil, resp)
 	defer taskResp.Close()
 
 	// Data() should return error
@@ -130,7 +138,7 @@ func TestHTTPTaskResponse_Metadata(t *testing.T) {
 	resp, err := http.Get(server.URL)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	taskResp := NewHTTPTaskResponse(resp)
+	taskResp := NewHTTPTaskResponse(nil, resp)
 	defer taskResp.Close()
 
 	md := taskResp.Metadata()
@@ -139,8 +147,9 @@ func TestHTTPTaskResponse_Metadata(t *testing.T) {
 }
 
 func TestWSTaskResponse_DataAndReader(t *testing.T) {
+	remoteAddr := net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1234}
 	wsData := []byte("hello from websocket")
-	wsResp := NewWSTaskResponse(wsData)
+	wsResp := NewWSTaskResponse(&remoteAddr, wsData)
 	defer wsResp.Close()
 
 	data, err := wsResp.Data()

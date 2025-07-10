@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,6 +31,7 @@ type WSEndpoint struct {
 
 	// Set internally
 	conn         *websocket.Conn
+	remoteAddr   net.Addr
 	inflightMsgs sync.Map // Key string to value wsInflightMessage
 	wg           sync.WaitGroup
 
@@ -191,6 +193,7 @@ func (e *WSEndpoint) connect() error {
 		return err
 	}
 	e.conn = conn
+	e.remoteAddr = conn.RemoteAddr()
 
 	// Start the read pump for incoming messages
 	e.wg.Add(1)
@@ -329,7 +332,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 							return
 						}
 						// 5. set metadata to the taskresponse: original id, duration between time sent and time received
-						taskResponse := NewWSTaskResponse(p)
+						taskResponse := NewWSTaskResponse(e.remoteAddr, p)
 						taskResponse.timestamps = timestamps
 
 						// Send the message to the read channel
@@ -354,7 +357,7 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 					WatcherID: e.watcherID,
 					URL:       &urlClone,
 					Err:       nil,
-					Payload:   NewWSTaskResponse(p),
+					Payload:   NewWSTaskResponse(e.remoteAddr, p),
 				}
 				e.respChan <- response
 			}
@@ -403,6 +406,7 @@ func (oh *wsOneHit) Execute() error {
 			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, &urlClone)
 			return err
 		}
+		remoteAddr := conn.RemoteAddr()
 		defer conn.Close()
 		timestamps.dnsDone = time.Now()
 		timestamps.connDone = time.Now()
@@ -429,7 +433,7 @@ func (oh *wsOneHit) Execute() error {
 		timestamps.dataDone = time.Now()
 
 		// 4. Create a task response
-		taskResponse := NewWSTaskResponse(message)
+		taskResponse := NewWSTaskResponse(remoteAddr, message)
 		taskResponse.timestamps = timestamps
 
 		// 5. Send the response message on the channel
