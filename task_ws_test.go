@@ -377,6 +377,29 @@ func TestWSConnReconnect(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestWSEndpoint_ResponseRemoteAddr(t *testing.T) {
+	server := echoServer()
+	defer server.Close()
+
+	// Build endpoint
+	wsURL := "ws" + server.URL[4:] + "/ws"
+	u, _ := url.Parse(wsURL)
+	ep := NewWSEndpoint(u, http.Header{}, OneHitText, nil, "ws-id1")
+
+	respChan := make(chan WatcherResponse, 1)
+	ep.Initialize("watcher-1", respChan)
+
+	// Run a one-shot WS task
+	task := ep.Task().(*wsOneHit)
+	require.NoError(t, task.Execute())
+
+	// Check the response metadata for RemoteAddr
+	resp := <-respChan
+	md := resp.Metadata()
+	require.Equal(t, server.Listener.Addr(), md.RemoteAddr)
+	require.Greater(t, md.TimeData.Latency, time.Duration(0))
+}
+
 func TestNewWSEndpoint(t *testing.T) {
 	url, err := url.Parse("ws://example.com/ws")
 	assert.NoError(t, err, "failed to parse URL")

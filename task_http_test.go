@@ -166,7 +166,28 @@ func TestHTTPEndpointExecuteMethods(t *testing.T) {
 			}
 		})
 	}
+}
 
+func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
+	server := echoServer()
+	defer server.Close()
+
+	// Build a minimal endpoint that hits the test server
+	u, _ := url.Parse(server.URL)
+	ep := NewHTTPEndpoint(u, http.MethodGet, http.Header{}, nil, "id1")
+	respChan := make(chan WatcherResponse, 1)
+	ep.Initialize("watcher-1", respChan)
+
+	// Run one request synchronously
+	task := ep.Task().(*httpRequest)
+	require.NoError(t, task.Execute())
+
+	// Check the response metadata for RemoteAddr
+	resp := <-respChan
+	metadata := resp.Metadata()
+	assert.NotNil(t, metadata)
+	assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
+	require.Equal(t, server.Listener.Addr(), metadata.RemoteAddr)
 }
 
 func TestNewHTTPEndpoint(t *testing.T) {

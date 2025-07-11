@@ -96,7 +96,7 @@ func (r httpRequest) Execute() error {
 	// Add tracing to the request
 	timestamps := &requestTimestamps{}
 	var remoteAddr net.Addr
-	trace := traceRequest(timestamps, remoteAddr)
+	trace := traceRequest(timestamps, &remoteAddr)
 	ctx := httptrace.WithClientTrace(request.Context(), trace)
 	request = request.WithContext(ctx)
 
@@ -134,13 +134,13 @@ func (r httpRequest) Execute() error {
 }
 
 // traceRequest traces the HTTP request and stores the timestamps in the provided times.
-func traceRequest(times *requestTimestamps, addr net.Addr) *httptrace.ClientTrace {
+func traceRequest(times *requestTimestamps, addr *net.Addr) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		// The earliest guaranteed callback is usually GetConn, so we set the start time there
 		GetConn: func(string) { times.start = time.Now() },
 		GotConn: func(info httptrace.GotConnInfo) {
-			if info.Conn != nil {
-				addr = info.Conn.RemoteAddr()
+			if info.Conn != nil && addr != nil {
+				*addr = info.Conn.RemoteAddr()
 			}
 		},
 		DNSStart:             func(httptrace.DNSStartInfo) { times.dnsStart = time.Now() },
