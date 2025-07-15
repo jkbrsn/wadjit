@@ -2,11 +2,13 @@ package wadjit
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/netip"
 	"net/url"
 	"time"
 
@@ -22,6 +24,9 @@ type HTTPEndpoint struct {
 	Payload []byte
 	URL     *url.URL
 	ID      string
+
+	// TransportControl activates DNS-bypass when non-nil.
+	TransportControl *TransportControl
 
 	// OptReadFast is a flag that, when set, makes the task execution read the response body into
 	// memory and close the connection as soon as the response is received. This completes the
@@ -70,6 +75,11 @@ func (e *HTTPEndpoint) Validate() error {
 		// Set random ID if nil
 		e.ID = xid.New().String()
 	}
+	if e.TransportControl != nil {
+		if e.TransportControl.AddrPort == (netip.AddrPort{}) {
+			return errors.New("TransportControl.AddrPort is empty")
+		}
+	}
 	return nil
 }
 
@@ -107,8 +117,35 @@ func (r httpRequest) Execute() error {
 		}
 	}
 
+	var client *http.Client
+	if r.endpoint.TransportControl == nil {
+		client = http.DefaultClient
+	} else {
+		tc := r.endpoint.TransportControl
+
+		// Clone the default transport to keep sensible settings
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+
+		// Override name–resolution only
+		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			// TODO: move timeout to configuration
+			d := &net.Dialer{Timeout: 5 * time.Second}
+			return d.DialContext(ctx, "tcp", tc.AddrPort.String())
+		}
+
+		// Optional TLS wrapping with correct SNI
+		if tc.TLSEnabled {
+			tr.TLSClientConfig = &tls.Config{
+				ServerName:         r.endpoint.URL.Hostname(),
+				InsecureSkipVerify: tc.SkipTLSVerify,
+			}
+		}
+
+		client = &http.Client{Transport: tr}
+	}
+
 	// Send the request
-	response, err := http.DefaultClient.Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, &urlClone)
 		return err

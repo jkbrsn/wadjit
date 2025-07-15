@@ -136,72 +136,73 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+// echoHandler is a custom handler that echoes back the payload sent to it, if a payload is present.
+func echoHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+
+	// Handle WebSocket
+	case "/ws":
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
+			return
+		}
+		defer conn.Close()
+
+		// Echo messages back to the client
+		for {
+			mt, message, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			err = conn.WriteMessage(mt, message)
+			if err != nil {
+				return
+			}
+		}
+
+	// Handle HTTP
+	default:
+		switch r.Method {
+		case http.MethodOptions:
+			fallthrough
+		case http.MethodDelete:
+			fallthrough
+		case http.MethodGet:
+			w.WriteHeader(http.StatusOK)
+			w.Write(fmt.Appendf(nil, "%s request received on path %s", r.Method, r.URL.Path))
+
+		case http.MethodPatch:
+			fallthrough
+		case http.MethodPost:
+			fallthrough
+		case http.MethodPut:
+			payload, err := io.ReadAll(r.Body)
+			if err != nil {
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("no payload found"))
+				return
+			}
+			// Mirror request's content type in the response
+			if _, ok := r.Header["Content-Type"]; ok {
+				w.Header().Set("Content-Type", r.Header.Get("Content-Type"))
+			}
+			w.WriteHeader(http.StatusOK)
+			// Echo payload back to the client
+			w.Write(payload)
+
+		default:
+			// Write harcoded message to the client
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("unsupported method"))
+		}
+	}
+}
+
 // echoServer creates a custom handled server that echoes back the payload sent to it,
 // if a payload is present.
 func echoServer() *httptest.Server {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-
-		// Handle WebSocket
-		case "/ws":
-			conn, err := upgrader.Upgrade(w, r, nil)
-			if err != nil {
-				http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
-				return
-			}
-			defer conn.Close()
-
-			// Echo messages back to the client
-			for {
-				mt, message, err := conn.ReadMessage()
-				if err != nil {
-					return
-				}
-				err = conn.WriteMessage(mt, message)
-				if err != nil {
-					return
-				}
-			}
-
-		// Handle HTTP
-		default:
-			switch r.Method {
-			case http.MethodOptions:
-				fallthrough
-			case http.MethodDelete:
-				fallthrough
-			case http.MethodGet:
-				w.WriteHeader(http.StatusOK)
-				w.Write(fmt.Appendf(nil, "%s request received on path %s", r.Method, r.URL.Path))
-
-			case http.MethodPatch:
-				fallthrough
-			case http.MethodPost:
-				fallthrough
-			case http.MethodPut:
-				payload, err := io.ReadAll(r.Body)
-				if err != nil {
-					w.WriteHeader(http.StatusOK)
-					w.Write([]byte("no payload found"))
-					return
-				}
-				// Mirror request's content type in the response
-				if _, ok := r.Header["Content-Type"]; ok {
-					w.Header().Set("Content-Type", r.Header.Get("Content-Type"))
-				}
-				w.WriteHeader(http.StatusOK)
-				// Echo payload back to the client
-				w.Write(payload)
-
-			default:
-				// Write harcoded message to the client
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("unsupported method"))
-			}
-		}
-	}))
-
-	return server
+	return httptest.NewServer(http.HandlerFunc(echoHandler))
 }
 
 // jsonRPCServer creates a test server that responds to JSON-RPC requests.

@@ -1,7 +1,9 @@
 package wadjit
 
 import (
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -188,6 +190,91 @@ func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
 	assert.NotNil(t, metadata)
 	assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
 	require.Equal(t, server.Listener.Addr(), metadata.RemoteAddr)
+}
+
+func TestTransportControlBypassesDNS(t *testing.T) {
+	// 1. Spin up a test server.
+	server := echoServer() // already in task_http_test.go
+	defer server.Close()
+
+	// 2. Parse the URL but change the Host to something that cannot resolve.
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	fakeHost := "nonexistent.example.com"
+	u.Host = fakeHost // keep scheme & port placeholders
+
+	// 3. Extract the real IP:port from the listener for TransportControl.
+	realAddr := server.Listener.Addr().(*net.TCPAddr)
+
+	tc := &TransportControl{
+		AddrPort:      realAddr.AddrPort(), // ip:randomPort
+		TLSEnabled:    false,               // echoServer() is http
+		SkipTLSVerify: true,                // accept self-signed cert from httptest
+	}
+
+	// 4. Build endpoint with TransportControl.
+	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "id")
+	ep.TransportControl = tc
+	responseChan := make(chan WatcherResponse, 1)
+	require.NoError(t, ep.Initialize("wid", responseChan))
+
+	// 5. Execute.
+	go ep.Task().Execute()
+
+	// 6. Assert.
+	select {
+	case resp := <-responseChan:
+		assert.NoError(t, resp.Err)
+		md := resp.Metadata()
+		// DNSLookup should be nil because DialContext skipped it.
+		assert.Nil(t, md.TimeData.DNSLookup)
+		// Remote addr should match the server’s IP.
+		serverAddr := net.TCPAddr{
+			IP:   net.ParseIP(realAddr.IP.String()),
+			Port: realAddr.Port,
+		}
+		assert.Equal(t, serverAddr.String(), resp.Metadata().RemoteAddr.String())
+		assert.Equal(t, realAddr.AddrPort(), resp.Metadata().RemoteAddr.(*net.TCPAddr).AddrPort())
+		assert.Equal(t, fakeHost, resp.URL.Hostname())
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for response")
+	}
+}
+
+func TestTransportControlTLS(t *testing.T) {
+	// HTTPS test server
+	server := httptest.NewTLSServer(http.HandlerFunc(echoHandler))
+	defer server.Close()
+
+	// Fake hostname that will not resolve
+	u, _ := url.Parse(server.URL)
+	u.Host = "geo.example.com" // keeps :443 from server.URL
+
+	real := server.Listener.Addr().(*net.TCPAddr)
+	tc := &TransportControl{
+		AddrPort:      real.AddrPort(), // ip:randomPort
+		TLSEnabled:    true,
+		SkipTLSVerify: true, // accept self-signed cert from httptest
+	}
+
+	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "tls-test")
+	ep.TransportControl = tc
+	respCh := make(chan WatcherResponse, 1)
+	require.NoError(t, ep.Initialize("wid", respCh))
+
+	go ep.Task().Execute()
+
+	select {
+	case resp := <-respCh:
+		assert.NoError(t, resp.Err)
+		md := resp.Metadata()
+		assert.Nil(t, md.TimeData.DNSLookup)         // bypassed
+		assert.NotZero(t, *md.TimeData.TLSHandshake) // handshake happened
+		assert.Equal(t, real.AddrPort(),             // connected to real IP
+			resp.Metadata().RemoteAddr.(*net.TCPAddr).AddrPort())
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
 }
 
 func TestNewHTTPEndpoint(t *testing.T) {
