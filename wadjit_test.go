@@ -3,6 +3,7 @@ package wadjit
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"sync/atomic"
 	"testing"
@@ -209,7 +210,7 @@ func TestWadjit_Close(t *testing.T) {
 
 	t.Run("With Pending Responses", func(t *testing.T) {
 		w := New()
-		server := echoServer()
+		server := httptest.NewServer(http.HandlerFunc(echoHandler))
 		defer server.Close()
 
 		// Set up URLs
@@ -254,7 +255,7 @@ func TestWadjit_Close(t *testing.T) {
 
 func TestWadjit_Lifecycle(t *testing.T) {
 	w := New()
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer func() {
 		// Make sure the Wadjit is closed before the server closes
 		err := w.Close()

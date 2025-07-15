@@ -35,7 +35,7 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 }
 
 func TestHTTPEndpointExecute(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	url, err := url.Parse(server.URL)
@@ -99,7 +99,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 }
 
 func TestHTTPEndpointExecuteMethods(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	echoURL, err := url.Parse(server.URL)
@@ -171,7 +171,7 @@ func TestHTTPEndpointExecuteMethods(t *testing.T) {
 }
 
 func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	// Build a minimal endpoint that hits the test server
@@ -194,7 +194,7 @@ func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
 
 func TestTransportControlBypassesDNS(t *testing.T) {
 	// 1. Spin up a test server.
-	server := echoServer() // already in task_http_test.go
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	// 2. Parse the URL but change the Host to something that cannot resolve.
@@ -208,7 +208,7 @@ func TestTransportControlBypassesDNS(t *testing.T) {
 
 	tc := &TransportControl{
 		AddrPort:      realAddr.AddrPort(), // ip:randomPort
-		TLSEnabled:    false,               // echoServer() is http
+		TLSEnabled:    false,               // httptest.NewServer(http.HandlerFunc(echoHandler)) is http
 		SkipTLSVerify: true,                // accept self-signed cert from httptest
 	}
 

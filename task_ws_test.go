@@ -2,6 +2,7 @@ package wadjit
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"sync"
 	"testing"
@@ -18,7 +19,7 @@ func TestWSConnnImplementsWatcherTask(t *testing.T) {
 }
 
 func TestWSConnInitialize(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
@@ -290,7 +291,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 }
 
 func TestWSEndpointExecutewsOneHit(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
@@ -352,7 +353,7 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 }
 
 func TestWSConnReconnect(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
@@ -378,7 +379,7 @@ func TestWSConnReconnect(t *testing.T) {
 }
 
 func TestWSEndpoint_ResponseRemoteAddr(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	// Build endpoint

@@ -12,7 +12,7 @@ import (
 )
 
 func TestHTTPTaskResponse_Close(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL)
@@ -24,7 +24,7 @@ func TestHTTPTaskResponse_Close(t *testing.T) {
 }
 
 func TestHTTPTaskResponse_Data_Success(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	payload := []byte("hello world")
@@ -54,7 +54,7 @@ func TestHTTPTaskResponse_Data_Success(t *testing.T) {
 }
 
 func TestHTTPTaskResponse_Data_AfterReaderFails(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	resp, err := http.Get(server.URL)
@@ -78,7 +78,7 @@ func TestHTTPTaskResponse_Data_AfterReaderFails(t *testing.T) {
 }
 
 func TestHTTPTaskResponse_Reader_AfterDataReturnsMemory(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	payload := []byte("response data")

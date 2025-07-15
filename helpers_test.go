@@ -199,12 +199,6 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// echoServer creates a custom handled server that echoes back the payload sent to it,
-// if a payload is present.
-func echoServer() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(echoHandler))
-}
-
 // jsonRPCServer creates a test server that responds to JSON-RPC requests.
 // The server echoes back the entire message sent to it under the "result" key, and the request ID under
 // the "id" key. If the payload is not a valid JSON-RPC request, the server will respond with a parse

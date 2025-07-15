@@ -3,6 +3,7 @@ package wadjit
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestWatcherStart(t *testing.T) {
 }
 
 func TestWatcherExecution(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	// Set up URLs
@@ -110,7 +111,7 @@ func TestWatcherExecution(t *testing.T) {
 }
 
 func TestWatcherExecution_Error(t *testing.T) {
-	server := echoServer()
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
 	// Set up URLs
