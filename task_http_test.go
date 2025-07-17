@@ -4,10 +4,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"testing"
 	"time"
 
+	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -21,7 +23,12 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	endpoint := NewHTTPEndpoint(url, http.MethodGet, header, nil, "an-id", nil)
+	endpoint := NewHTTPEndpoint(
+		url,
+		http.MethodGet,
+		WithHeader(header),
+		WithID("an-id"),
+	)
 
 	assert.Equal(t, url, endpoint.URL)
 	assert.Equal(t, header, endpoint.Header)
@@ -45,7 +52,13 @@ func TestHTTPEndpointExecute(t *testing.T) {
 
 	header.Add("Content-Type", "application/json")
 
-	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, []byte(`{"key":"value"}`), "an-id", nil)
+	endpoint := NewHTTPEndpoint(
+		url,
+		http.MethodPost,
+		WithHeader(header),
+		WithPayload([]byte(`{"key":"value"}`)),
+		WithID("an-id"),
+	)
 
 	err = endpoint.Initialize("some-watcher-id", responseChan)
 	assert.NoError(t, err)
@@ -126,7 +139,13 @@ func TestHTTPEndpointExecuteMethods(t *testing.T) {
 				header.Add("Content-Type", "application/json")
 			}
 			echoURL.Path = c.path
-			endpoint := NewHTTPEndpoint(echoURL, c.method, header, c.payload, "an-id", nil)
+			endpoint := NewHTTPEndpoint(
+				echoURL,
+				c.method,
+				WithHeader(header),
+				WithPayload(c.payload),
+				WithID("an-id"),
+			)
 			err = endpoint.Initialize("some-watcher-id", responseChan)
 			assert.NoError(t, err)
 
@@ -176,7 +195,7 @@ func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
 
 	// Build a minimal endpoint that hits the test server
 	u, _ := url.Parse(server.URL)
-	ep := NewHTTPEndpoint(u, http.MethodGet, http.Header{}, nil, "id1", nil)
+	ep := NewHTTPEndpoint(u, http.MethodGet, WithHeader(http.Header{}), WithID("id1"))
 	respChan := make(chan WatcherResponse, 1)
 	ep.Initialize("watcher-1", respChan)
 
@@ -213,7 +232,7 @@ func TestTransportControlBypassesDNS(t *testing.T) {
 	}
 
 	// 4. Build endpoint with TransportControl.
-	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "id", tc)
+	ep := NewHTTPEndpoint(u, http.MethodGet, WithID("id"), WithTransportControl(tc))
 	responseChan := make(chan WatcherResponse, 1)
 	require.NoError(t, ep.Initialize("wid", responseChan))
 
@@ -256,7 +275,7 @@ func TestTransportControlTLS(t *testing.T) {
 		SkipTLSVerify: true, // accept self-signed cert from httptest
 	}
 
-	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "tls-test", tc)
+	ep := NewHTTPEndpoint(u, http.MethodGet, WithID("tls-test"), WithTransportControl(tc))
 	respCh := make(chan WatcherResponse, 1)
 	require.NoError(t, ep.Initialize("wid", respCh))
 
@@ -285,8 +304,12 @@ func TestConnectionReuse(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build endpoint that will reuse connections.
-	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "reuse", nil)
-	ep.OptReadFast = true // ensure body is read/closed so the conn can be reused
+	ep := NewHTTPEndpoint(
+		u,
+		http.MethodGet,
+		WithID("reuse"),
+		WithReadFast(), // ensure body is read/closed so the conn can be reused
+	)
 
 	respCh := make(chan WatcherResponse, 1)
 	require.NoError(t, ep.Initialize("wid", respCh))
@@ -314,14 +337,93 @@ func TestConnectionReuse(t *testing.T) {
 func TestNewHTTPEndpoint(t *testing.T) {
 	url, err := url.Parse("http://example.com")
 	assert.NoError(t, err, "failed to parse URL")
-	header := make(http.Header)
-	payload := []byte(`{"key":"value"}`)
 
-	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, payload, "", nil)
-	require.NotNil(t, endpoint)
+	cases := []struct {
+		name    string
+		options []HTTPEndpointOption
+	}{
+		{
+			name:    "minimal construction",
+			options: []HTTPEndpointOption{},
+		},
+		{
+			name: "with header",
+			options: []HTTPEndpointOption{
+				WithHeader(http.Header{
+					"X-Test": []string{"value"},
+				}),
+			},
+		},
+		{
+			name: "with payload",
+			options: []HTTPEndpointOption{
+				WithPayload([]byte(`{"key":"value"}`)),
+			},
+		},
+		{
+			name: "with transport control",
+			options: []HTTPEndpointOption{
+				WithTransportControl(&TransportControl{
+					AddrPort:      netip.AddrPort{},
+					TLSEnabled:    false,
+					SkipTLSVerify: true,
+				}),
+			},
+		},
+		{
+			name: "with everything",
+			options: []HTTPEndpointOption{
+				WithHeader(http.Header{
+					"X-Test": []string{"value"},
+				}),
+				WithPayload([]byte(`{"key":"value"}`)),
+				WithTransportControl(&TransportControl{
+					AddrPort:      netip.AddrPort{},
+					TLSEnabled:    false,
+					SkipTLSVerify: true,
+				}),
+			},
+		},
+	}
 
-	assert.Equal(t, url, endpoint.URL)
-	assert.Equal(t, header, endpoint.Header)
-	assert.Equal(t, payload, endpoint.Payload)
-	assert.Nil(t, endpoint.TransportControl)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			endpoint := NewHTTPEndpoint(url, http.MethodPost, c.options...)
+			require.NotNil(t, endpoint)
+
+			assert.Equal(t, url, endpoint.URL)
+			assert.Equal(t, http.MethodPost, endpoint.Method)
+		})
+	}
+
+	t.Run("with everything validated", func(t *testing.T) {
+		header := http.Header{
+			"X-Test": []string{"value"},
+		}
+		id := xid.New().String()
+		payload := []byte(`{"key":"value"}`)
+		tc := &TransportControl{
+			AddrPort:      netip.AddrPort{},
+			TLSEnabled:    false,
+			SkipTLSVerify: true,
+		}
+		endpoint := NewHTTPEndpoint(
+			url,
+			http.MethodPost,
+			WithHeader(header),
+			WithID(id),
+			WithPayload(payload),
+			WithReadFast(),
+			WithTransportControl(tc),
+		)
+		require.NotNil(t, endpoint)
+
+		assert.Equal(t, url, endpoint.URL)
+		assert.Equal(t, http.MethodPost, endpoint.Method)
+		assert.Equal(t, id, endpoint.ID)
+		assert.Equal(t, header, endpoint.Header)
+		assert.Equal(t, payload, endpoint.Payload)
+		assert.True(t, endpoint.OptReadFast)
+		assert.Equal(t, tc, endpoint.TransportControl)
+	})
 }

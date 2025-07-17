@@ -16,6 +16,9 @@ import (
 	"github.com/rs/xid"
 )
 
+// HTTPEndpointOption is a functional option for the HTTPEndpoint struct.
+type HTTPEndpointOption func(*HTTPEndpoint)
+
 // HTTPEndpoint spawns tasks to make HTTP requests towards the defined endpoint. Implements the
 // WatcherTask interface and is meant for use in a Watcher.
 type HTTPEndpoint struct {
@@ -30,7 +33,7 @@ type HTTPEndpoint struct {
 	client           *http.Client
 
 	// OptReadFast is a flag that, when set, makes the task execution read the response body into
-	// memory and close the connection as soon as the response is received. This completes the
+	// memory and close the body as soon as the full response has been received. This completes the
 	// request faster but buffers the body into memory.
 	// TODO: consider introducing a max-length option to limit this option for large responses.
 	OptReadFast bool
@@ -108,6 +111,32 @@ func (e *HTTPEndpoint) Validate() error {
 		}
 	}
 	return nil
+}
+
+// WithHeader configures the HTTPEndpoint to use the provided header.
+func WithHeader(h http.Header) HTTPEndpointOption {
+	return func(ep *HTTPEndpoint) { ep.Header = h }
+}
+
+// WithID configures the HTTPEndpoint to use the provided ID.
+func WithID(id string) HTTPEndpointOption {
+	return func(ep *HTTPEndpoint) { ep.ID = id }
+}
+
+// WithPayload configures the HTTPEndpoint to use the provided payload.
+func WithPayload(b []byte) HTTPEndpointOption {
+	return func(ep *HTTPEndpoint) { ep.Payload = b }
+}
+
+// WithReadFast configures the HTTPEndpoint to read the response body into memory and close
+// the body as soon as the full response is received.
+func WithReadFast() HTTPEndpointOption {
+	return func(ep *HTTPEndpoint) { ep.OptReadFast = true }
+}
+
+// WithTransportControl configures the HTTPEndpoint to use the provided TransportControl.
+func WithTransportControl(tc *TransportControl) HTTPEndpointOption {
+	return func(ep *HTTPEndpoint) { ep.TransportControl = tc }
 }
 
 // httpRequest is an implementation of taskman.Task that sends an HTTP request to an endpoint.
@@ -193,19 +222,21 @@ func traceRequest(times *requestTimestamps, addr *net.Addr) *httptrace.ClientTra
 
 // NewHTTPEndpoint creates a new HTTPEndpoint with the given attributes.
 func NewHTTPEndpoint(
-	url *url.URL,
+	u *url.URL,
 	method string,
-	header http.Header,
-	payload []byte,
-	id string,
-	tc *TransportControl,
+	opts ...HTTPEndpointOption,
 ) *HTTPEndpoint {
-	return &HTTPEndpoint{
-		Header:           header,
+	ep := &HTTPEndpoint{
+		URL:              u,
 		Method:           method,
-		Payload:          payload,
-		URL:              url,
-		ID:               id,
-		TransportControl: tc,
+		Header:           make(http.Header),
+		ID:               xid.New().String(),
+		TransportControl: nil,
 	}
+
+	for _, opt := range opts {
+		opt(ep)
+	}
+
+	return ep
 }
