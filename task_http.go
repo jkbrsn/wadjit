@@ -25,8 +25,9 @@ type HTTPEndpoint struct {
 	URL     *url.URL
 	ID      string
 
-	// TransportControl activates DNS-bypass when non-nil.
+	// TransportControl facilitates DNS-bypass when non-nil.
 	TransportControl *TransportControl
+	client           *http.Client
 
 	// OptReadFast is a flag that, when set, makes the task execution read the response body into
 	// memory and close the connection as soon as the response is received. This completes the
@@ -34,7 +35,6 @@ type HTTPEndpoint struct {
 	// TODO: consider introducing a max-length option to limit this option for large responses.
 	OptReadFast bool
 
-	// Set by Initialize
 	watcherID string
 	respChan  chan<- WatcherResponse
 }
@@ -48,6 +48,33 @@ func (e *HTTPEndpoint) Close() error {
 func (e *HTTPEndpoint) Initialize(watcherID string, responseChannel chan<- WatcherResponse) error {
 	e.watcherID = watcherID
 	e.respChan = responseChannel
+
+	if e.TransportControl == nil {
+		e.client = http.DefaultClient
+	} else {
+		tc := e.TransportControl
+
+		// Clone the default transport to keep sensible settings
+		tr := http.DefaultTransport.(*http.Transport).Clone()
+
+		// Override name–resolution only
+		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			// TODO: move timeout to configuration
+			d := &net.Dialer{Timeout: 5 * time.Second}
+			return d.DialContext(ctx, "tcp", tc.AddrPort.String())
+		}
+
+		// Optional TLS wrapping with correct SNI
+		if tc.TLSEnabled {
+			tr.TLSClientConfig = &tls.Config{
+				ServerName:         e.URL.Hostname(),
+				InsecureSkipVerify: tc.SkipTLSVerify,
+			}
+		}
+
+		e.client = &http.Client{Transport: tr}
+	}
+
 	// TODO: set mode based on payload, e.g. JSON RPC, text ete.
 	return nil
 }
@@ -117,35 +144,8 @@ func (r httpRequest) Execute() error {
 		}
 	}
 
-	var client *http.Client
-	if r.endpoint.TransportControl == nil {
-		client = http.DefaultClient
-	} else {
-		tc := r.endpoint.TransportControl
-
-		// Clone the default transport to keep sensible settings
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-
-		// Override name–resolution only
-		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
-			// TODO: move timeout to configuration
-			d := &net.Dialer{Timeout: 5 * time.Second}
-			return d.DialContext(ctx, "tcp", tc.AddrPort.String())
-		}
-
-		// Optional TLS wrapping with correct SNI
-		if tc.TLSEnabled {
-			tr.TLSClientConfig = &tls.Config{
-				ServerName:         r.endpoint.URL.Hostname(),
-				InsecureSkipVerify: tc.SkipTLSVerify,
-			}
-		}
-
-		client = &http.Client{Transport: tr}
-	}
-
 	// Send the request
-	response, err := client.Do(request)
+	response, err := r.endpoint.client.Do(request)
 	if err != nil {
 		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, &urlClone)
 		return err

@@ -277,6 +277,42 @@ func TestTransportControlTLS(t *testing.T) {
 	}
 }
 
+func TestConnectionReuse(t *testing.T) {
+	// Start a simple HTTP test server that echoes.
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
+	defer server.Close()
+
+	// Parse the server URL.
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	// Build endpoint that will reuse connections.
+	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "reuse")
+	ep.OptReadFast = true // ensure body is read/closed so the conn can be reused
+
+	respCh := make(chan WatcherResponse, 1)
+	require.NoError(t, ep.Initialize("wid", respCh))
+
+	// 1st request – should establish a new TCP connection.
+	require.NoError(t, ep.Task().Execute())
+
+	resp1 := <-respCh
+	require.NoError(t, resp1.Err)
+	md1 := resp1.Metadata()
+	assert.NotNil(t, md1.TimeData.TCPConnect, "first request should incur TCP connect")
+
+	// 2nd request – should reuse the existing connection (no new ConnectStart/Done callbacks).
+	require.NoError(t, ep.Task().Execute())
+
+	resp2 := <-respCh
+	require.NoError(t, resp2.Err)
+	md2 := resp2.Metadata()
+	assert.Nil(t, md2.TimeData.TCPConnect, "second request should reuse connection (no TCP connect)")
+
+	// Remote address must be the same for both requests.
+	assert.Equal(t, md1.RemoteAddr.String(), md2.RemoteAddr.String())
+}
+
 func TestNewHTTPEndpoint(t *testing.T) {
 	url, err := url.Parse("http://example.com")
 	assert.NoError(t, err, "failed to parse URL")
