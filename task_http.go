@@ -198,12 +198,14 @@ func NewHTTPEndpoint(
 	header http.Header,
 	payload []byte,
 	id string,
+	tc *TransportControl,
 ) *HTTPEndpoint {
 	return &HTTPEndpoint{
-		Header:  header,
-		Method:  method,
-		Payload: payload,
-		URL:     url,
-		ID:      id,
+		Header:           header,
+		Method:           method,
+		Payload:          payload,
+		URL:              url,
+		ID:               id,
+		TransportControl: tc,
 	}
 }

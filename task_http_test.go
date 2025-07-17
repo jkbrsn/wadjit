@@ -21,7 +21,7 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
-	endpoint := NewHTTPEndpoint(url, http.MethodGet, header, nil, "an-id")
+	endpoint := NewHTTPEndpoint(url, http.MethodGet, header, nil, "an-id", nil)
 
 	assert.Equal(t, url, endpoint.URL)
 	assert.Equal(t, header, endpoint.Header)
@@ -45,7 +45,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 
 	header.Add("Content-Type", "application/json")
 
-	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, []byte(`{"key":"value"}`), "an-id")
+	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, []byte(`{"key":"value"}`), "an-id", nil)
 
 	err = endpoint.Initialize("some-watcher-id", responseChan)
 	assert.NoError(t, err)
@@ -126,7 +126,7 @@ func TestHTTPEndpointExecuteMethods(t *testing.T) {
 				header.Add("Content-Type", "application/json")
 			}
 			echoURL.Path = c.path
-			endpoint := NewHTTPEndpoint(echoURL, c.method, header, c.payload, "an-id")
+			endpoint := NewHTTPEndpoint(echoURL, c.method, header, c.payload, "an-id", nil)
 			err = endpoint.Initialize("some-watcher-id", responseChan)
 			assert.NoError(t, err)
 
@@ -176,7 +176,7 @@ func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
 
 	// Build a minimal endpoint that hits the test server
 	u, _ := url.Parse(server.URL)
-	ep := NewHTTPEndpoint(u, http.MethodGet, http.Header{}, nil, "id1")
+	ep := NewHTTPEndpoint(u, http.MethodGet, http.Header{}, nil, "id1", nil)
 	respChan := make(chan WatcherResponse, 1)
 	ep.Initialize("watcher-1", respChan)
 
@@ -213,8 +213,7 @@ func TestTransportControlBypassesDNS(t *testing.T) {
 	}
 
 	// 4. Build endpoint with TransportControl.
-	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "id")
-	ep.TransportControl = tc
+	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "id", tc)
 	responseChan := make(chan WatcherResponse, 1)
 	require.NoError(t, ep.Initialize("wid", responseChan))
 
@@ -257,8 +256,7 @@ func TestTransportControlTLS(t *testing.T) {
 		SkipTLSVerify: true, // accept self-signed cert from httptest
 	}
 
-	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "tls-test")
-	ep.TransportControl = tc
+	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "tls-test", tc)
 	respCh := make(chan WatcherResponse, 1)
 	require.NoError(t, ep.Initialize("wid", respCh))
 
@@ -287,7 +285,7 @@ func TestConnectionReuse(t *testing.T) {
 	require.NoError(t, err)
 
 	// Build endpoint that will reuse connections.
-	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "reuse")
+	ep := NewHTTPEndpoint(u, http.MethodGet, nil, nil, "reuse", nil)
 	ep.OptReadFast = true // ensure body is read/closed so the conn can be reused
 
 	respCh := make(chan WatcherResponse, 1)
@@ -319,10 +317,11 @@ func TestNewHTTPEndpoint(t *testing.T) {
 	header := make(http.Header)
 	payload := []byte(`{"key":"value"}`)
 
-	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, payload, "")
+	endpoint := NewHTTPEndpoint(url, http.MethodPost, header, payload, "", nil)
 	require.NotNil(t, endpoint)
 
 	assert.Equal(t, url, endpoint.URL)
 	assert.Equal(t, header, endpoint.Header)
 	assert.Equal(t, payload, endpoint.Payload)
+	assert.Nil(t, endpoint.TransportControl)
 }
