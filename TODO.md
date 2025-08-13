@@ -1,6 +1,6 @@
 # todo
 
-## v0.7.0
+## v0.7.1
 
 - Add `Watcher` metrics (per watcher and/or overall)
   - Timing accuracy/skew
@@ -15,7 +15,7 @@
   - Deadline times
   - Read upon response received, to avoid adding lag to the timing of DataTransferTime or RequestTimeTotal
 - Improve readme; add more (real) implementation examples, mention WS support, show response handling more
-- Add golangci-lint config + make command
+- Clean up linter errors
 
 ## various ideas
 
