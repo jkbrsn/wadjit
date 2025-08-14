@@ -33,7 +33,7 @@ func TestHTTPTaskResponse_Data_Success(t *testing.T) {
 	require.NotNil(t, resp)
 
 	taskResp := NewHTTPTaskResponse(server.Listener.Addr(), resp)
-	defer taskResp.Close()
+	defer func() { _ = taskResp.Close() }()
 
 	// Call Data() to read the entire body
 	data, err := taskResp.Data()
@@ -62,13 +62,13 @@ func TestHTTPTaskResponse_Data_AfterReaderFails(t *testing.T) {
 	require.NotNil(t, resp)
 
 	taskResp := NewHTTPTaskResponse(nil, resp)
-	defer taskResp.Close()
+	defer func() { _ = taskResp.Close() }()
 
 	// First, get the Reader
 	r, err := taskResp.Reader()
 	require.NoError(t, err)
 	require.NotNil(t, r)
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	// Then attempt Data()
 	data, err := taskResp.Data()
@@ -87,7 +87,7 @@ func TestHTTPTaskResponse_Reader_AfterDataReturnsMemory(t *testing.T) {
 	require.NotNil(t, resp)
 
 	taskResp := NewHTTPTaskResponse(nil, resp)
-	defer taskResp.Close()
+	defer func() { _ = taskResp.Close() }()
 
 	// Call Data() first
 	data, err := taskResp.Data()
@@ -102,7 +102,7 @@ func TestHTTPTaskResponse_Reader_AfterDataReturnsMemory(t *testing.T) {
 	// Read the response and close the reader
 	bytes, err := io.ReadAll(r)
 	require.NoError(t, err)
-	r.Close()
+	_ = r.Close()
 	require.Equal(t, payload, bytes)
 }
 
@@ -114,7 +114,7 @@ func TestHTTPTaskResponse_NilBody(t *testing.T) {
 	}
 
 	taskResp := NewHTTPTaskResponse(nil, resp)
-	defer taskResp.Close()
+	defer func() { _ = taskResp.Close() }()
 
 	// Data() should return error
 	data, err := taskResp.Data()
@@ -131,7 +131,7 @@ func TestHTTPTaskResponse_Metadata(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Custom-Header", "Value123")
 		w.WriteHeader(http.StatusTeapot)
-		w.Write([]byte("test"))
+		_, _ = w.Write([]byte("test"))
 	}))
 	defer server.Close()
 
@@ -139,7 +139,7 @@ func TestHTTPTaskResponse_Metadata(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	taskResp := NewHTTPTaskResponse(nil, resp)
-	defer taskResp.Close()
+	defer func() { _ = taskResp.Close() }()
 
 	md := taskResp.Metadata()
 	require.Equal(t, http.StatusTeapot, md.StatusCode)
@@ -150,7 +150,7 @@ func TestWSTaskResponse_DataAndReader(t *testing.T) {
 	remoteAddr := net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1234}
 	wsData := []byte("hello from websocket")
 	wsResp := NewWSTaskResponse(&remoteAddr, wsData)
-	defer wsResp.Close()
+	defer func() { _ = wsResp.Close() }()
 
 	data, err := wsResp.Data()
 	require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestWSTaskResponse_DataAndReader(t *testing.T) {
 
 	readBytes, err := io.ReadAll(r)
 	require.NoError(t, err)
-	r.Close()
+	_ = r.Close()
 	require.Equal(t, wsData, readBytes)
 
 	// Metadata is empty

@@ -149,7 +149,9 @@ func (h *HTTPTaskResponse) readBody() {
 		h.dataErr = errors.New("http.Response.Body is nil")
 		return
 	}
-	defer h.resp.Body.Close()
+	defer func() {
+		_ = h.resp.Body.Close()
+	}()
 
 	bodyBytes, err := io.ReadAll(h.resp.Body)
 	if err != nil {

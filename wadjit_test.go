@@ -388,7 +388,7 @@ func TestWadjit_WatcherIDs(t *testing.T) {
 	w2, err := NewWatcher("watcher-2", 1*time.Second, WatcherTasksToSlice(task2))
 	require.NoError(t, err, "error creating watcher 2")
 
-	w.AddWatchers(w1, w2)
+	require.NoError(t, w.AddWatchers(w1, w2))
 
 	// Drain responses
 	go func() {
@@ -410,7 +410,7 @@ func TestWadjit_WatcherIDs(t *testing.T) {
 	assert.True(t, idsMap["watcher-1"] && idsMap["watcher-2"], "expected IDs 'watcher-1' and 'watcher-2', got %v", idsAfterAdd)
 
 	// Remove a watcher and check IDs after removal
-	w.RemoveWatcher("watcher-1")
+	require.NoError(t, w.RemoveWatcher("watcher-1"))
 
 	idsAfterRemove := w.WatcherIDs()
 	assert.Equal(t, 1, len(idsAfterRemove), "expected 1 watcher ID after removal")

@@ -197,7 +197,7 @@ func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
 	u, _ := url.Parse(server.URL)
 	ep := NewHTTPEndpoint(u, http.MethodGet, WithHeader(http.Header{}), WithID("id1"))
 	respChan := make(chan WatcherResponse, 1)
-	ep.Initialize("watcher-1", respChan)
+	require.NoError(t, ep.Initialize("watcher-1", respChan))
 
 	// Run one request synchronously
 	task := ep.Task().(*httpRequest)
@@ -237,7 +237,7 @@ func TestTransportControlBypassesDNS(t *testing.T) {
 	require.NoError(t, ep.Initialize("wid", responseChan))
 
 	// 5. Execute.
-	go ep.Task().Execute()
+	go func() { _ = ep.Task().Execute() }()
 
 	// 6. Assert.
 	select {
@@ -279,7 +279,7 @@ func TestTransportControlTLS(t *testing.T) {
 	respCh := make(chan WatcherResponse, 1)
 	require.NoError(t, ep.Initialize("wid", respCh))
 
-	go ep.Task().Execute()
+	go func() { _ = ep.Task().Execute() }()
 
 	select {
 	case resp := <-respCh:
