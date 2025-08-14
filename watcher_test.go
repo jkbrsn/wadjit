@@ -82,7 +82,7 @@ func TestWatcherExecution(t *testing.T) {
 	err = watcher.start(watcherResponses)
 	assert.NoError(t, err)
 	for _, task := range watcher.Tasks {
-		task.Task().Execute()
+		assert.NoError(t, task.Task().Execute())
 	}
 
 	// Listen for responses on the watcherResponses channel
@@ -96,15 +96,16 @@ func TestWatcherExecution(t *testing.T) {
 		responsePayload, err := response.Payload.Data()
 		assert.NoError(t, err)
 		assert.Equal(t, payload, responsePayload)
-		if response.URL.Scheme == "http" {
+		switch response.URL.Scheme {
+		case "http":
 			_, ok := response.Payload.(*HTTPTaskResponse)
 			assert.True(t, ok, "response.Payload is not of type HTTPTaskResponse")
 			assert.Equal(t, "an-id", response.TaskID)
-		} else if response.URL.Scheme == "ws" {
+		case "ws":
 			_, ok := response.Payload.(*WSTaskResponse)
 			assert.True(t, ok, "response.Payload is not of type WSTaskResponse")
 			assert.Equal(t, "another-id", response.TaskID)
-		} else {
+		default:
 			t.Fail()
 		}
 	}
@@ -137,7 +138,7 @@ func TestWatcherExecution_Error(t *testing.T) {
 	err = watcher.start(watcherResponses)
 	assert.NoError(t, err)
 	for _, task := range watcher.Tasks {
-		task.Task().Execute()
+		assert.Error(t, task.Task().Execute())
 	}
 
 	// Listen for responses on the watcherResponses channel

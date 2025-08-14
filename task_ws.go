@@ -287,9 +287,8 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 					//e.respChan <- errorResponse(fmt.Errorf("unexpected websocket read error: %w", err), e.ID, e.watcherID, &urlClone)
 				}
 
-				// If there was an error, close the connection
-				e.closeConn()
-
+				// Any read error closes the connection and exits the pump
+				_ = e.closeConn()
 				return
 			}
 			// Register first byte timestamp
@@ -407,7 +406,7 @@ func (oh *wsOneHit) Execute() error {
 			return err
 		}
 		remoteAddr := conn.RemoteAddr()
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		timestamps.dnsDone = time.Now()
 		timestamps.connDone = time.Now()
 		timestamps.tlsDone = time.Now()
@@ -561,7 +560,7 @@ func (ll *wsPersistent) Execute() error {
 			}
 
 			// Close the connection
-			ll.wsEndpoint.closeConn()
+			_ = ll.wsEndpoint.closeConn()
 
 			// Send an error response
 			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, &urlClone)

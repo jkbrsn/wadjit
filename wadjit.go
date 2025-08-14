@@ -134,7 +134,10 @@ func (w *Wadjit) RemoveWatcher(id string) error {
 		return err
 	}
 
-	w.taskManager.RemoveJob(id)
+	err = w.taskManager.RemoveJob(id)
+	if err != nil {
+		return fmt.Errorf("error removing watcher: %w", err)
+	}
 
 	return nil
 }

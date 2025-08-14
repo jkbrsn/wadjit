@@ -147,7 +147,7 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		// Echo messages back to the client
 		for {
@@ -170,7 +170,7 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 			fallthrough
 		case http.MethodGet:
 			w.WriteHeader(http.StatusOK)
-			w.Write(fmt.Appendf(nil, "%s request received on path %s", r.Method, r.URL.Path))
+			_, _ = w.Write(fmt.Appendf(nil, "%s request received on path %s", r.Method, r.URL.Path))
 
 		case http.MethodPatch:
 			fallthrough
@@ -180,7 +180,7 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 			payload, err := io.ReadAll(r.Body)
 			if err != nil {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("no payload found"))
+				_, _ = w.Write([]byte("no payload found"))
 				return
 			}
 			// Mirror request's content type in the response
@@ -189,12 +189,12 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			w.WriteHeader(http.StatusOK)
 			// Echo payload back to the client
-			w.Write(payload)
+			_, _ = w.Write(payload)
 
 		default:
 			// Write harcoded message to the client
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("unsupported method"))
+			_, _ = w.Write([]byte("unsupported method"))
 		}
 	}
 }
@@ -214,7 +214,7 @@ func jsonRPCServer() *httptest.Server {
 				http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
 				return
 			}
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 
 			// Echo messages back to the client as the result of a JSON-RPC request
 			for {
@@ -261,14 +261,14 @@ func jsonRPCServer() *httptest.Server {
 			if err != nil {
 				// Write harcoded message to the client
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("no payload found"))
+				_, _ = w.Write([]byte("no payload found"))
 				return
 			}
 
 			// JSON header not found
 			if r.Header.Get("Content-Type") != "application/json" {
 				w.WriteHeader(http.StatusOK)
-				w.Write([]byte("no Content-Type: application/json header found"))
+				_, _ = w.Write([]byte("no Content-Type: application/json header found"))
 				return
 			}
 
@@ -287,7 +287,7 @@ func jsonRPCServer() *httptest.Server {
 				respBytes, _ := resp.MarshalJSON()
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
-				w.Write(respBytes)
+				_, _ = w.Write(respBytes)
 				return
 			}
 
@@ -303,7 +303,7 @@ func jsonRPCServer() *httptest.Server {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			// Echo payload back to the client as the result of a JSON-RPC request
-			w.Write(respBytes)
+			_, _ = w.Write(respBytes)
 		}
 	}))
 
@@ -326,7 +326,7 @@ func jsonRPCServerWithServerDisconnect() *httptest.Server {
 			// Handle only the first message
 			mt, message, err := conn.ReadMessage()
 			if err != nil {
-				conn.Close() // Close on read error
+				_ = conn.Close() // Close on read error
 				return
 			}
 
@@ -345,7 +345,7 @@ func jsonRPCServerWithServerDisconnect() *httptest.Server {
 				respBytes, _ := resp.MarshalJSON()
 				// Try to write error response, then close
 				_ = conn.WriteMessage(mt, respBytes)
-				conn.Close()
+				_ = conn.Close()
 				return
 			}
 
@@ -359,7 +359,7 @@ func jsonRPCServerWithServerDisconnect() *httptest.Server {
 			respBytes, _ := resp.MarshalJSON()
 			err = conn.WriteMessage(mt, respBytes)
 			if err != nil {
-				conn.Close() // Close on write error
+				_ = conn.Close() // Close on write error
 				return
 			}
 

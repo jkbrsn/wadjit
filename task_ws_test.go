@@ -388,7 +388,7 @@ func TestWSEndpoint_ResponseRemoteAddr(t *testing.T) {
 	ep := NewWSEndpoint(u, http.Header{}, OneHitText, nil, "ws-id1")
 
 	respChan := make(chan WatcherResponse, 1)
-	ep.Initialize("watcher-1", respChan)
+	require.NoError(t, ep.Initialize("watcher-1", respChan))
 
 	// Run a one-shot WS task
 	task := ep.Task().(*wsOneHit)
@@ -417,7 +417,7 @@ func TestNewWSEndpoint(t *testing.T) {
 		assert.Equal(t, ModeUnknown, endpoint.Mode)
 
 		// Initialize should set the mode to default mode OneHitText
-		endpoint.Initialize("some-watcher-id", make(chan WatcherResponse))
+		require.NoError(t, endpoint.Initialize("some-watcher-id", make(chan WatcherResponse)))
 		assert.Equal(t, OneHitText, endpoint.Mode)
 	})
 
