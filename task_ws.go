@@ -277,17 +277,61 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 			// Read message from connection
 			_, p, err := e.conn.ReadMessage()
 			if err != nil {
-				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseServiceRestart) {
-					// This is an expected situation, handle gracefully
-				} else if strings.Contains(err.Error(), "connection closed") {
-					// This is not an unknown situation, handle gracefully
-				} else {
-					// This is unexpected
-					// TODO: consider returning an error response, though the channel may not be available
-					//e.respChan <- errorResponse(fmt.Errorf("unexpected websocket read error: %w", err), e.ID, e.watcherID, &urlClone)
+				// If shutting down, just close and exit quietly
+				if e.ctx.Err() != nil {
+					_ = e.closeConn()
+					return
 				}
 
-				// Any read error closes the connection and exits the pump
+				// Classify websocket close errors
+				var ce *websocket.CloseError
+				if errors.As(err, &ce) {
+					switch ce.Code {
+					case websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseServiceRestart:
+						// Benign/expected closes: quiet close and exit
+						_ = e.closeConn()
+						return
+					case websocket.CloseTryAgainLater:
+						// Backpressure: surface an actionable error for backoff
+						e.respChan <- errorResponse(fmt.Errorf("websocket closed: try again later (1013): %w", err), e.ID, e.watcherID, &urlClone)
+						_ = e.closeConn()
+						return
+					case websocket.CloseAbnormalClosure:
+						// Abnormal close: surface error
+						e.respChan <- errorResponse(fmt.Errorf("websocket closed abnormally (1006): %w", err), e.ID, e.watcherID, &urlClone)
+						_ = e.closeConn()
+						return
+					default:
+						// Unexpected close: surface error with details
+						e.respChan <- errorResponse(fmt.Errorf("websocket unexpected close (%d %q): %w", ce.Code, ce.Text, err), e.ID, e.watcherID, &urlClone)
+						_ = e.closeConn()
+						return
+					}
+				}
+
+				// Local and benign teardown
+				if errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection") {
+					_ = e.closeConn()
+					return
+				}
+
+				// Unexpected close error not matched above
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseServiceRestart) {
+					e.respChan <- errorResponse(fmt.Errorf("websocket unexpected close: %w", err), e.ID, e.watcherID, &urlClone)
+					_ = e.closeConn()
+					return
+				}
+
+				// Network-level transient conditions
+				var nerr net.Error
+				if errors.As(err, &nerr) && nerr.Timeout() {
+					e.respChan <- errorResponse(fmt.Errorf("websocket read timeout error: %w", err), e.ID, e.watcherID, &urlClone)
+					_ = e.closeConn()
+					return
+				}
+
+				// Generic read error: surface for visibility
+				e.respChan <- errorResponse(fmt.Errorf("websocket read error: %w", err), e.ID, e.watcherID, &urlClone)
 				_ = e.closeConn()
 				return
 			}
