@@ -15,7 +15,6 @@
   - Deadline times
   - Read upon response received, to avoid adding lag to the timing of DataTransferTime or RequestTimeTotal
 - Improve readme; add more (real) implementation examples, mention WS support, show response handling more
-- Clean up linter errors
 
 ## various ideas
 
