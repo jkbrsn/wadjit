@@ -75,7 +75,7 @@ type TaskResponse interface {
 
 	// Reader returns an io.ReadCloser for streaming the data without loading it all into memory.
 	// The caller is responsible for closing it. If Data() has already been called, this returns
-	// an in-memory reader.
+	// an in-memory reader. The caller is responsible for closing it.
 	Reader() (io.ReadCloser, error)
 
 	// Metadata returns metadata connected to the response.
