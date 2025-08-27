@@ -155,6 +155,9 @@ func (h *HTTPTaskResponse) readBody() {
 
 	bodyBytes, err := io.ReadAll(h.resp.Body)
 	if err != nil {
+		// Best-effort drain to EOF to maximize connection reuse.
+		// Ignore drain errors because we're about to close anyway.
+		_, _ = io.Copy(io.Discard, h.resp.Body)
 		h.dataErr = err
 		return
 	}
