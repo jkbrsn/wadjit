@@ -3,7 +3,7 @@ module github.com/jkbrsn/go-wadjit
 go 1.25.1
 
 require (
-	github.com/bytedance/sonic v1.13.1
+	github.com/bytedance/sonic v1.14.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/jkbrsn/go-jsonrpc v0.6.0
 	github.com/jkbrsn/taskman v0.5.0
@@ -11,15 +11,16 @@ require (
 )
 
 require (
-	github.com/bytedance/sonic/loader v0.2.4 // indirect
-	github.com/cloudwego/base64x v0.1.5 // indirect
+	github.com/bytedance/gopkg v0.1.3 // indirect
+	github.com/bytedance/sonic/loader v0.3.0 // indirect
+	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/jkbrsn/threadsafe v0.5.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
+	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/rs/zerolog v1.34.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
-	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
+	golang.org/x/arch v0.21.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
