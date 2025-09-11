@@ -1,6 +1,6 @@
 module github.com/jkbrsn/go-wadjit
 
-go 1.24.3
+go 1.25.1
 
 require (
 	github.com/bytedance/sonic v1.13.1
