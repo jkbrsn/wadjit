@@ -1,6 +1,16 @@
 # todo
 
-## v0.7.1
+## v0.7.2
+
+- CI
+  - Add GitHub workflow for PR tests
+  - Add GitHub workflow for release
+- Change module name and repo name to only `wadjit` instead of `go-wadjit`
+- Extend test coverage with test suites and more table driven tests
+  - There is one very rare race condition in the `TestWadjit_Lifecycle` test that needs investigation
+- Improve readme; add more (real) implementation examples, mention WS support, show response handling more
+
+## v0.x.x
 
 - Add `Watcher` metrics (per watcher and/or overall)
   - Timing accuracy/skew
@@ -9,12 +19,12 @@
   - Backlog size
   - Channel pressure
 - (maybe) Support for concurrent add/remove of watchers
+  - Might be better to just not support it and let it be clear the management of watchers is left to the user
 - Expose opt-in configuration via functional options, some option ideas:
   - Buffer sizes
   - Metric sink
   - Deadline times
   - Read upon response received, to avoid adding lag to the timing of DataTransferTime or RequestTimeTotal
-- Improve readme; add more (real) implementation examples, mention WS support, show response handling more
 
 ## various ideas
 
