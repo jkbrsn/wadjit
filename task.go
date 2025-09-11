@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"net/url"
 
-	"github.com/jkbrsn/go-taskman"
+	"github.com/jkbrsn/taskman"
 )
 
 // WatcherTask is a task that the Watcher can execute to interact with a target endpoint.

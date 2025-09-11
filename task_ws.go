@@ -14,7 +14,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/jkbrsn/go-jsonrpc"
-	"github.com/jkbrsn/go-taskman"
+	"github.com/jkbrsn/taskman"
 	"github.com/rs/xid"
 )
 

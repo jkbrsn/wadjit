@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jkbrsn/go-taskman"
+	"github.com/jkbrsn/taskman"
 	"github.com/rs/xid"
 )
 

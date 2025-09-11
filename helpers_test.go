@@ -13,7 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/jkbrsn/go-jsonrpc"
-	"github.com/jkbrsn/go-taskman"
+	"github.com/jkbrsn/taskman"
 )
 
 //
