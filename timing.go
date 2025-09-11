@@ -5,6 +5,8 @@ import (
 	"io"
 	"sync"
 	"time"
+
+	"go.uber.org/atomic"
 )
 
 // requestTimestamps stores the timestamps of a request's phases.
@@ -19,6 +21,23 @@ type requestTimestamps struct {
 	wroteDone time.Time
 	firstByte time.Time
 	dataDone  time.Time
+}
+
+// traceTimes stores the timestamps of a request's phases as atomic values, for use in the
+// httptrace.ClientTrace. Atomic values are used to avoid race conditions due to the async nature
+// of the httptrace.ClientTrace.
+type traceTimes struct {
+	// TODO: consider exchanging for atomic.Int64 to go allocation free
+	start     atomic.Time
+	dnsStart  atomic.Time
+	dnsDone   atomic.Time
+	connStart atomic.Time
+	connDone  atomic.Time
+	tlsStart  atomic.Time
+	tlsDone   atomic.Time
+	wroteDone atomic.Time
+	firstByte atomic.Time
+	dataDone  atomic.Time
 }
 
 // RequestTimes represents the timing information for a layer 7 request.
@@ -41,6 +60,22 @@ type RequestTimes struct {
 	TLSHandshake     *time.Duration // TLS handshake duration
 	ServerProcessing *time.Duration // Server processing duration
 	DataTransfer     *time.Duration // Data transfer duration
+}
+
+// Snapshot returns a snapshot of the trace times as a requestTimestamps.
+func (t *traceTimes) Snapshot() requestTimestamps {
+	return requestTimestamps{
+		start:     t.start.Load(),
+		dnsStart:  t.dnsStart.Load(),
+		dnsDone:   t.dnsDone.Load(),
+		connStart: t.connStart.Load(),
+		connDone:  t.connDone.Load(),
+		tlsStart:  t.tlsStart.Load(),
+		tlsDone:   t.tlsDone.Load(),
+		wroteDone: t.wroteDone.Load(),
+		firstByte: t.firstByte.Load(),
+		dataDone:  t.dataDone.Load(),
+	}
 }
 
 // ptr returns a pointer to the given value.

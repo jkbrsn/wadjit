@@ -160,9 +160,9 @@ func (r httpRequest) Execute() error {
 	}
 
 	// Add tracing to the request
-	timestamps := &requestTimestamps{}
+	tStore := &traceTimes{}
 	remoteAddrChan := make(chan net.Addr, 1)
-	trace := traceRequest(timestamps, remoteAddrChan)
+	trace := traceRequest(tStore, remoteAddrChan)
 	ctx := httptrace.WithClientTrace(request.Context(), trace)
 	request = request.WithContext(ctx)
 
@@ -190,7 +190,7 @@ func (r httpRequest) Execute() error {
 
 	// Create a task response
 	taskResponse := NewHTTPTaskResponse(remoteAddr, response)
-	taskResponse.timestamps = *timestamps // TODO: fix race test fail on reading this timestamp
+	taskResponse.timestamps = tStore.Snapshot()
 	if r.endpoint.OptReadFast {
 		taskResponse.readBody()
 	}
@@ -208,10 +208,10 @@ func (r httpRequest) Execute() error {
 }
 
 // traceRequest traces the HTTP request and stores the timestamps in the provided times.
-func traceRequest(times *requestTimestamps, addrChan chan<- net.Addr) *httptrace.ClientTrace {
+func traceRequest(times *traceTimes, addrChan chan<- net.Addr) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		// The earliest guaranteed callback is usually GetConn, so we set the start time there
-		GetConn: func(string) { times.start = time.Now() },
+		GetConn: func(string) { times.start.Store(time.Now()) },
 		GotConn: func(info httptrace.GotConnInfo) {
 			if info.Conn != nil {
 				select {
@@ -220,14 +220,14 @@ func traceRequest(times *requestTimestamps, addrChan chan<- net.Addr) *httptrace
 				}
 			}
 		},
-		DNSStart:             func(httptrace.DNSStartInfo) { times.dnsStart = time.Now() },
-		DNSDone:              func(httptrace.DNSDoneInfo) { times.dnsDone = time.Now() },
-		ConnectStart:         func(_, _ string) { times.connStart = time.Now() },
-		ConnectDone:          func(_, _ string, _ error) { times.connDone = time.Now() },
-		TLSHandshakeStart:    func() { times.tlsStart = time.Now() },
-		TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) { times.tlsDone = time.Now() },
-		WroteRequest:         func(httptrace.WroteRequestInfo) { times.wroteDone = time.Now() },
-		GotFirstResponseByte: func() { times.firstByte = time.Now() },
+		DNSStart:             func(httptrace.DNSStartInfo) { times.dnsStart.Store(time.Now()) },
+		DNSDone:              func(httptrace.DNSDoneInfo) { times.dnsDone.Store(time.Now()) },
+		ConnectStart:         func(_, _ string) { times.connStart.Store(time.Now()) },
+		ConnectDone:          func(_, _ string, _ error) { times.connDone.Store(time.Now()) },
+		TLSHandshakeStart:    func() { times.tlsStart.Store(time.Now()) },
+		TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) { times.tlsDone.Store(time.Now()) },
+		WroteRequest:         func(httptrace.WroteRequestInfo) { times.wroteDone.Store(time.Now()) },
+		GotFirstResponseByte: func() { times.firstByte.Store(time.Now()) },
 	}
 }
 
