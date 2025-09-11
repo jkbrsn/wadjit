@@ -7,7 +7,7 @@
   - Add GitHub workflow for release
 - Change module name and repo name to only `wadjit` instead of `go-wadjit`
 - Extend test coverage with test suites and more table driven tests
-  - There is one very rare race condition in the `TestWadjit_Lifecycle` test that needs investigation
+  - There is one rare race condition in the `TestWadjit_Lifecycle` test that needs solving
 - Improve readme; add more (real) implementation examples, mention WS support, show response handling more
 
 ## v0.x.x

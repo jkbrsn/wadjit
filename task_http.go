@@ -161,8 +161,8 @@ func (r httpRequest) Execute() error {
 
 	// Add tracing to the request
 	timestamps := &requestTimestamps{}
-	var remoteAddr net.Addr
-	trace := traceRequest(timestamps, &remoteAddr)
+	remoteAddrChan := make(chan net.Addr, 1)
+	trace := traceRequest(timestamps, remoteAddrChan)
 	ctx := httptrace.WithClientTrace(request.Context(), trace)
 	request = request.WithContext(ctx)
 
@@ -180,9 +180,17 @@ func (r httpRequest) Execute() error {
 		return err
 	}
 
+	var remoteAddr net.Addr
+	select {
+	case remoteAddr = <-remoteAddrChan:
+		// Use the received address
+	case <-time.After(100 * time.Millisecond): // Short timeout to avoid indefinite wait
+		remoteAddr = nil // Fallback if callback doesn't complete in time
+	}
+
 	// Create a task response
 	taskResponse := NewHTTPTaskResponse(remoteAddr, response)
-	taskResponse.timestamps = *timestamps
+	taskResponse.timestamps = *timestamps // TODO: fix race test fail on reading this timestamp
 	if r.endpoint.OptReadFast {
 		taskResponse.readBody()
 	}
@@ -200,13 +208,16 @@ func (r httpRequest) Execute() error {
 }
 
 // traceRequest traces the HTTP request and stores the timestamps in the provided times.
-func traceRequest(times *requestTimestamps, addr *net.Addr) *httptrace.ClientTrace {
+func traceRequest(times *requestTimestamps, addrChan chan<- net.Addr) *httptrace.ClientTrace {
 	return &httptrace.ClientTrace{
 		// The earliest guaranteed callback is usually GetConn, so we set the start time there
 		GetConn: func(string) { times.start = time.Now() },
 		GotConn: func(info httptrace.GotConnInfo) {
-			if info.Conn != nil && addr != nil {
-				*addr = info.Conn.RemoteAddr()
+			if info.Conn != nil {
+				select {
+				case addrChan <- info.Conn.RemoteAddr():
+				default: // Non-blocking send to avoid issues if channel is full or closed
+				}
 			}
 		},
 		DNSStart:             func(httptrace.DNSStartInfo) { times.dnsStart = time.Now() },
