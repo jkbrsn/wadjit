@@ -6,7 +6,7 @@ require (
 	github.com/bytedance/sonic v1.14.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/jkbrsn/go-jsonrpc v0.6.0
-	github.com/jkbrsn/taskman v0.5.0
+	github.com/jkbrsn/taskman v0.5.1
 	github.com/rs/xid v1.6.0
 	go.uber.org/atomic v1.11.0
 )

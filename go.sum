@@ -15,8 +15,8 @@ github.com/gorilla/websocket v1.5.3 h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aN
 github.com/gorilla/websocket v1.5.3/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/jkbrsn/go-jsonrpc v0.6.0 h1:797IcCXdDRAOzI55+vJ88WrLRv4ZesG0bBrWuONlCCs=
 github.com/jkbrsn/go-jsonrpc v0.6.0/go.mod h1:3rsj7I1oyKAB1RmyjpzHJpcJgeIJ6xLTOsHYSKOS7iU=
-github.com/jkbrsn/taskman v0.5.0 h1:xM8MbEct5OKpY4v8yN0WRQ2MUCEXPxevbN/LbZ5+Lj4=
-github.com/jkbrsn/taskman v0.5.0/go.mod h1:Nu5B2eAHvfAj3biSwsbZlJyKOCdxPx4Fpd/MlA2zz3g=
+github.com/jkbrsn/taskman v0.5.1 h1:txRWd8hqME9kWqwGz9FSTGEPco8vYp5eb69GT3GN0Ko=
+github.com/jkbrsn/taskman v0.5.1/go.mod h1:c07AVtbgG5HRDnfeUpoinubwnWALz16pk0Cu8dC4FYI=
 github.com/jkbrsn/threadsafe v0.5.0 h1:Iev5+agv64qxXa0QnTUnsvMkBhicnEMQ3YsVZ+KU9cY=
 github.com/jkbrsn/threadsafe v0.5.0/go.mod h1:f8lewyuKXmcsoapAekEXgoCDsM2tWPys8jiNeVC+8Kk=
 github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
