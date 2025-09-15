@@ -1,7 +1,7 @@
 package wadjit
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,7 +16,10 @@ func TestWatcherInitialization(t *testing.T) {
 	id := xid.New().String()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
-	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
+	httpTasks := []HTTPEndpoint{{
+		URL:     &url.URL{Scheme: "http", Host: "localhost:8080"},
+		Payload: payload,
+	}}
 	var tasks []WatcherTask
 	for _, task := range httpTasks {
 		tasks = append(tasks, &task)
@@ -72,8 +75,10 @@ func TestWatcherExecution(t *testing.T) {
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
 	var tasks []WatcherTask
-	tasks = append(tasks, &HTTPEndpoint{URL: httpURL, Method: http.MethodPost, Header: header, Payload: payload, ID: "an-id"})
-	tasks = append(tasks, &WSEndpoint{URL: wsURL, Header: header, Payload: payload, ID: "another-id"})
+	tasks = append(tasks, &HTTPEndpoint{
+		URL: httpURL, Method: http.MethodPost, Header: header, Payload: payload, ID: "an-id"})
+	tasks = append(tasks, &WSEndpoint{
+		URL: wsURL, Header: header, Payload: payload, ID: "another-id"})
 	watcher, err := NewWatcher(id, cadence, tasks)
 	assert.NoError(t, err)
 
@@ -127,7 +132,7 @@ func TestWatcherExecution_Error(t *testing.T) {
 	tasks = append(tasks, &MockWatcherTask{
 		URL:             httpURL,
 		Header:          header,
-		ErrTaskResponse: fmt.Errorf("mock error"),
+		ErrTaskResponse: errors.New("mock error"),
 		ID:              "an-id",
 	})
 	watcher, err := NewWatcher(id, cadence, tasks)

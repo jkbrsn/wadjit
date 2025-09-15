@@ -1,3 +1,4 @@
+// Package wadjit provides a framework for monitoring HTTP and WebSocket endpoints.
 package wadjit
 
 import (
@@ -7,6 +8,11 @@ import (
 	"sync"
 
 	"github.com/jkbrsn/taskman"
+)
+
+const (
+	// responseChanBufferSize is the buffer size for response channels to prevent blocking
+	responseChanBufferSize = 512
 )
 
 // Wadjit is a struct that manages a collection of endpoint watchers.
@@ -152,7 +158,7 @@ func (w *Wadjit) Responses() <-chan WatcherResponse {
 // WatcherIDs returns a slice of strings containing the IDs of all active watchers.
 func (w *Wadjit) WatcherIDs() []string {
 	var ids []string
-	w.watchers.Range(func(key, value any) bool {
+	w.watchers.Range(func(key, _ any) bool {
 		ids = append(ids, key.(string))
 		return true
 	})
@@ -169,7 +175,7 @@ func (w *Wadjit) listenForResponses() {
 				return // Channel closed
 			}
 			if w.ctx.Err() != nil {
-				return // Context cancelled
+				return // Context canceled
 			}
 
 			// Send the response to the external facing channel
@@ -188,8 +194,8 @@ func New() *Wadjit {
 	w := &Wadjit{
 		watchers:       sync.Map{},
 		taskManager:    taskman.New(),
-		respGatherChan: make(chan WatcherResponse, 512),
-		respExportChan: make(chan WatcherResponse, 512),
+		respGatherChan: make(chan WatcherResponse, responseChanBufferSize),
+		respExportChan: make(chan WatcherResponse, responseChanBufferSize),
 		ctx:            ctx,
 		cancel:         cancel,
 	}

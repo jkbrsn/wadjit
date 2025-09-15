@@ -2,14 +2,12 @@
 
 ## v0.7.2
 
-- CI
-  - Add GitHub workflow for PR tests
-  - Add GitHub workflow for release
 - Add golangci-lint
   - Makefile
   - CI
 - Extend test coverage with test suites and more table driven tests
 - Improve readme; add more (real) implementation examples, mention WS support, show response handling more
+- Fix `_example/main.go` to work with latest dependencies and module
 
 ## v0.x.x
 

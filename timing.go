@@ -49,7 +49,7 @@ type RequestTimes struct {
 
 	// Latency is the time it took to receive the very first byte of the response.
 	// For HTTP, this is the time from request send to receiving the first byte of the response.
-	// For WS, this is the time from inital Dial to the first 101 response for a new conn, or
+	// For WS, this is the time from initial Dial to the first 101 response for a new conn, or
 	// the time from sending a message to receiving a response on an existing connection.
 	Latency time.Duration
 
@@ -81,8 +81,8 @@ func (t *traceTimes) Snapshot() requestTimestamps {
 // ptr returns a pointer to the given value.
 func ptr[T any](v T) *T { return &v }
 
-// TimeDataFromTimestamps returns the RequestTimes from the given requestTimestamps. Calculates and sets
-// all durations and times except RequestTimeTotal and DataTransfer.
+// TimeDataFromTimestamps returns the RequestTimes from the given requestTimestamps. Calculates and
+// sets all durations and times except RequestTimeTotal and DataTransfer.
 func TimeDataFromTimestamps(t requestTimestamps) RequestTimes {
 	req := RequestTimes{}
 

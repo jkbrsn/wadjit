@@ -3,12 +3,13 @@ package wadjit
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +24,7 @@ type WatcherResponse struct {
 	TaskID    string       // ID of the task that generated the response
 	WatcherID string       // ID of the watcher that generated the response
 	URL       *url.URL     // URL of the response's target
-	Err       error        // Error that occurred during the request, if nil the request was successful
+	Err       error        // Error during the request, nil if the request was successful
 	Payload   TaskResponse // Payload stores the response data from the endpoint
 }
 
@@ -97,28 +98,29 @@ type TaskResponseMetadata struct {
 	TimeData RequestTimes
 }
 
+// String returns a string representation of the metadata.
+//
+// revive:disable:add-constant exception
 func (m TaskResponseMetadata) String() string {
-	buffer := bytes.Buffer{}
-	buffer.WriteString("{")
-	first := true
+	var headerParts []string
 	for key, values := range m.Headers {
 		for _, value := range values {
-			if !first {
-				buffer.WriteString(", ")
-			}
-			buffer.WriteString(key + ": " + value)
-			first = false
+			headerParts = append(headerParts, key+": "+value)
 		}
 	}
-	buffer.WriteString("}")
-	return "TaskResponseMetadata{" +
-		"StatusCode: " + strconv.Itoa(m.StatusCode) + ", " +
-		"Headers: " + buffer.String() + ", " +
-		"Size: " + strconv.Itoa(int(m.Size)) + ", " +
-		"Latency: " + m.TimeData.Latency.String() + ", " +
-		"TimeSent: " + m.TimeData.SentAt.String() + ", " +
-		"TimeReceived: " + m.TimeData.ReceivedAt.String() + "}"
+	headersStr := "{" + strings.Join(headerParts, ", ") + "}"
+
+	return fmt.Sprintf("TaskResponseMetadata{StatusCode: %d%sHeaders: %s%sSize: "+
+		"%d%sLatency: %s%sTimeSent: %s%sTimeReceived: %s}",
+		m.StatusCode, ", ",
+		headersStr, ", ",
+		m.Size, ", ",
+		m.TimeData.Latency.String(), ", ",
+		m.TimeData.SentAt.String(), ", ",
+		m.TimeData.ReceivedAt.String())
 }
+
+// revive:enable:add-constant
 
 //
 // HTTP
@@ -139,6 +141,7 @@ type HTTPTaskResponse struct {
 	usedReader atomic.Bool // flags if we returned a Reader
 }
 
+// NewHTTPTaskResponse creates a new HTTPTaskResponse from an http.Response.
 func NewHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *HTTPTaskResponse {
 	return &HTTPTaskResponse{remoteAddr: remoteAddr, resp: r}
 }
@@ -204,7 +207,7 @@ func (h *HTTPTaskResponse) Reader() (io.ReadCloser, error) {
 
 	// If Reader() was already called, disallow retrieving the reader again.
 	if h.usedReader.Load() {
-		return nil, errors.New("Reader() already called")
+		return nil, errors.New("reader already called")
 	}
 
 	// Otherwise, mark reader as used and return the original body.
@@ -265,7 +268,8 @@ func NewWSTaskResponse(remoteAddr net.Addr, data []byte) *WSTaskResponse {
 	return &WSTaskResponse{remoteAddr: remoteAddr, data: data}
 }
 
-func (w *WSTaskResponse) Close() error {
+// Close implements the TaskResponse interface but does nothing for WS responses.
+func (*WSTaskResponse) Close() error {
 	return nil
 }
 

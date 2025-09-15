@@ -16,6 +16,11 @@ import (
 	"github.com/rs/xid"
 )
 
+const (
+	// defaultDialTimeout is the default timeout for network dial operations
+	defaultDialTimeout = 5 * time.Second
+)
+
 // HTTPEndpointOption is a functional option for the HTTPEndpoint struct.
 type HTTPEndpointOption func(*HTTPEndpoint)
 
@@ -43,7 +48,7 @@ type HTTPEndpoint struct {
 }
 
 // Close closes the HTTP endpoint.
-func (e *HTTPEndpoint) Close() error {
+func (*HTTPEndpoint) Close() error {
 	return nil
 }
 
@@ -63,7 +68,7 @@ func (e *HTTPEndpoint) Initialize(watcherID string, responseChannel chan<- Watch
 		// Override name–resolution only
 		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			// TODO: move timeout to configuration
-			d := &net.Dialer{Timeout: 5 * time.Second}
+			d := &net.Dialer{Timeout: defaultDialTimeout}
 			return d.DialContext(ctx, "tcp", tc.AddrPort.String())
 		}
 
@@ -220,13 +225,17 @@ func traceRequest(times *traceTimes, addrChan chan<- net.Addr) *httptrace.Client
 				}
 			}
 		},
-		DNSStart:             func(httptrace.DNSStartInfo) { times.dnsStart.Store(time.Now()) },
-		DNSDone:              func(httptrace.DNSDoneInfo) { times.dnsDone.Store(time.Now()) },
-		ConnectStart:         func(_, _ string) { times.connStart.Store(time.Now()) },
-		ConnectDone:          func(_, _ string, _ error) { times.connDone.Store(time.Now()) },
-		TLSHandshakeStart:    func() { times.tlsStart.Store(time.Now()) },
-		TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) { times.tlsDone.Store(time.Now()) },
-		WroteRequest:         func(httptrace.WroteRequestInfo) { times.wroteDone.Store(time.Now()) },
+		DNSStart:          func(httptrace.DNSStartInfo) { times.dnsStart.Store(time.Now()) },
+		DNSDone:           func(httptrace.DNSDoneInfo) { times.dnsDone.Store(time.Now()) },
+		ConnectStart:      func(_, _ string) { times.connStart.Store(time.Now()) },
+		ConnectDone:       func(_, _ string, _ error) { times.connDone.Store(time.Now()) },
+		TLSHandshakeStart: func() { times.tlsStart.Store(time.Now()) },
+		TLSHandshakeDone: func(_ tls.ConnectionState, _ error) {
+			times.tlsDone.Store(time.Now())
+		},
+		WroteRequest: func(httptrace.WroteRequestInfo) {
+			times.wroteDone.Store(time.Now())
+		},
 		GotFirstResponseByte: func() { times.firstByte.Store(time.Now()) },
 	}
 }

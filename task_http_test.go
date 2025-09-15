@@ -14,23 +14,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHTTPEndpointImplementsWatcherTask(t *testing.T) {
+func TestHTTPEndpointImplementsWatcherTask(_ *testing.T) {
 	var _ WatcherTask = &HTTPEndpoint{}
 }
 
 func TestHTTPEndpointInitialize(t *testing.T) {
-	url, _ := url.Parse("http://example.com")
+	testURL, _ := url.Parse("http://example.com")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
 	endpoint := NewHTTPEndpoint(
-		url,
+		testURL,
 		http.MethodGet,
 		WithHeader(header),
 		WithID("an-id"),
 	)
 
-	assert.Equal(t, url, endpoint.URL)
+	assert.Equal(t, testURL, endpoint.URL)
 	assert.Equal(t, header, endpoint.Header)
 	assert.Equal(t, "an-id", endpoint.ID)
 	assert.Nil(t, endpoint.respChan)
@@ -45,7 +45,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
-	url, err := url.Parse(server.URL)
+	parsedURL, err := url.Parse(server.URL)
 	assert.NoError(t, err, "failed to parse HTTP URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse, 1)
@@ -53,7 +53,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 	header.Add("Content-Type", "application/json")
 
 	endpoint := NewHTTPEndpoint(
-		url,
+		parsedURL,
 		http.MethodPost,
 		WithHeader(header),
 		WithPayload([]byte(`{"key":"value"}`)),
@@ -76,7 +76,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.Equal(t, endpoint.ID, resp.TaskID)
 		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
-		assert.Equal(t, url, resp.URL)
+		assert.Equal(t, parsedURL, resp.URL)
 		assert.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
 		// Check the response metadata
@@ -200,7 +200,8 @@ func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
 	require.NoError(t, ep.Initialize("watcher-1", respChan))
 
 	// Run one request synchronously
-	task := ep.Task().(*httpRequest)
+	task, ok := ep.Task().(*httpRequest)
+	require.True(t, ok, "expected task to be *httpRequest")
 	require.NoError(t, task.Execute())
 
 	// Check the response metadata for RemoteAddr
@@ -223,12 +224,16 @@ func TestTransportControlBypassesDNS(t *testing.T) {
 	u.Host = fakeHost // keep scheme & port placeholders
 
 	// 3. Extract the real IP:port from the listener for TransportControl.
-	realAddr := server.Listener.Addr().(*net.TCPAddr)
+	realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok, "expected listener address to be *net.TCPAddr")
 
 	tc := &TransportControl{
-		AddrPort:      realAddr.AddrPort(), // ip:randomPort
-		TLSEnabled:    false,               // httptest.NewServer(http.HandlerFunc(echoHandler)) is http
-		SkipTLSVerify: true,                // accept self-signed cert from httptest
+		// ip:randomPort
+		AddrPort: realAddr.AddrPort(),
+		// httptest.NewServer(http.HandlerFunc(echoHandler)) is http
+		TLSEnabled: false,
+		// accept self-signed cert from httptest
+		SkipTLSVerify: true,
 	}
 
 	// 4. Build endpoint with TransportControl.
@@ -268,9 +273,10 @@ func TestTransportControlTLS(t *testing.T) {
 	u, _ := url.Parse(server.URL)
 	u.Host = "geo.example.com" // keeps :443 from server.URL
 
-	real := server.Listener.Addr().(*net.TCPAddr)
+	realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok, "expected listener address to be *net.TCPAddr")
 	tc := &TransportControl{
-		AddrPort:      real.AddrPort(), // ip:randomPort
+		AddrPort:      realAddr.AddrPort(), // ip:randomPort
 		TLSEnabled:    true,
 		SkipTLSVerify: true, // accept self-signed cert from httptest
 	}
@@ -287,7 +293,7 @@ func TestTransportControlTLS(t *testing.T) {
 		md := resp.Metadata()
 		assert.Nil(t, md.TimeData.DNSLookup)         // bypassed
 		assert.NotZero(t, *md.TimeData.TLSHandshake) // handshake happened
-		assert.Equal(t, real.AddrPort(),             // connected to real IP
+		assert.Equal(t, realAddr.AddrPort(),         // connected to real IP
 			resp.Metadata().RemoteAddr.(*net.TCPAddr).AddrPort())
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
@@ -328,14 +334,15 @@ func TestConnectionReuse(t *testing.T) {
 	resp2 := <-respCh
 	require.NoError(t, resp2.Err)
 	md2 := resp2.Metadata()
-	assert.Nil(t, md2.TimeData.TCPConnect, "second request should reuse connection (no TCP connect)")
+	assert.Nil(t, md2.TimeData.TCPConnect,
+		"second request should reuse connection (no TCP connect)")
 
 	// Remote address must be the same for both requests.
 	assert.Equal(t, md1.RemoteAddr.String(), md2.RemoteAddr.String())
 }
 
 func TestNewHTTPEndpoint(t *testing.T) {
-	url, err := url.Parse("http://example.com")
+	testURL, err := url.Parse("http://example.com")
 	assert.NoError(t, err, "failed to parse URL")
 
 	cases := []struct {
@@ -388,10 +395,10 @@ func TestNewHTTPEndpoint(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			endpoint := NewHTTPEndpoint(url, http.MethodPost, c.options...)
+			endpoint := NewHTTPEndpoint(testURL, http.MethodPost, c.options...)
 			require.NotNil(t, endpoint)
 
-			assert.Equal(t, url, endpoint.URL)
+			assert.Equal(t, testURL, endpoint.URL)
 			assert.Equal(t, http.MethodPost, endpoint.Method)
 		})
 	}
@@ -408,7 +415,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 			SkipTLSVerify: true,
 		}
 		endpoint := NewHTTPEndpoint(
-			url,
+			testURL,
 			http.MethodPost,
 			WithHeader(header),
 			WithID(id),
@@ -418,7 +425,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 		)
 		require.NotNil(t, endpoint)
 
-		assert.Equal(t, url, endpoint.URL)
+		assert.Equal(t, testURL, endpoint.URL)
 		assert.Equal(t, http.MethodPost, endpoint.Method)
 		assert.Equal(t, id, endpoint.ID)
 		assert.Equal(t, header, endpoint.Header)

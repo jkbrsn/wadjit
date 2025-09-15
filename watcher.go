@@ -120,12 +120,13 @@ func NewWatcher(
 	cadence time.Duration,
 	tasks []WatcherTask,
 ) (*Watcher, error) {
+	newID := id
 	if id == "" {
-		id = xid.New().String()
+		newID = xid.New().String()
 	}
 
 	w := &Watcher{
-		ID:       id,
+		ID:       newID,
 		Cadence:  cadence,
 		Tasks:    tasks,
 		doneChan: make(chan struct{}),

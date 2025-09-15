@@ -35,11 +35,11 @@ type TransportControl struct {
 }
 
 // errorResponse is a helper to create a WatcherResponse with an error.
-func errorResponse(err error, taskID, watcherID string, url *url.URL) WatcherResponse {
+func errorResponse(err error, taskID, watcherID string, reqURL *url.URL) WatcherResponse {
 	return WatcherResponse{
 		TaskID:    taskID,
 		WatcherID: watcherID,
-		URL:       url,
+		URL:       reqURL,
 		Err:       err,
 		Payload:   nil,
 	}

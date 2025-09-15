@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestWSConnnImplementsWatcherTask(t *testing.T) {
+func TestWSConnnImplementsWatcherTask(_ *testing.T) {
 	var _ WatcherTask = &WSEndpoint{}
 }
 
@@ -23,19 +23,19 @@ func TestWSConnInitialize(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
-	url, err := url.Parse(wsURL)
+	parsedURL, err := url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
 	t.Run("PersistentJSONRPC", func(t *testing.T) {
 		conn := &WSEndpoint{
-			URL:    url,
+			URL:    parsedURL,
 			Header: header,
 			Mode:   PersistentJSONRPC,
 		}
 
-		assert.Equal(t, url, conn.URL)
+		assert.Equal(t, parsedURL, conn.URL)
 		assert.Equal(t, header, conn.Header)
 		assert.Nil(t, conn.respChan)
 
@@ -49,12 +49,12 @@ func TestWSConnInitialize(t *testing.T) {
 
 	t.Run("OneHitText", func(t *testing.T) {
 		conn := &WSEndpoint{
-			URL:    url,
+			URL:    parsedURL,
 			Header: header,
 			Mode:   OneHitText,
 		}
 
-		assert.Equal(t, url, conn.URL)
+		assert.Equal(t, parsedURL, conn.URL)
 		assert.Equal(t, header, conn.Header)
 		assert.Nil(t, conn.respChan)
 
@@ -72,15 +72,16 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
-	url, err := url.Parse(wsURL)
+	parsedURL, err := url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse, 2)
 
 	originalID := xid.New().String()
-	payload := []byte(`{"id":"` + originalID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
+	payload := []byte(`{"id":"` + originalID +
+		`","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
 	endpoint := &WSEndpoint{
-		URL:     url,
+		URL:     parsedURL,
 		Header:  header,
 		Mode:    PersistentJSONRPC,
 		Payload: payload,
@@ -112,18 +113,21 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		wg.Wait()
 
 		length := 0
-		endpoint.inflightMsgs.Range(func(key, value any) bool {
+		endpoint.inflightMsgs.Range(func(_, _ any) bool {
 			length++
 			return true
 		})
 		assert.Equal(t, 1, length)
 		var inflightMsg wsInflightMessage
-		endpoint.inflightMsgs.Range(func(key, value any) bool {
-			inflightMsg = value.(wsInflightMessage)
+		endpoint.inflightMsgs.Range(func(_, value any) bool {
+			var ok bool
+			inflightMsg, ok = value.(wsInflightMessage)
+			assert.True(t, ok, "expected value to be wsInflightMessage")
 			return false // Stop after the first item
 		})
 		assert.Equal(t, originalID, inflightMsg.originalID)
-		expectedResult := []byte(`{"id":"` + inflightMsg.inflightID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
+		expectedResult := []byte(`{"id":"` + inflightMsg.inflightID +
+			`","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
 		resp := jsonrpc.Response{
 			JSONRPC: "2.0",
 			ID:      originalID,
@@ -137,7 +141,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			assert.NotNil(t, resp)
 			assert.Equal(t, endpoint.ID, resp.TaskID)
 			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
-			assert.Equal(t, url, resp.URL)
+			assert.Equal(t, parsedURL, resp.URL)
 			require.NoError(t, resp.Err)
 			assert.NotNil(t, resp.Payload)
 			// Check the response metadata
@@ -191,7 +195,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 			assert.NotNil(t, resp.Payload)
 			assert.NoError(t, resp.Err)
-			assert.Equal(t, url, resp.URL)
+			assert.Equal(t, parsedURL, resp.URL)
 
 			assert.NotNil(t, endpoint.conn)
 
@@ -210,12 +214,12 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		defer server.Close()
 
 		wsURL := "ws" + server.URL[4:] + "/ws"
-		url, err := url.Parse(wsURL)
+		parsedURL, err := url.Parse(wsURL)
 		assert.NoError(t, err, "failed to parse URL")
 		responseChan := make(chan WatcherResponse, 2)
 
 		endpoint := &WSEndpoint{
-			URL:     url,
+			URL:     parsedURL,
 			Header:  header,
 			Mode:    PersistentJSONRPC,
 			Payload: payload,
@@ -244,9 +248,9 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 			assert.NotNil(t, resp.Payload)
 			assert.NoError(t, resp.Err)
-			assert.Equal(t, url, resp.URL)
+			assert.Equal(t, parsedURL, resp.URL)
 
-			//assert.NotNil(t, endpoint.conn)
+			// assert.NotNil(t, endpoint.conn)
 
 			metadata := resp.Metadata()
 			assert.NotNil(t, metadata)
@@ -275,9 +279,9 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 			assert.NotNil(t, resp.Payload)
 			assert.NoError(t, resp.Err)
-			assert.Equal(t, url, resp.URL)
+			assert.Equal(t, parsedURL, resp.URL)
 
-			//assert.NotNil(t, endpoint.conn)
+			// assert.NotNil(t, endpoint.conn)
 
 			metadata := resp.Metadata()
 			assert.NotNil(t, metadata)
@@ -295,13 +299,13 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
-	url, err := url.Parse(wsURL)
+	parsedURL, err := url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
 	endpoint := &WSEndpoint{
-		URL:     url,
+		URL:     parsedURL,
 		Header:  header,
 		Mode:    OneHitText,
 		Payload: []byte(`{"key":"value"}`),
@@ -324,7 +328,7 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.Equal(t, endpoint.ID, resp.TaskID)
 		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
-		assert.Equal(t, url, resp.URL)
+		assert.Equal(t, parsedURL, resp.URL)
 		assert.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
 		// Check the response metadata
@@ -335,8 +339,9 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		assert.Equal(t, len(endpoint.Payload), int(metadata.Size))
 		assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
 		assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
-		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))     // Data is fully read when received
-		assert.Greater(t, *metadata.TimeData.RequestTimeTotal, time.Duration(0)) // Data is fully read when received
+		// Data is fully read when received
+		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))
+		assert.Greater(t, *metadata.TimeData.RequestTimeTotal, time.Duration(0))
 		// Check the response data
 		data, err := resp.Data()
 		assert.NoError(t, err)
@@ -357,13 +362,13 @@ func TestWSConnReconnect(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
-	url, err := url.Parse(wsURL)
+	parsedURL, err := url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
 	conn := &WSEndpoint{
-		URL:    url,
+		URL:    parsedURL,
 		Header: header,
 		Mode:   PersistentJSONRPC,
 	}
@@ -391,7 +396,8 @@ func TestWSEndpoint_ResponseRemoteAddr(t *testing.T) {
 	require.NoError(t, ep.Initialize("watcher-1", respChan))
 
 	// Run a one-shot WS task
-	task := ep.Task().(*wsOneHit)
+	task, ok := ep.Task().(*wsOneHit)
+	require.True(t, ok, "expected task to be *wsOneHit")
 	require.NoError(t, task.Execute())
 
 	// Check the response metadata for RemoteAddr
@@ -402,16 +408,16 @@ func TestWSEndpoint_ResponseRemoteAddr(t *testing.T) {
 }
 
 func TestNewWSEndpoint(t *testing.T) {
-	url, err := url.Parse("ws://example.com/ws")
+	parsedURL, err := url.Parse("ws://example.com/ws")
 	assert.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
 	payload := []byte(`{"key":"value"}`)
 
 	t.Run("ModeUnknown mode", func(t *testing.T) {
-		endpoint := NewWSEndpoint(url, header, ModeUnknown, payload, "")
+		endpoint := NewWSEndpoint(parsedURL, header, ModeUnknown, payload, "")
 		require.NotNil(t, endpoint)
 
-		assert.Equal(t, url, endpoint.URL)
+		assert.Equal(t, parsedURL, endpoint.URL)
 		assert.Equal(t, header, endpoint.Header)
 		assert.Equal(t, payload, endpoint.Payload)
 		assert.Equal(t, ModeUnknown, endpoint.Mode)
@@ -422,20 +428,20 @@ func TestNewWSEndpoint(t *testing.T) {
 	})
 
 	t.Run("OneHitText mode", func(t *testing.T) {
-		endpoint := NewWSEndpoint(url, header, OneHitText, payload, "")
+		endpoint := NewWSEndpoint(parsedURL, header, OneHitText, payload, "")
 		require.NotNil(t, endpoint)
 
-		assert.Equal(t, url, endpoint.URL)
+		assert.Equal(t, parsedURL, endpoint.URL)
 		assert.Equal(t, header, endpoint.Header)
 		assert.Equal(t, payload, endpoint.Payload)
 		assert.Equal(t, OneHitText, endpoint.Mode)
 	})
 
 	t.Run("PersistentJSONRPC mode", func(t *testing.T) {
-		endpoint := NewWSEndpoint(url, header, PersistentJSONRPC, payload, "")
+		endpoint := NewWSEndpoint(parsedURL, header, PersistentJSONRPC, payload, "")
 		require.NotNil(t, endpoint)
 
-		assert.Equal(t, url, endpoint.URL)
+		assert.Equal(t, parsedURL, endpoint.URL)
 		assert.Equal(t, header, endpoint.Header)
 		assert.Equal(t, payload, endpoint.Payload)
 		assert.Equal(t, PersistentJSONRPC, endpoint.Mode)
