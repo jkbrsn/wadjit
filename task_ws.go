@@ -339,14 +339,18 @@ func (e *WSEndpoint) handleJSONRPCResponse(p []byte, timestamps requestTimestamp
 
 		// 3. If the ID is known, get the inflight map metadata and delete the ID in the map
 		if inflightMsg, ok := e.inflightMsgs.Load(responseID); ok {
-			inflightMsg := inflightMsg.(wsInflightMessage)
+			inflightMsgTyped, ok := inflightMsg.(wsInflightMessage)
+			if !ok {
+				e.respChan <- errorResponse(errors.New("unexpected inflight message type"), e.ID, e.watcherID, urlClone)
+				return
+			}
 			e.inflightMsgs.Delete(responseID)
 
 			// Get start time from inflight message
-			timestamps.start = inflightMsg.timeSent
+			timestamps.start = inflightMsgTyped.timeSent
 
 			// 4. Restore original ID and marshal the JSON-RPC interface back into a byte slice
-			jsonRPCResp.ID = inflightMsg.originalID
+			jsonRPCResp.ID = inflightMsgTyped.originalID
 			p, err = jsonRPCResp.MarshalJSON()
 			if err != nil {
 				// Send an error response

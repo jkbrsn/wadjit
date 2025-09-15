@@ -147,7 +147,6 @@ var upgrader = websocket.Upgrader{
 // echoHandler is a custom handler that echoes back the payload sent to it, if a payload is present.
 func echoHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-
 	// Handle WebSocket
 	case "/ws":
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -401,7 +400,7 @@ func jsonRPCServerWithServerDisconnect() *httptest.Server {
 
 func syncMapLen(m *sync.Map) int {
 	var length int
-	m.Range(func(key, value any) bool {
+	m.Range(func(_, _ any) bool {
 		length++
 		return true
 	})

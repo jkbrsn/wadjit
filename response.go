@@ -98,6 +98,7 @@ type TaskResponseMetadata struct {
 	TimeData RequestTimes
 }
 
+// String returns a string representation of the metadata.
 func (m TaskResponseMetadata) String() string {
 	var headerParts []string
 	for key, values := range m.Headers {
@@ -107,8 +108,13 @@ func (m TaskResponseMetadata) String() string {
 	}
 	headersStr := "{" + strings.Join(headerParts, ", ") + "}"
 
-	return fmt.Sprintf("TaskResponseMetadata{StatusCode: %d, Headers: %s, Size: %d, Latency: %s, TimeSent: %s, TimeReceived: %s}",
-		m.StatusCode, headersStr, m.Size, m.TimeData.Latency.String(), m.TimeData.SentAt.String(), m.TimeData.ReceivedAt.String())
+	return fmt.Sprintf("TaskResponseMetadata{StatusCode: %d%sHeaders: %s%sSize: %d%sLatency: %s%sTimeSent: %s%sTimeReceived: %s}",
+		m.StatusCode, ", ",
+		headersStr, ", ",
+		m.Size, ", ",
+		m.TimeData.Latency.String(), ", ",
+		m.TimeData.SentAt.String(), ", ",
+		m.TimeData.ReceivedAt.String())
 }
 
 //

@@ -48,8 +48,9 @@ func TestWadjit_AddWatcher(t *testing.T) {
 		assert.Equal(t, 1, syncMapLen(&w.watchers))
 		loaded, _ := w.watchers.Load(id)
 		assert.NotNil(t, loaded)
-		loaded = loaded.(*Watcher)
-		assert.Equal(t, watcher, loaded)
+		loadedTyped, ok := loaded.(*Watcher)
+		assert.True(t, ok, "expected loaded value to be *Watcher")
+		assert.Equal(t, watcher, loadedTyped)
 	})
 
 	t.Run("add duplicate", func(t *testing.T) {
@@ -393,6 +394,7 @@ func TestWadjit_WatcherIDs(t *testing.T) {
 	// Drain responses
 	go func() {
 		for range w.Responses() {
+			// Drain responses to prevent blocking
 		}
 	}()
 

@@ -200,7 +200,8 @@ func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
 	require.NoError(t, ep.Initialize("watcher-1", respChan))
 
 	// Run one request synchronously
-	task := ep.Task().(*httpRequest)
+	task, ok := ep.Task().(*httpRequest)
+	require.True(t, ok, "expected task to be *httpRequest")
 	require.NoError(t, task.Execute())
 
 	// Check the response metadata for RemoteAddr
@@ -223,7 +224,8 @@ func TestTransportControlBypassesDNS(t *testing.T) {
 	u.Host = fakeHost // keep scheme & port placeholders
 
 	// 3. Extract the real IP:port from the listener for TransportControl.
-	realAddr := server.Listener.Addr().(*net.TCPAddr)
+	realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok, "expected listener address to be *net.TCPAddr")
 
 	tc := &TransportControl{
 		AddrPort:      realAddr.AddrPort(), // ip:randomPort
@@ -268,7 +270,8 @@ func TestTransportControlTLS(t *testing.T) {
 	u, _ := url.Parse(server.URL)
 	u.Host = "geo.example.com" // keeps :443 from server.URL
 
-	realAddr := server.Listener.Addr().(*net.TCPAddr)
+	realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok, "expected listener address to be *net.TCPAddr")
 	tc := &TransportControl{
 		AddrPort:      realAddr.AddrPort(), // ip:randomPort
 		TLSEnabled:    true,

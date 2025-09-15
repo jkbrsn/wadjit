@@ -118,8 +118,10 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		})
 		assert.Equal(t, 1, length)
 		var inflightMsg wsInflightMessage
-		endpoint.inflightMsgs.Range(func(key, value any) bool {
-			inflightMsg = value.(wsInflightMessage)
+		endpoint.inflightMsgs.Range(func(_, value any) bool {
+			var ok bool
+			inflightMsg, ok = value.(wsInflightMessage)
+			assert.True(t, ok, "expected value to be wsInflightMessage")
 			return false // Stop after the first item
 		})
 		assert.Equal(t, originalID, inflightMsg.originalID)
@@ -391,7 +393,8 @@ func TestWSEndpoint_ResponseRemoteAddr(t *testing.T) {
 	require.NoError(t, ep.Initialize("watcher-1", respChan))
 
 	// Run a one-shot WS task
-	task := ep.Task().(*wsOneHit)
+	task, ok := ep.Task().(*wsOneHit)
+	require.True(t, ok, "expected task to be *wsOneHit")
 	require.NoError(t, task.Execute())
 
 	// Check the response metadata for RemoteAddr

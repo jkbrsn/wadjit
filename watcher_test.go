@@ -1,7 +1,7 @@
 package wadjit
 
 import (
-	"fmt"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -127,7 +127,7 @@ func TestWatcherExecution_Error(t *testing.T) {
 	tasks = append(tasks, &MockWatcherTask{
 		URL:             httpURL,
 		Header:          header,
-		ErrTaskResponse: fmt.Errorf("mock error"),
+		ErrTaskResponse: errors.New("mock error"),
 		ID:              "an-id",
 	})
 	watcher, err := NewWatcher(id, cadence, tasks)

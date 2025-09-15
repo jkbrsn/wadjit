@@ -16,6 +16,11 @@ import (
 	"github.com/rs/xid"
 )
 
+const (
+	// defaultDialTimeout is the default timeout for network dial operations
+	defaultDialTimeout = 5 * time.Second
+)
+
 // HTTPEndpointOption is a functional option for the HTTPEndpoint struct.
 type HTTPEndpointOption func(*HTTPEndpoint)
 
@@ -63,7 +68,7 @@ func (e *HTTPEndpoint) Initialize(watcherID string, responseChannel chan<- Watch
 		// Override name–resolution only
 		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 			// TODO: move timeout to configuration
-			d := &net.Dialer{Timeout: 5 * time.Second}
+			d := &net.Dialer{Timeout: defaultDialTimeout}
 			return d.DialContext(ctx, "tcp", tc.AddrPort.String())
 		}
 
