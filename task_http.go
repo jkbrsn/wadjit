@@ -43,7 +43,7 @@ type HTTPEndpoint struct {
 }
 
 // Close closes the HTTP endpoint.
-func (_ *HTTPEndpoint) Close() error {
+func (*HTTPEndpoint) Close() error {
 	return nil
 }
 

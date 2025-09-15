@@ -268,9 +268,9 @@ func TestTransportControlTLS(t *testing.T) {
 	u, _ := url.Parse(server.URL)
 	u.Host = "geo.example.com" // keeps :443 from server.URL
 
-	real := server.Listener.Addr().(*net.TCPAddr)
+	realAddr := server.Listener.Addr().(*net.TCPAddr)
 	tc := &TransportControl{
-		AddrPort:      real.AddrPort(), // ip:randomPort
+		AddrPort:      realAddr.AddrPort(), // ip:randomPort
 		TLSEnabled:    true,
 		SkipTLSVerify: true, // accept self-signed cert from httptest
 	}
@@ -287,7 +287,7 @@ func TestTransportControlTLS(t *testing.T) {
 		md := resp.Metadata()
 		assert.Nil(t, md.TimeData.DNSLookup)         // bypassed
 		assert.NotZero(t, *md.TimeData.TLSHandshake) // handshake happened
-		assert.Equal(t, real.AddrPort(),             // connected to real IP
+		assert.Equal(t, realAddr.AddrPort(),         // connected to real IP
 			resp.Metadata().RemoteAddr.(*net.TCPAddr).AddrPort())
 	case <-time.After(time.Second):
 		t.Fatal("timeout")

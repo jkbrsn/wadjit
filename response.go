@@ -267,7 +267,7 @@ func NewWSTaskResponse(remoteAddr net.Addr, data []byte) *WSTaskResponse {
 }
 
 // Close implements the TaskResponse interface but does nothing for WS responses.
-func (_ *WSTaskResponse) Close() error {
+func (*WSTaskResponse) Close() error {
 	return nil
 }
 
