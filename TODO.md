@@ -2,15 +2,14 @@
 
 ## v0.7.2
 
-- Add golangci-lint
-  - Makefile
-  - CI
 - Extend test coverage with test suites and more table driven tests
 - Improve readme; add more (real) implementation examples, mention WS support, show response handling more
 - Fix `_example/main.go` to work with latest dependencies and module
 
 ## v0.x.x
 
+- Support "pause" and "resume" of watchers
+  - Dependent on future `taskman` features
 - Add `Watcher` metrics (per watcher and/or overall)
   - Timing accuracy/skew
   - Error/success rates
