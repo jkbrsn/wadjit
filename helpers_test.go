@@ -48,7 +48,7 @@ type MockTaskResponse struct {
 	data []byte
 }
 
-func (m *MockTaskResponse) Close() error {
+func (_ *MockTaskResponse) Close() error {
 	return nil
 }
 
@@ -56,7 +56,7 @@ func (m *MockTaskResponse) Data() ([]byte, error) {
 	return m.data, nil
 }
 
-func (m *MockTaskResponse) Metadata() TaskResponseMetadata {
+func (_ *MockTaskResponse) Metadata() TaskResponseMetadata {
 	return TaskResponseMetadata{}
 }
 
@@ -76,7 +76,7 @@ type MockWatcherTask struct {
 	respChan  chan<- WatcherResponse
 }
 
-func (m *MockWatcherTask) Close() error {
+func (_ *MockWatcherTask) Close() error {
 	return nil
 }
 
@@ -94,11 +94,11 @@ func (m *MockWatcherTask) Task() taskman.Task {
 	}
 }
 
-func (m *MockWatcherTask) Validate() error {
+func (_ *MockWatcherTask) Validate() error {
 	return nil
 }
 
-func TestMockWatcherTaskImplementsWatcherTask(t *testing.T) {
+func TestMockWatcherTaskImplementsWatcherTask(_ *testing.T) {
 	var _ WatcherTask = &MockWatcherTask{}
 }
 
@@ -131,7 +131,7 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
 	// In tests, you may want to allow any origin, or be more restrictive depending on your scenario.
-	CheckOrigin: func(r *http.Request) bool {
+	CheckOrigin: func(_ *http.Request) bool {
 		return true
 	},
 }

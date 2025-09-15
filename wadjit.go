@@ -152,7 +152,7 @@ func (w *Wadjit) Responses() <-chan WatcherResponse {
 // WatcherIDs returns a slice of strings containing the IDs of all active watchers.
 func (w *Wadjit) WatcherIDs() []string {
 	var ids []string
-	w.watchers.Range(func(key, value any) bool {
+	w.watchers.Range(func(key, _ any) bool {
 		ids = append(ids, key.(string))
 		return true
 	})
@@ -169,7 +169,7 @@ func (w *Wadjit) listenForResponses() {
 				return // Channel closed
 			}
 			if w.ctx.Err() != nil {
-				return // Context cancelled
+				return // Context canceled
 			}
 
 			// Send the response to the external facing channel

@@ -14,23 +14,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHTTPEndpointImplementsWatcherTask(t *testing.T) {
+func TestHTTPEndpointImplementsWatcherTask(_ *testing.T) {
 	var _ WatcherTask = &HTTPEndpoint{}
 }
 
 func TestHTTPEndpointInitialize(t *testing.T) {
-	url, _ := url.Parse("http://example.com")
+	testURL, _ := url.Parse("http://example.com")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
 	endpoint := NewHTTPEndpoint(
-		url,
+		testURL,
 		http.MethodGet,
 		WithHeader(header),
 		WithID("an-id"),
 	)
 
-	assert.Equal(t, url, endpoint.URL)
+	assert.Equal(t, testURL, endpoint.URL)
 	assert.Equal(t, header, endpoint.Header)
 	assert.Equal(t, "an-id", endpoint.ID)
 	assert.Nil(t, endpoint.respChan)
@@ -45,7 +45,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(echoHandler))
 	defer server.Close()
 
-	url, err := url.Parse(server.URL)
+	parsedURL, err := url.Parse(server.URL)
 	assert.NoError(t, err, "failed to parse HTTP URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse, 1)
@@ -53,7 +53,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 	header.Add("Content-Type", "application/json")
 
 	endpoint := NewHTTPEndpoint(
-		url,
+		parsedURL,
 		http.MethodPost,
 		WithHeader(header),
 		WithPayload([]byte(`{"key":"value"}`)),
@@ -76,7 +76,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.Equal(t, endpoint.ID, resp.TaskID)
 		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
-		assert.Equal(t, url, resp.URL)
+		assert.Equal(t, parsedURL, resp.URL)
 		assert.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
 		// Check the response metadata
@@ -335,7 +335,7 @@ func TestConnectionReuse(t *testing.T) {
 }
 
 func TestNewHTTPEndpoint(t *testing.T) {
-	url, err := url.Parse("http://example.com")
+	testURL, err := url.Parse("http://example.com")
 	assert.NoError(t, err, "failed to parse URL")
 
 	cases := []struct {
@@ -388,10 +388,10 @@ func TestNewHTTPEndpoint(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			endpoint := NewHTTPEndpoint(url, http.MethodPost, c.options...)
+			endpoint := NewHTTPEndpoint(testURL, http.MethodPost, c.options...)
 			require.NotNil(t, endpoint)
 
-			assert.Equal(t, url, endpoint.URL)
+			assert.Equal(t, testURL, endpoint.URL)
 			assert.Equal(t, http.MethodPost, endpoint.Method)
 		})
 	}
@@ -408,7 +408,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 			SkipTLSVerify: true,
 		}
 		endpoint := NewHTTPEndpoint(
-			url,
+			testURL,
 			http.MethodPost,
 			WithHeader(header),
 			WithID(id),
@@ -418,7 +418,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 		)
 		require.NotNil(t, endpoint)
 
-		assert.Equal(t, url, endpoint.URL)
+		assert.Equal(t, testURL, endpoint.URL)
 		assert.Equal(t, http.MethodPost, endpoint.Method)
 		assert.Equal(t, id, endpoint.ID)
 		assert.Equal(t, header, endpoint.Header)

@@ -617,7 +617,7 @@ func (ll *wsPersistent) Execute() error {
 
 // NewWSEndpoint creates a new WSEndpoint with the given attributes.
 func NewWSEndpoint(
-	url *url.URL,
+	wsURL *url.URL,
 	header http.Header,
 	mode WSEndpointMode,
 	payload []byte,
@@ -627,7 +627,7 @@ func NewWSEndpoint(
 		Header:  header,
 		Mode:    mode,
 		Payload: payload,
-		URL:     url,
+		URL:     wsURL,
 		ID:      id,
 	}
 }

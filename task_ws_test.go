@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestWSConnnImplementsWatcherTask(t *testing.T) {
+func TestWSConnnImplementsWatcherTask(_ *testing.T) {
 	var _ WatcherTask = &WSEndpoint{}
 }
 
@@ -23,19 +23,19 @@ func TestWSConnInitialize(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
-	url, err := url.Parse(wsURL)
+	parsedURL, err := url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
 	t.Run("PersistentJSONRPC", func(t *testing.T) {
 		conn := &WSEndpoint{
-			URL:    url,
+			URL:    parsedURL,
 			Header: header,
 			Mode:   PersistentJSONRPC,
 		}
 
-		assert.Equal(t, url, conn.URL)
+		assert.Equal(t, parsedURL, conn.URL)
 		assert.Equal(t, header, conn.Header)
 		assert.Nil(t, conn.respChan)
 
@@ -49,12 +49,12 @@ func TestWSConnInitialize(t *testing.T) {
 
 	t.Run("OneHitText", func(t *testing.T) {
 		conn := &WSEndpoint{
-			URL:    url,
+			URL:    parsedURL,
 			Header: header,
 			Mode:   OneHitText,
 		}
 
-		assert.Equal(t, url, conn.URL)
+		assert.Equal(t, parsedURL, conn.URL)
 		assert.Equal(t, header, conn.Header)
 		assert.Nil(t, conn.respChan)
 
@@ -72,7 +72,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
-	url, err := url.Parse(wsURL)
+	parsedURL, err := url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse, 2)
@@ -80,7 +80,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	originalID := xid.New().String()
 	payload := []byte(`{"id":"` + originalID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
 	endpoint := &WSEndpoint{
-		URL:     url,
+		URL:     parsedURL,
 		Header:  header,
 		Mode:    PersistentJSONRPC,
 		Payload: payload,
@@ -112,7 +112,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		wg.Wait()
 
 		length := 0
-		endpoint.inflightMsgs.Range(func(key, value any) bool {
+		endpoint.inflightMsgs.Range(func(_, _ any) bool {
 			length++
 			return true
 		})
@@ -137,7 +137,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			assert.NotNil(t, resp)
 			assert.Equal(t, endpoint.ID, resp.TaskID)
 			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
-			assert.Equal(t, url, resp.URL)
+			assert.Equal(t, parsedURL, resp.URL)
 			require.NoError(t, resp.Err)
 			assert.NotNil(t, resp.Payload)
 			// Check the response metadata
@@ -191,7 +191,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 			assert.NotNil(t, resp.Payload)
 			assert.NoError(t, resp.Err)
-			assert.Equal(t, url, resp.URL)
+			assert.Equal(t, parsedURL, resp.URL)
 
 			assert.NotNil(t, endpoint.conn)
 
@@ -210,12 +210,12 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		defer server.Close()
 
 		wsURL := "ws" + server.URL[4:] + "/ws"
-		url, err := url.Parse(wsURL)
+		parsedURL, err := url.Parse(wsURL)
 		assert.NoError(t, err, "failed to parse URL")
 		responseChan := make(chan WatcherResponse, 2)
 
 		endpoint := &WSEndpoint{
-			URL:     url,
+			URL:     parsedURL,
 			Header:  header,
 			Mode:    PersistentJSONRPC,
 			Payload: payload,
@@ -244,7 +244,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 			assert.NotNil(t, resp.Payload)
 			assert.NoError(t, resp.Err)
-			assert.Equal(t, url, resp.URL)
+			assert.Equal(t, parsedURL, resp.URL)
 
 			//assert.NotNil(t, endpoint.conn)
 
@@ -275,7 +275,7 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			assert.Equal(t, endpoint.watcherID, resp.WatcherID)
 			assert.NotNil(t, resp.Payload)
 			assert.NoError(t, resp.Err)
-			assert.Equal(t, url, resp.URL)
+			assert.Equal(t, parsedURL, resp.URL)
 
 			//assert.NotNil(t, endpoint.conn)
 
@@ -295,13 +295,13 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 	defer server.Close()
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
-	url, err := url.Parse(wsURL)
+	parsedURL, err := url.Parse(wsURL)
 	assert.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
 	responseChan := make(chan WatcherResponse)
 
 	endpoint := &WSEndpoint{
-		URL:     url,
+		URL:     parsedURL,
 		Header:  header,
 		Mode:    OneHitText,
 		Payload: []byte(`{"key":"value"}`),
@@ -324,7 +324,7 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		assert.NotNil(t, resp)
 		assert.Equal(t, endpoint.ID, resp.TaskID)
 		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
-		assert.Equal(t, url, resp.URL)
+		assert.Equal(t, parsedURL, resp.URL)
 		assert.NoError(t, resp.Err)
 		assert.NotNil(t, resp.Payload)
 		// Check the response metadata

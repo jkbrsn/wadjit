@@ -100,10 +100,10 @@ func TestHTTPTaskResponse_Reader_AfterDataReturnsMemory(t *testing.T) {
 	require.NotNil(t, r)
 
 	// Read the response and close the reader
-	bytes, err := io.ReadAll(r)
+	data, err = io.ReadAll(r)
 	require.NoError(t, err)
 	_ = r.Close()
-	require.Equal(t, payload, bytes)
+	require.Equal(t, payload, data)
 }
 
 func TestHTTPTaskResponse_NilBody(t *testing.T) {
@@ -128,7 +128,7 @@ func TestHTTPTaskResponse_NilBody(t *testing.T) {
 }
 
 func TestHTTPTaskResponse_Metadata(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-Custom-Header", "Value123")
 		w.WriteHeader(http.StatusTeapot)
 		_, _ = w.Write([]byte("test"))
