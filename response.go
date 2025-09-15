@@ -139,6 +139,7 @@ type HTTPTaskResponse struct {
 	usedReader atomic.Bool // flags if we returned a Reader
 }
 
+// NewHTTPTaskResponse creates a new HTTPTaskResponse from an http.Response.
 func NewHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *HTTPTaskResponse {
 	return &HTTPTaskResponse{remoteAddr: remoteAddr, resp: r}
 }
@@ -265,7 +266,8 @@ func NewWSTaskResponse(remoteAddr net.Addr, data []byte) *WSTaskResponse {
 	return &WSTaskResponse{remoteAddr: remoteAddr, data: data}
 }
 
-func (w *WSTaskResponse) Close() error {
+// Close implements the TaskResponse interface but does nothing for WS responses.
+func (_ *WSTaskResponse) Close() error {
 	return nil
 }
 

@@ -46,12 +46,13 @@ type WSEndpoint struct {
 type WSEndpointMode int
 
 const (
-	ModeUnknown WSEndpointMode = iota // Defaults to OneHitText
-	// One hit text mode is the basic mode where a new connection is established for each message
+	// ModeUnknown defaults to OneHitText
+	ModeUnknown WSEndpointMode = iota
+	// OneHitText is the basic mode where a new connection is established for each message
 	// and the response is read once. This design is due to the nature of standard text-based
 	// WebSocket messages not having a way to link responses to requests.
 	OneHitText
-	// Persistent JSON RPC mode is a mode where a long-lived connection is established to the
+	// PersistentJSONRPC is a mode where a long-lived connection is established to the
 	// endpoint, and JSON-RPC messages are sent and received. This mode sets a temporary ID for
 	// each message, which is used to link an incoming response to the request. This allows for
 	// reuse of the same connection for multiple messages while keeping message integrity.
@@ -514,7 +515,9 @@ type wsPersistent struct {
 type wsPersistentProtocol int
 
 const (
+	// UnknownProtocol is the default protocol value
 	UnknownProtocol wsPersistentProtocol = iota
+	// JSONRPC is the JSON-RPC protocol
 	JSONRPC
 )
 

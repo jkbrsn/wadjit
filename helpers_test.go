@@ -48,18 +48,22 @@ type MockTaskResponse struct {
 	data []byte
 }
 
-func (_ *MockTaskResponse) Close() error {
+// Close implements the TaskResponse interface but does nothing.
+func (*MockTaskResponse) Close() error {
 	return nil
 }
 
+// Data implements the TaskResponse interface, returning the data stored in the response.
 func (m *MockTaskResponse) Data() ([]byte, error) {
 	return m.data, nil
 }
 
-func (_ *MockTaskResponse) Metadata() TaskResponseMetadata {
+// Metadata implements the TaskResponse interface, returning an empty TaskResponseMetadata.
+func (*MockTaskResponse) Metadata() TaskResponseMetadata {
 	return TaskResponseMetadata{}
 }
 
+// Reader implements the TaskResponse interface, returning an io.ReadCloser for the data.
 func (m *MockTaskResponse) Reader() (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(m.data)), nil
 }
@@ -76,16 +80,19 @@ type MockWatcherTask struct {
 	respChan  chan<- WatcherResponse
 }
 
-func (_ *MockWatcherTask) Close() error {
+// Close implements the WatcherTask interface but does nothing.
+func (*MockWatcherTask) Close() error {
 	return nil
 }
 
+// Initialize implements the WatcherTask interface, setting the watcher ID and response channel.
 func (m *MockWatcherTask) Initialize(watcherID string, responseChan chan<- WatcherResponse) error {
 	m.watcherID = watcherID
 	m.respChan = responseChan
 	return nil
 }
 
+// Task implements the WatcherTask interface, returning a new MockTask.
 func (m *MockWatcherTask) Task() taskman.Task {
 	return &MockTask{
 		mwt:      m,
@@ -94,7 +101,8 @@ func (m *MockWatcherTask) Task() taskman.Task {
 	}
 }
 
-func (_ *MockWatcherTask) Validate() error {
+// Validate implements the WatcherTask interface but does nothing.
+func (*MockWatcherTask) Validate() error {
 	return nil
 }
 
