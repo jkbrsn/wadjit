@@ -228,9 +228,12 @@ func TestTransportControlBypassesDNS(t *testing.T) {
 	require.True(t, ok, "expected listener address to be *net.TCPAddr")
 
 	tc := &TransportControl{
-		AddrPort:      realAddr.AddrPort(), // ip:randomPort
-		TLSEnabled:    false,               // httptest.NewServer(http.HandlerFunc(echoHandler)) is http
-		SkipTLSVerify: true,                // accept self-signed cert from httptest
+		// ip:randomPort
+		AddrPort: realAddr.AddrPort(),
+		// httptest.NewServer(http.HandlerFunc(echoHandler)) is http
+		TLSEnabled: false,
+		// accept self-signed cert from httptest
+		SkipTLSVerify: true,
 	}
 
 	// 4. Build endpoint with TransportControl.
@@ -331,7 +334,8 @@ func TestConnectionReuse(t *testing.T) {
 	resp2 := <-respCh
 	require.NoError(t, resp2.Err)
 	md2 := resp2.Metadata()
-	assert.Nil(t, md2.TimeData.TCPConnect, "second request should reuse connection (no TCP connect)")
+	assert.Nil(t, md2.TimeData.TCPConnect,
+		"second request should reuse connection (no TCP connect)")
 
 	// Remote address must be the same for both requests.
 	assert.Equal(t, md1.RemoteAddr.String(), md2.RemoteAddr.String())

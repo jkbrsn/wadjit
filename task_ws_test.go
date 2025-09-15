@@ -78,7 +78,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	responseChan := make(chan WatcherResponse, 2)
 
 	originalID := xid.New().String()
-	payload := []byte(`{"id":"` + originalID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
+	payload := []byte(`{"id":"` + originalID +
+		`","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
 	endpoint := &WSEndpoint{
 		URL:     parsedURL,
 		Header:  header,
@@ -125,7 +126,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			return false // Stop after the first item
 		})
 		assert.Equal(t, originalID, inflightMsg.originalID)
-		expectedResult := []byte(`{"id":"` + inflightMsg.inflightID + `","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
+		expectedResult := []byte(`{"id":"` + inflightMsg.inflightID +
+			`","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
 		resp := jsonrpc.Response{
 			JSONRPC: "2.0",
 			ID:      originalID,
@@ -337,8 +339,9 @@ func TestWSEndpointExecutewsOneHit(t *testing.T) {
 		assert.Equal(t, len(endpoint.Payload), int(metadata.Size))
 		assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
 		assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
-		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))     // Data is fully read when received
-		assert.Greater(t, *metadata.TimeData.RequestTimeTotal, time.Duration(0)) // Data is fully read when received
+		// Data is fully read when received
+		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))
+		assert.Greater(t, *metadata.TimeData.RequestTimeTotal, time.Duration(0))
 		// Check the response data
 		data, err := resp.Data()
 		assert.NoError(t, err)

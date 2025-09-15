@@ -116,7 +116,9 @@ func TestMockWatcherTaskImplementsWatcherTask(_ *testing.T) {
 
 // getHTTPWatcher creates a new Watcher with the given values and returns it.
 func getHTTPWatcher(id string, cadence time.Duration, payload []byte) (*Watcher, error) {
-	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
+	httpTasks := []HTTPEndpoint{{URL: &url.URL{
+		Scheme: "http", Host: "localhost:8080",
+	}, Payload: payload}}
 	var tasks []WatcherTask
 	for _, task := range httpTasks {
 		tasks = append(tasks, &task)
@@ -138,7 +140,7 @@ func getHTTPWatcher(id string, cadence time.Duration, payload []byte) (*Watcher,
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// In tests, you may want to allow any origin, or be more restrictive depending on your scenario.
+	// In tests, we may want to allow any origin, or be more restrictive depending on the scenario.
 	CheckOrigin: func(_ *http.Request) bool {
 		return true
 	},
@@ -308,9 +310,9 @@ func sendHTTPSuccessResponse(w http.ResponseWriter, id any, payload []byte) {
 }
 
 // jsonRPCServer creates a test server that responds to JSON-RPC requests.
-// The server echoes back the entire message sent to it under the "result" key, and the request ID under
-// the "id" key. If the payload is not a valid JSON-RPC request, the server will respond with a parse
-// error as per the JSON-RPC 2.0 specification.
+// The server echoes back the entire message sent to it under the "result" key, and the request ID
+// under the "id" key. If the payload is not a valid JSON-RPC request, the server will respond with
+// a parse error as per the JSON-RPC 2.0 specification.
 func jsonRPCServer() *httptest.Server {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

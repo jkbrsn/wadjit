@@ -81,8 +81,8 @@ func (t *traceTimes) Snapshot() requestTimestamps {
 // ptr returns a pointer to the given value.
 func ptr[T any](v T) *T { return &v }
 
-// TimeDataFromTimestamps returns the RequestTimes from the given requestTimestamps. Calculates and sets
-// all durations and times except RequestTimeTotal and DataTransfer.
+// TimeDataFromTimestamps returns the RequestTimes from the given requestTimestamps. Calculates and
+// sets all durations and times except RequestTimeTotal and DataTransfer.
 func TimeDataFromTimestamps(t requestTimestamps) RequestTimes {
 	req := RequestTimes{}
 

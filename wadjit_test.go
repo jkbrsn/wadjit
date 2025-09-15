@@ -72,7 +72,11 @@ func TestWadjit_AddWatcher(t *testing.T) {
 		watchers := []*Watcher{}
 		for i := range 10 {
 			id := xid.New().String()
-			watcher, err := getHTTPWatcher(id, 1*time.Second, []byte(fmt.Sprintf("test payload %d", i)))
+			watcher, err := getHTTPWatcher(
+				id,
+				1*time.Second,
+				fmt.Appendf(nil, "test payload %d", i),
+			)
 			assert.NoError(t, err, "error creating watcher")
 			watchers = append(watchers, watcher)
 		}
@@ -113,7 +117,10 @@ func TestWadjit_RemoveWatcher(t *testing.T) {
 	id := xid.New().String()
 	cadence := 1 * time.Second
 	payload := []byte("test payload")
-	httpTasks := []HTTPEndpoint{{URL: &url.URL{Scheme: "http", Host: "localhost:8080"}, Payload: payload}}
+	httpTasks := []HTTPEndpoint{{URL: &url.URL{
+		Scheme: "http",
+		Host:   "localhost:8080",
+	}, Payload: payload}}
 	var tasks []WatcherTask
 	for _, task := range httpTasks {
 		tasks = append(tasks, &task)
@@ -148,7 +155,7 @@ func TestWadjit_Clear(t *testing.T) {
 	watchers := []*Watcher{}
 	for i := range 10 {
 		id := xid.New().String()
-		watcher, err := getHTTPWatcher(id, 1*time.Second, []byte(fmt.Sprintf("test payload %d", i)))
+		watcher, err := getHTTPWatcher(id, 1*time.Second, fmt.Appendf(nil, "test payload %d", i))
 		assert.NoError(t, err, "error creating watcher")
 		watchers = append(watchers, watcher)
 	}
@@ -270,7 +277,11 @@ func TestWadjit_Lifecycle(t *testing.T) {
 
 	// Create first watcher
 	id1 := xid.New().String()
-	tasks := append([]WatcherTask{}, &HTTPEndpoint{URL: testURL, Method: http.MethodPost, Payload: []byte("first")})
+	tasks := append([]WatcherTask{}, &HTTPEndpoint{
+		URL:     testURL,
+		Method:  http.MethodPost,
+		Payload: []byte("first")},
+	)
 	watcher1, err := NewWatcher(
 		id1,
 		5*time.Millisecond,
@@ -279,7 +290,11 @@ func TestWadjit_Lifecycle(t *testing.T) {
 	assert.NoError(t, err, "error creating watcher 1")
 	// Create second watcher
 	id2 := xid.New().String()
-	tasks = append([]WatcherTask{}, &HTTPEndpoint{URL: testURL, Method: http.MethodPost, Payload: []byte("second")})
+	tasks = append([]WatcherTask{}, &HTTPEndpoint{
+		URL:     testURL,
+		Method:  http.MethodPost,
+		Payload: []byte("second")},
+	)
 	watcher2, err := NewWatcher(
 		id2,
 		15*time.Millisecond,
@@ -348,7 +363,11 @@ func TestWadjit_Lifecycle(t *testing.T) {
 	assert.Error(t, err, "expected error adding a closed watcher")
 
 	// Try adding a new Watcher, but with the ID of the removed Watcher
-	tasks = append([]WatcherTask{}, &HTTPEndpoint{URL: testURL, Method: http.MethodPost, Payload: []byte("first")})
+	tasks = append([]WatcherTask{}, &HTTPEndpoint{
+		URL:     testURL,
+		Method:  http.MethodPost,
+		Payload: []byte("first"),
+	})
 	watcher4, err := NewWatcher(
 		id1,
 		5*time.Millisecond,
@@ -409,12 +428,14 @@ func TestWadjit_WatcherIDs(t *testing.T) {
 	for _, id := range idsAfterAdd {
 		idsMap[id] = true
 	}
-	assert.True(t, idsMap["watcher-1"] && idsMap["watcher-2"], "expected IDs 'watcher-1' and 'watcher-2', got %v", idsAfterAdd)
+	assert.True(t, idsMap["watcher-1"] && idsMap["watcher-2"],
+		"expected IDs 'watcher-1' and 'watcher-2', got %v", idsAfterAdd)
 
 	// Remove a watcher and check IDs after removal
 	require.NoError(t, w.RemoveWatcher("watcher-1"))
 
 	idsAfterRemove := w.WatcherIDs()
 	assert.Equal(t, 1, len(idsAfterRemove), "expected 1 watcher ID after removal")
-	assert.Equal(t, "watcher-2", idsAfterRemove[0], "expected remaining ID 'watcher-2', got %v", idsAfterRemove[0])
+	assert.Equal(t, "watcher-2", idsAfterRemove[0],
+		"expected remaining ID 'watcher-2', got %v", idsAfterRemove[0])
 }

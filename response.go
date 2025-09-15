@@ -24,7 +24,7 @@ type WatcherResponse struct {
 	TaskID    string       // ID of the task that generated the response
 	WatcherID string       // ID of the watcher that generated the response
 	URL       *url.URL     // URL of the response's target
-	Err       error        // Error that occurred during the request, if nil the request was successful
+	Err       error        // Error during the request, nil if the request was successful
 	Payload   TaskResponse // Payload stores the response data from the endpoint
 }
 
@@ -99,6 +99,8 @@ type TaskResponseMetadata struct {
 }
 
 // String returns a string representation of the metadata.
+//
+// revive:disable:add-constant exception
 func (m TaskResponseMetadata) String() string {
 	var headerParts []string
 	for key, values := range m.Headers {
@@ -108,7 +110,8 @@ func (m TaskResponseMetadata) String() string {
 	}
 	headersStr := "{" + strings.Join(headerParts, ", ") + "}"
 
-	return fmt.Sprintf("TaskResponseMetadata{StatusCode: %d%sHeaders: %s%sSize: %d%sLatency: %s%sTimeSent: %s%sTimeReceived: %s}",
+	return fmt.Sprintf("TaskResponseMetadata{StatusCode: %d%sHeaders: %s%sSize: "+
+		"%d%sLatency: %s%sTimeSent: %s%sTimeReceived: %s}",
 		m.StatusCode, ", ",
 		headersStr, ", ",
 		m.Size, ", ",
@@ -116,6 +119,8 @@ func (m TaskResponseMetadata) String() string {
 		m.TimeData.SentAt.String(), ", ",
 		m.TimeData.ReceivedAt.String())
 }
+
+// revive:enable:add-constant
 
 //
 // HTTP

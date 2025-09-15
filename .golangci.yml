@@ -25,8 +25,8 @@ linters:
           disabled: false
           exclude: [TEST]
           arguments:
-            - max-lit-count: "3"
-              allow-strs: '"","/",":"'
+            - max-lit-count: "4"
+              allow-strs: '"","/",":""; "'
               allow-ints: "0,1,2,3,4,10,16,64"
               allow-floats: "0.0,0.,1.0,1.,2.0,2."
         - name: line-length-limit

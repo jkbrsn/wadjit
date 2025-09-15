@@ -225,13 +225,17 @@ func traceRequest(times *traceTimes, addrChan chan<- net.Addr) *httptrace.Client
 				}
 			}
 		},
-		DNSStart:             func(httptrace.DNSStartInfo) { times.dnsStart.Store(time.Now()) },
-		DNSDone:              func(httptrace.DNSDoneInfo) { times.dnsDone.Store(time.Now()) },
-		ConnectStart:         func(_, _ string) { times.connStart.Store(time.Now()) },
-		ConnectDone:          func(_, _ string, _ error) { times.connDone.Store(time.Now()) },
-		TLSHandshakeStart:    func() { times.tlsStart.Store(time.Now()) },
-		TLSHandshakeDone:     func(_ tls.ConnectionState, _ error) { times.tlsDone.Store(time.Now()) },
-		WroteRequest:         func(httptrace.WroteRequestInfo) { times.wroteDone.Store(time.Now()) },
+		DNSStart:          func(httptrace.DNSStartInfo) { times.dnsStart.Store(time.Now()) },
+		DNSDone:           func(httptrace.DNSDoneInfo) { times.dnsDone.Store(time.Now()) },
+		ConnectStart:      func(_, _ string) { times.connStart.Store(time.Now()) },
+		ConnectDone:       func(_, _ string, _ error) { times.connDone.Store(time.Now()) },
+		TLSHandshakeStart: func() { times.tlsStart.Store(time.Now()) },
+		TLSHandshakeDone: func(_ tls.ConnectionState, _ error) {
+			times.tlsDone.Store(time.Now())
+		},
+		WroteRequest: func(httptrace.WroteRequestInfo) {
+			times.wroteDone.Store(time.Now())
+		},
 		GotFirstResponseByte: func() { times.firstByte.Store(time.Now()) },
 	}
 }

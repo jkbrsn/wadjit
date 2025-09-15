@@ -115,7 +115,7 @@ func (e *WSEndpoint) Initialize(watcherID string, responseChannel chan<- Watcher
 	case OneHitText:
 		// One hit modes do not require a connection to be established, so do nothing
 	default:
-		// Default to one hit text mode, since its a mode not requiring anything logic outside of its own scope
+		// Default to one hit text mode, since does not require anything outside of its own scope
 		e.mu.Lock()
 		e.Mode = OneHitText
 		e.mu.Unlock()
@@ -276,31 +276,57 @@ func (e *WSEndpoint) handleWebSocketReadError(err error, urlClone *url.URL) {
 			return
 		case websocket.CloseTryAgainLater:
 			// Backpressure: surface an actionable error for backoff
-			e.respChan <- errorResponse(fmt.Errorf("websocket closed: try again later (1013): %w", err), e.ID, e.watcherID, urlClone)
+			e.respChan <- errorResponse(
+				fmt.Errorf("websocket closed: try again later (1013): %w", err),
+				e.ID,
+				e.watcherID,
+				urlClone,
+			)
 			_ = e.closeConn()
 			return
 		case websocket.CloseAbnormalClosure:
 			// Abnormal close: surface error
-			e.respChan <- errorResponse(fmt.Errorf("websocket closed abnormally (1006): %w", err), e.ID, e.watcherID, urlClone)
+			e.respChan <- errorResponse(
+				fmt.Errorf("websocket closed abnormally (1006): %w", err),
+				e.ID,
+				e.watcherID,
+				urlClone,
+			)
 			_ = e.closeConn()
 			return
 		default:
 			// Unexpected close: surface error with details
-			e.respChan <- errorResponse(fmt.Errorf("websocket unexpected close (%d %q): %w", ce.Code, ce.Text, err), e.ID, e.watcherID, urlClone)
+			e.respChan <- errorResponse(
+				fmt.Errorf("websocket unexpected close (%d %q): %w", ce.Code, ce.Text, err),
+				e.ID,
+				e.watcherID,
+				urlClone,
+			)
 			_ = e.closeConn()
 			return
 		}
 	}
 
 	// Local and benign teardown
-	if errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection") {
+	if errors.Is(err, net.ErrClosed) ||
+		strings.Contains(err.Error(), "use of closed network connection") {
 		_ = e.closeConn()
 		return
 	}
 
 	// Unexpected close error not matched above
-	if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseServiceRestart) {
-		e.respChan <- errorResponse(fmt.Errorf("websocket unexpected close: %w", err), e.ID, e.watcherID, urlClone)
+	if websocket.IsUnexpectedCloseError(
+		err,
+		websocket.CloseNormalClosure,
+		websocket.CloseGoingAway,
+		websocket.CloseServiceRestart,
+	) {
+		e.respChan <- errorResponse(
+			fmt.Errorf("websocket unexpected close: %w", err),
+			e.ID,
+			e.watcherID,
+			urlClone,
+		)
 		_ = e.closeConn()
 		return
 	}
@@ -308,23 +334,42 @@ func (e *WSEndpoint) handleWebSocketReadError(err error, urlClone *url.URL) {
 	// Network-level transient conditions
 	var nerr net.Error
 	if errors.As(err, &nerr) && nerr.Timeout() {
-		e.respChan <- errorResponse(fmt.Errorf("websocket read timeout error: %w", err), e.ID, e.watcherID, urlClone)
+		e.respChan <- errorResponse(
+			fmt.Errorf("websocket read timeout error: %w", err),
+			e.ID,
+			e.watcherID,
+			urlClone,
+		)
 		_ = e.closeConn()
 		return
 	}
 
 	// Generic read error: surface for visibility
-	e.respChan <- errorResponse(fmt.Errorf("websocket read error: %w", err), e.ID, e.watcherID, urlClone)
+	e.respChan <- errorResponse(
+		fmt.Errorf("websocket read error: %w", err),
+		e.ID,
+		e.watcherID,
+		urlClone,
+	)
 	_ = e.closeConn()
 }
 
 // handleJSONRPCResponse processes a JSON-RPC response message
-func (e *WSEndpoint) handleJSONRPCResponse(p []byte, timestamps requestTimestamps, urlClone *url.URL) {
+func (e *WSEndpoint) handleJSONRPCResponse(
+	p []byte,
+	timestamps requestTimestamps,
+	urlClone *url.URL,
+) {
 	// 1. Unmarshal p into a JSON-RPC response interface
 	jsonRPCResp, err := jsonrpc.DecodeResponse(p)
 	if err != nil {
 		// Send an error response
-		e.respChan <- errorResponse(fmt.Errorf("failed parsing jsonrpc.Response from bytes: %w", err), e.ID, e.watcherID, urlClone)
+		e.respChan <- errorResponse(
+			fmt.Errorf("failed parsing jsonrpc.Response from bytes: %w", err),
+			e.ID,
+			e.watcherID,
+			urlClone,
+		)
 		return
 	}
 
@@ -333,7 +378,12 @@ func (e *WSEndpoint) handleJSONRPCResponse(p []byte, timestamps requestTimestamp
 		responseID := jsonRPCResp.IDString()
 		if responseID == "" {
 			// Send an error response
-			e.respChan <- errorResponse(fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.Result), e.ID, e.watcherID, urlClone)
+			e.respChan <- errorResponse(
+				fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.Result),
+				e.ID,
+				e.watcherID,
+				urlClone,
+			)
 			return
 		}
 
@@ -341,7 +391,12 @@ func (e *WSEndpoint) handleJSONRPCResponse(p []byte, timestamps requestTimestamp
 		if inflightMsg, ok := e.inflightMsgs.Load(responseID); ok {
 			inflightMsgTyped, ok := inflightMsg.(wsInflightMessage)
 			if !ok {
-				e.respChan <- errorResponse(errors.New("unexpected inflight message type"), e.ID, e.watcherID, urlClone)
+				e.respChan <- errorResponse(
+					errors.New("unexpected inflight message type"),
+					e.ID,
+					e.watcherID,
+					urlClone,
+				)
 				return
 			}
 			e.inflightMsgs.Delete(responseID)
@@ -351,14 +406,19 @@ func (e *WSEndpoint) handleJSONRPCResponse(p []byte, timestamps requestTimestamp
 
 			// 4. Restore original ID and marshal the JSON-RPC interface back into a byte slice
 			jsonRPCResp.ID = inflightMsgTyped.originalID
-			p, err = jsonRPCResp.MarshalJSON()
+			data, err := jsonRPCResp.MarshalJSON()
 			if err != nil {
 				// Send an error response
-				e.respChan <- errorResponse(fmt.Errorf("failed re-marshalling JSON-RPC response: %w", err), e.ID, e.watcherID, urlClone)
+				e.respChan <- errorResponse(
+					fmt.Errorf("failed re-marshaling JSON-RPC response: %w", err),
+					e.ID,
+					e.watcherID,
+					urlClone,
+				)
 				return
 			}
-			// 5. set metadata to the taskresponse: original id, duration between time sent and time received
-			taskResponse := NewWSTaskResponse(e.remoteAddr, p)
+			// 5. set metadata to the taskresponse: original id, time measurements
+			taskResponse := NewWSTaskResponse(e.remoteAddr, data)
 			taskResponse.timestamps = timestamps
 
 			// Send the message to the read channel
@@ -371,10 +431,20 @@ func (e *WSEndpoint) handleJSONRPCResponse(p []byte, timestamps requestTimestamp
 			}
 			e.respChan <- response
 		} else {
-			e.respChan <- errorResponse(errors.New("unknown response ID: "+jsonRPCResp.IDString()), e.ID, e.watcherID, urlClone)
+			e.respChan <- errorResponse(
+				errors.New("unknown response ID: "+jsonRPCResp.IDString()),
+				e.ID,
+				e.watcherID,
+				urlClone,
+			)
 		}
 	} else {
-		e.respChan <- errorResponse(errors.New("empty JSON-RPC response"), e.ID, e.watcherID, urlClone)
+		e.respChan <- errorResponse(
+			errors.New("empty JSON-RPC response"),
+			e.ID,
+			e.watcherID,
+			urlClone,
+		)
 	}
 }
 
@@ -436,7 +506,9 @@ type wsOneHit struct {
 }
 
 // establishConnection establishes a new WebSocket connection and returns it with timestamps
-func (oh *wsOneHit) establishConnection(urlClone *url.URL) (*websocket.Conn, requestTimestamps, error) {
+func (oh *wsOneHit) establishConnection(
+	urlClone *url.URL,
+) (*websocket.Conn, requestTimestamps, error) {
 	timestamps := requestTimestamps{}
 	timestamps.start = time.Now()
 	timestamps.dnsStart = time.Now()
@@ -456,7 +528,10 @@ func (oh *wsOneHit) establishConnection(urlClone *url.URL) (*websocket.Conn, req
 }
 
 // sendAndReceiveMessage sends a message and receives the response
-func (oh *wsOneHit) sendAndReceiveMessage(conn *websocket.Conn, timestamps requestTimestamps, urlClone *url.URL) (requestTimestamps, []byte, error) {
+func (oh *wsOneHit) sendAndReceiveMessage(
+	conn *websocket.Conn,
+	timestamps requestTimestamps,
+) (requestTimestamps, []byte, error) {
 	// Write message to connection
 	if err := conn.WriteMessage(websocket.TextMessage, oh.wsEndpoint.Payload); err != nil {
 		return timestamps, nil, fmt.Errorf("failed to write message: %w", err)
@@ -475,7 +550,7 @@ func (oh *wsOneHit) sendAndReceiveMessage(conn *websocket.Conn, timestamps reque
 }
 
 // closeConnectionGracefully closes the WebSocket connection gracefully
-func (oh *wsOneHit) closeConnectionGracefully(conn *websocket.Conn) error {
+func (*wsOneHit) closeConnectionGracefully(conn *websocket.Conn) error {
 	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
 	err := conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(3*time.Second))
 	if err != nil {
@@ -507,16 +582,18 @@ func (oh *wsOneHit) Execute() error {
 		// Establish connection
 		conn, timestamps, err := oh.establishConnection(&urlClone)
 		if err != nil {
-			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, &urlClone)
+			oh.wsEndpoint.respChan <- errorResponse(
+				err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, &urlClone)
 			return err
 		}
 		defer func() { _ = conn.Close() }()
 		remoteAddr := conn.RemoteAddr()
 
 		// Send message and receive response
-		timestamps, message, err := oh.sendAndReceiveMessage(conn, timestamps, &urlClone)
+		timestamps, message, err := oh.sendAndReceiveMessage(conn, timestamps)
 		if err != nil {
-			oh.wsEndpoint.respChan <- errorResponse(err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, &urlClone)
+			oh.wsEndpoint.respChan <- errorResponse(
+				err, oh.wsEndpoint.ID, oh.wsEndpoint.watcherID, &urlClone)
 			return err
 		}
 
@@ -566,7 +643,8 @@ func (ll *wsPersistent) prepareJSONRPCMessage() ([]byte, wsInflightMessage, erro
 	if len(ll.wsEndpoint.Payload) > 0 {
 		err := jsonRPCReq.UnmarshalJSON(ll.wsEndpoint.Payload)
 		if err != nil {
-			return nil, wsInflightMessage{}, fmt.Errorf("failed to unmarshal JSON-RPC message: %w", err)
+			return nil, wsInflightMessage{},
+				fmt.Errorf("failed to unmarshal JSON-RPC message: %w", err)
 		}
 	}
 
@@ -595,20 +673,22 @@ func (ll *wsPersistent) prepareJSONRPCMessage() ([]byte, wsInflightMessage, erro
 }
 
 // handleWriteError handles WebSocket write errors
-func (ll *wsPersistent) handleWriteError(err error, urlClone *url.URL) error {
-	if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-		err = fmt.Errorf("websocket write failed (connection closed): %w", err)
-	} else if strings.Contains(err.Error(), "websocket: close sent") {
-		err = fmt.Errorf("websocket write failed (connection closed): %w", err)
+func (ll *wsPersistent) handleWriteError(wsErr error, urlClone *url.URL) error {
+	var err error
+	if websocket.IsCloseError(wsErr, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		err = fmt.Errorf("websocket write failed (connection closed): %w", wsErr)
+	} else if strings.Contains(wsErr.Error(), "websocket: close sent") {
+		err = fmt.Errorf("websocket write failed (connection closed): %w", wsErr)
 	} else {
-		err = fmt.Errorf("unexpected websocket write error: %w", err)
+		err = fmt.Errorf("unexpected websocket write error: %w", wsErr)
 	}
 
 	// Close the connection
 	_ = ll.wsEndpoint.closeConn()
 
 	// Send an error response
-	ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, urlClone)
+	ll.wsEndpoint.respChan <- errorResponse(
+		err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, urlClone)
 	return err
 }
 
@@ -640,7 +720,8 @@ func (ll *wsPersistent) Execute() error {
 		// Prepare JSON-RPC message
 		payload, inflightMsg, err := ll.prepareJSONRPCMessage()
 		if err != nil {
-			ll.wsEndpoint.respChan <- errorResponse(err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, &urlClone)
+			ll.wsEndpoint.respChan <- errorResponse(
+				err, ll.wsEndpoint.ID, ll.wsEndpoint.watcherID, &urlClone)
 			return err
 		}
 
