@@ -2,9 +2,6 @@
 
 ## v0.7.2
 
-- CI
-  - Add GitHub workflow for PR tests
-  - Add GitHub workflow for release
 - Add golangci-lint
   - Makefile
   - CI
