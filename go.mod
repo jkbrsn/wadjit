@@ -1,4 +1,4 @@
-module github.com/jkbrsn/go-wadjit
+module github.com/jkbrsn/wadjit
 
 go 1.25.1
 

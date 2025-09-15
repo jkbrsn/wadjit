@@ -5,7 +5,6 @@
 - CI
   - Add GitHub workflow for PR tests
   - Add GitHub workflow for release
-- Change module name and repo name to only `wadjit` instead of `go-wadjit`
 - Extend test coverage with test suites and more table driven tests
 - Improve readme; add more (real) implementation examples, mention WS support, show response handling more
 
