@@ -410,10 +410,10 @@ func TestWadjit_WatcherIDs(t *testing.T) {
 
 	require.NoError(t, w.AddWatchers(w1, w2))
 
-	// Drain responses
+	// Drain responses to prevent blocking
 	go func() {
-		for range w.Responses() {
-			// Drain responses to prevent blocking
+		for resp := range w.Responses() {
+			_ = resp // Drain response to prevent channel blocking
 		}
 	}()
 
