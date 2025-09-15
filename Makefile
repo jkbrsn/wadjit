@@ -1,4 +1,4 @@
-.PHONY: explain test vet lint default
+.PHONY: explain test lint default
 
 .DEFAULT_GOAL := explain
 
@@ -12,7 +12,6 @@ explain:
 	@echo ""
 	@echo "Targets:"
 	@echo "  test             - Run tests (unit tests using cache)."
-	@echo "  vet              - Run go vet."
 	@echo "  lint             - Run golangci-lint."
 	@echo "  explain          - Display this help message."
 
@@ -28,13 +27,9 @@ ifdef V
 endif
 
 test:
-	@echo "==> Running tests..."
+	@echo "==> Running tests"
 	@go test -count=$(N) $(TEST_FLAGS) ./...
 
-vet:
-	@echo "==> Running go vet..."
-	@go vet ./...
-
 lint:
-	@echo "==> Running linter (golangci-lint)..."
+	@echo "==> Running linter (golangci-lint)"
 	@golangci-lint run
