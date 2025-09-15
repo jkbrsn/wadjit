@@ -1,4 +1,4 @@
-.PHONY: explain test lint default
+.PHONY: explain test fmt lint default
 
 .DEFAULT_GOAL := explain
 
@@ -12,7 +12,8 @@ explain:
 	@echo ""
 	@echo "Targets:"
 	@echo "  test             - Run tests (unit tests using cache)."
-	@echo "  lint             - Run golangci-lint."
+	@echo "  fmt              - Run formatter (gofmt)."
+	@echo "  lint             - Run linter (golangci-lint)."
 	@echo "  explain          - Display this help message."
 
 # Number of times to run burst tests, default 1
@@ -29,6 +30,10 @@ endif
 test:
 	@echo "==> Running tests"
 	@go test -count=$(N) $(TEST_FLAGS) ./...
+
+fmt:
+	@echo "==> Running formatter (gofmt)"
+	@gofmt -w .
 
 lint:
 	@echo "==> Running linter (golangci-lint)"
