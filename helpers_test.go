@@ -207,119 +207,132 @@ func echoHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleWebSocketRequest handles WebSocket JSON-RPC requests.
+func handleWebSocketRequest(conn *websocket.Conn) {
+	for {
+		mt, message, err := conn.ReadMessage()
+		if err != nil {
+			return
+		}
+		handleJSONRPCMessage(conn, mt, message)
+	}
+}
+
+// handleJSONRPCMessage processes a single JSON-RPC message.
+func handleJSONRPCMessage(conn *websocket.Conn, mt int, message []byte) {
+	var req jsonrpc.Request
+	err := req.UnmarshalJSON(message)
+	if err != nil {
+		sendParseError(conn, mt)
+		return
+	}
+	sendSuccessResponse(conn, mt, req.ID, message)
+}
+
+// sendParseError sends a JSON-RPC parse error response.
+func sendParseError(conn *websocket.Conn, mt int) {
+	resp := jsonrpc.Response{
+		JSONRPC: "2.0",
+		Error: &jsonrpc.Error{
+			Code:    -32700,
+			Message: "Parse error",
+		},
+	}
+	respBytes, _ := resp.MarshalJSON()
+	_ = conn.WriteMessage(mt, respBytes)
+}
+
+// sendSuccessResponse sends a successful JSON-RPC response.
+func sendSuccessResponse(conn *websocket.Conn, mt int, id any, result []byte) {
+	resp := jsonrpc.Response{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error:   nil,
+		Result:  result,
+	}
+	respBytes, _ := resp.MarshalJSON()
+	_ = conn.WriteMessage(mt, respBytes)
+}
+
+// handleHTTPRequest handles HTTP JSON-RPC requests.
+func handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
+	payload, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("no payload found"))
+		return
+	}
+
+	if r.Header.Get("Content-Type") != "application/json" {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("no Content-Type: application/json header found"))
+		return
+	}
+
+	var req jsonrpc.Request
+	err = req.UnmarshalJSON(payload)
+	if err != nil {
+		sendHTTPParseError(w)
+		return
+	}
+
+	sendHTTPSuccessResponse(w, req.ID, payload)
+}
+
+// sendHTTPParseError sends an HTTP JSON-RPC parse error.
+func sendHTTPParseError(w http.ResponseWriter) {
+	resp := jsonrpc.Response{
+		JSONRPC: "2.0",
+		Error: &jsonrpc.Error{
+			Code:    -32700,
+			Message: "Parse error",
+		},
+	}
+	respBytes, _ := resp.MarshalJSON()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(respBytes)
+}
+
+// sendHTTPSuccessResponse sends an HTTP JSON-RPC success response.
+func sendHTTPSuccessResponse(w http.ResponseWriter, id any, payload []byte) {
+	resp := jsonrpc.Response{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error:   nil,
+		Result:  payload,
+	}
+	respBytes, _ := resp.MarshalJSON()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(respBytes)
+}
+
 // jsonRPCServer creates a test server that responds to JSON-RPC requests.
 // The server echoes back the entire message sent to it under the "result" key, and the request ID under
 // the "id" key. If the payload is not a valid JSON-RPC request, the server will respond with a parse
 // error as per the JSON-RPC 2.0 specification.
 func jsonRPCServer() *httptest.Server {
-	// Create a test server with a custom handler
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/ws":
-			// Handle WebSocket upgrade
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
 				http.Error(w, "Could not open websocket connection", http.StatusBadRequest)
 				return
 			}
 			defer func() { _ = conn.Close() }()
-
-			// Echo messages back to the client as the result of a JSON-RPC request
-			for {
-				mt, message, err := conn.ReadMessage()
-				if err != nil {
-					return
-				}
-				// Parse the message as a JSON-RPC request
-				var req jsonrpc.Request
-				err = req.UnmarshalJSON(message)
-				if err != nil {
-					// Respond with a parse error
-					resp := jsonrpc.Response{
-						JSONRPC: "2.0",
-						Error: &jsonrpc.Error{
-							Code:    -32700,
-							Message: "Parse error",
-						},
-					}
-					respBytes, _ := resp.MarshalJSON()
-					err = conn.WriteMessage(mt, respBytes)
-					if err != nil {
-						return
-					}
-					continue
-				}
-				// Echo the request back to the client
-				resp := jsonrpc.Response{
-					JSONRPC: "2.0",
-					ID:      req.ID,
-					Error:   nil,
-					Result:  message,
-				}
-				respBytes, _ := resp.MarshalJSON()
-				err = conn.WriteMessage(mt, respBytes)
-				if err != nil {
-					return
-				}
-			}
-
+			handleWebSocketRequest(conn)
 		default:
-			// Read payload from the client
-			payload, err := io.ReadAll(r.Body)
-			if err != nil {
-				// Write harcoded message to the client
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte("no payload found"))
-				return
-			}
-
-			// JSON header not found
-			if r.Header.Get("Content-Type") != "application/json" {
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte("no Content-Type: application/json header found"))
-				return
-			}
-
-			// Parse the payload as a JSON-RPC request
-			var req jsonrpc.Request
-			err = req.UnmarshalJSON(payload)
-			if err != nil {
-				// Respond with a parse error
-				resp := jsonrpc.Response{
-					JSONRPC: "2.0",
-					Error: &jsonrpc.Error{
-						Code:    -32700,
-						Message: "Parse error",
-					},
-				}
-				respBytes, _ := resp.MarshalJSON()
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write(respBytes)
-				return
-			}
-
-			// Build the response
-			resp := jsonrpc.Response{
-				JSONRPC: "2.0",
-				ID:      req.ID,
-				Error:   nil,
-				Result:  payload,
-			}
-			respBytes, _ := resp.MarshalJSON()
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			// Echo payload back to the client as the result of a JSON-RPC request
-			_, _ = w.Write(respBytes)
+			handleHTTPRequest(w, r)
 		}
 	}))
-
 	return server
 }
 
 // jsonRPCServerWithServerDisconnect creates a test server that responds to a single
 // JSON-RPC request and then closes the WebSocket connection from the server side.
+// TODO: make this share helpers with the jsonRPCServer function
 func jsonRPCServerWithServerDisconnect() *httptest.Server {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
