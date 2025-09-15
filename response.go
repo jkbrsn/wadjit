@@ -3,12 +3,13 @@ package wadjit
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -98,26 +99,16 @@ type TaskResponseMetadata struct {
 }
 
 func (m TaskResponseMetadata) String() string {
-	buffer := bytes.Buffer{}
-	buffer.WriteString("{")
-	first := true
+	var headerParts []string
 	for key, values := range m.Headers {
 		for _, value := range values {
-			if !first {
-				buffer.WriteString(", ")
-			}
-			buffer.WriteString(key + ": " + value)
-			first = false
+			headerParts = append(headerParts, key+": "+value)
 		}
 	}
-	buffer.WriteString("}")
-	return "TaskResponseMetadata{" +
-		"StatusCode: " + strconv.Itoa(m.StatusCode) + ", " +
-		"Headers: " + buffer.String() + ", " +
-		"Size: " + strconv.Itoa(int(m.Size)) + ", " +
-		"Latency: " + m.TimeData.Latency.String() + ", " +
-		"TimeSent: " + m.TimeData.SentAt.String() + ", " +
-		"TimeReceived: " + m.TimeData.ReceivedAt.String() + "}"
+	headersStr := "{" + strings.Join(headerParts, ", ") + "}"
+
+	return fmt.Sprintf("TaskResponseMetadata{StatusCode: %d, Headers: %s, Size: %d, Latency: %s, TimeSent: %s, TimeReceived: %s}",
+		m.StatusCode, headersStr, m.Size, m.TimeData.Latency.String(), m.TimeData.SentAt.String(), m.TimeData.ReceivedAt.String())
 }
 
 //
@@ -205,7 +196,7 @@ func (h *HTTPTaskResponse) Reader() (io.ReadCloser, error) {
 
 	// If Reader() was already called, disallow retrieving the reader again.
 	if h.usedReader.Load() {
-		return nil, errors.New("Reader() already called")
+		return nil, errors.New("reader already called")
 	}
 
 	// Otherwise, mark reader as used and return the original body.

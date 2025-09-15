@@ -185,7 +185,7 @@ func (e *WSEndpoint) connect() error {
 
 	// Only connect if the connection is not already established
 	if e.conn != nil {
-		return fmt.Errorf("connection already established")
+		return errors.New("connection already established")
 	}
 
 	// Establish the connection
