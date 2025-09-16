@@ -3,7 +3,6 @@
 ## v0.7.2
 
 - Extend test coverage with test suites and more table driven tests
-- Improve readme; add more (real) implementation examples, mention WS support, show response handling more
 
 ## v0.x.x
 

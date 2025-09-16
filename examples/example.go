@@ -1,3 +1,4 @@
+// Package main provides an example of how to use wadjit.
 package main
 
 import (
@@ -9,6 +10,8 @@ import (
 	"github.com/jkbrsn/wadjit"
 )
 
+// revive:disable:unhandled-error allow for prints
+
 func main() {
 	fmt.Println("Starting wadjit example:")
 	fmt.Println("- Create and run watchers on HTTP and WS endpoints")
@@ -16,7 +19,7 @@ func main() {
 
 	// Create the wadjit - the manager of all watchers
 	manager := wadjit.New()
-	defer manager.Close()
+	defer manager.Close() // nolint:errcheck
 
 	// Create a watcher that sends HTTP requests to httpbin.org
 	httpBinWatcher, err := wadjit.NewWatcher(
@@ -74,12 +77,12 @@ func main() {
 			fmt.Printf("Error reading data: %v\n", err)
 			continue
 		}
-		fmt.Printf("Data: %s\n", data)
-		fmt.Printf("Metadata:\n")
-		fmt.Printf("  Headers:     %v\n", resp.Metadata().Headers)
-		fmt.Printf("  Sent at:     %v\n", resp.Metadata().TimeData.SentAt)
-		fmt.Printf("  Received at: %v\n", resp.Metadata().TimeData.ReceivedAt)
-		fmt.Printf("  Latency:     %v\n", resp.Metadata().TimeData.Latency)
+		fmt.Println("Data:", string(data))
+		fmt.Println("Metadata:")
+		fmt.Println("  Headers:    ", resp.Metadata().Headers)
+		fmt.Println("  Sent at:    ", resp.Metadata().TimeData.SentAt)
+		fmt.Println("  Received at:", resp.Metadata().TimeData.ReceivedAt)
+		fmt.Println("  Latency:    ", resp.Metadata().TimeData.Latency)
 		fmt.Println()
 		fmt.Println()
 	}
