@@ -1,6 +1,4 @@
-# wadjit [![Go Documentation](http://img.shields.io/badge/go-documentation-blue.svg?style=flat-square)][godocs]
-
-[godocs]: http://godoc.org/github.com/jkbrsn/go-wadjit
+# wadjit [![Go Reference](https://pkg.go.dev/badge/github.com/jkbrsn/wadjit.svg)](https://pkg.go.dev/github.com/jkbrsn/wadjit)
 
 Wadjit (pronounced /ˈwɒdʒɪt/, or "watch it") is a program for endpoint monitoring and analysis.
 
@@ -11,39 +9,91 @@ Wadjit (pronounced /ˈwɒdʒɪt/, or "watch it") is a program for endpoint monit
 ## Installation
 
 ```bash
-go get -u github.com/jkbrsn/go-wadjit@latest
+go get github.com/jkbrsn/wadjit@latest
 ```
 
-## Usage
+## Features
 
-In pseduocode, these steps are what's needed to make use of the Wadjit watcher manager:
+- HTTP + WS: Monitor HTTP and WebSocket endpoints, with or without TLS.
+- WS modes: One-shot messages and persistent connections for JSON-RPC.
+- Batched watchers: Schedule many tasks per watcher at a fixed cadence.
+- Buffered responses: Non-blocking channel with watcher IDs and metadata.
+- Metrics: Access scheduler metrics via `Metrics()`.
+
+## Quick Start
+
+Minimal example with one HTTP and one WS task and basic response handling:
 
 ```go
-// Initialize manager
-manager := wadjit.New()
-defer manager.Close()
+package main
 
-// Add watcher with name, cadence, and tasks
-myWatcher := wadjit.NewWatcher(
-    "My watcher",
-    5*time.Second,
-    someTasks(),
+import (
+    "fmt"
+    "net/http"
+    "net/url"
+    "time"
+
+    "github.com/jkbrsn/wadjit"
 )
-manager.AddWatcher(myWatcher)
 
-// Start consuming responses, unless we do this the jobs will block when the channel is full
-respChannel := manager.Responses()
-for {
-    resp, ok := <-respChannel
-    // Handle resp data
+func main() {
+    // Initialize manager
+    manager := wadjit.New()
+    defer manager.Close()
+
+    // Build tasks
+    httpTask := &wadjit.HTTPEndpoint{
+        Header:  make(http.Header),
+        Method:  http.MethodGet,
+        URL:     &url.URL{Scheme: "https", Host: "httpbin.org", Path: "/get"},
+    }
+    wsTask := &wadjit.WSEndpoint{
+        Mode:    wadjit.OneHitText,
+        Payload: []byte("hello"),
+        URL:     &url.URL{Scheme: "wss", Host: "ws.postman-echo.com", Path: "/raw"},
+    }
+
+    // Add a watcher with a 5s cadence
+    watcher, err := wadjit.NewWatcher("example", 5*time.Second, wadjit.WatcherTasksToSlice(httpTask, wsTask))
+    if err == nil {
+        _ = manager.AddWatcher(watcher)
+    }
+
+    // Consume responses (must be read to avoid backpressure)
+    for resp := range manager.Responses() {
+        if resp.Err != nil {
+            fmt.Printf("%s error: %v\n", resp.WatcherID, resp.Err)
+            continue
+        }
+        body, err := resp.Data()
+        if err != nil { continue }
+        fmt.Printf("%s %s -> %s\n", resp.WatcherID, resp.URL, string(body))
+        // Access timing and header metadata
+        md := resp.Metadata()
+        fmt.Printf("latency: %v headers: %v\n", md.TimeData.Latency, md.Headers)
+    }
 }
 ```
 
-For a detailed example of how to use this package, have a look at [_example/main.go](./_example/main.go) and try running it with:
+## Examples
+
+See a fuller runnable example in [`examples/example.go`](examples/example.go) and run it with:
 
 ```bash
-go run _example/main.go
+go run ./examples
 ```
+
+## Tests and CI
+
+Run tests with:
+
+```bash
+make test
+```
+
+Other targets in the `Makefile` include `fmt` for formatting the code and `lint` for running the linter.
+
+These targets are also used in the GitHub CI pipeline, see [`.github/workflows/ci.yml`](.github/workflows/ci.yml) for details.
 
 ## API Reference
 
@@ -53,8 +103,10 @@ go run _example/main.go
 - `AddWatcher(watcher *Watcher) error`: Adds a watcher to the manager
 - `AddWatchers(watchers ...*Watcher) error`: Adds multiple watchers at once
 - `RemoveWatcher(id string) error`: Removes a watcher by ID
+- `Clear() error`: Stops and removes all watchers, keeps manager running
+- `WatcherIDs() []string`: Lists IDs of active watchers
 - `Responses() <-chan WatcherResponse`: Returns a channel for receiving responses
-- `Metrics() TaskManagerMetrics`: Returns metrics about the task manager
+- `Metrics() taskman.TaskManagerMetrics`: Returns task scheduler metrics
 - `Close() error`: Stops all watchers and cleans up resources
 
 ### Watcher
@@ -65,7 +117,7 @@ go run _example/main.go
 ### Task Types
 
 - `HTTPEndpoint`: For making HTTP/HTTPS requests
-- `WSEndpoint`: For WebSocket connections (both one-time and persistent)
+- `WSEndpoint`: For WebSocket connections (one-shot and persistent JSON-RPC)
 
 ## Contributing
 
