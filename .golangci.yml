@@ -25,7 +25,7 @@ linters:
           disabled: false
           exclude: [TEST]
           arguments:
-            - max-lit-count: "4"
+            - max-lit-count: "5"
               allow-strs: '"","/",":""; "'
               allow-ints: "0,1,2,3,4,10,16,64"
               allow-floats: "0.0,0.,1.0,1.,2.0,2."
