@@ -23,127 +23,131 @@ func TestHTTPTaskResponse_Close(t *testing.T) {
 	require.NoError(t, taskResp.Close())
 }
 
-func TestHTTPTaskResponse_Data_Success(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(echoHandler))
-	defer server.Close()
+func TestHTTPTaskResponse_Scenarios(t *testing.T) {
+	testCases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "data and reader reuse",
+			run: func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(echoHandler))
+				defer server.Close()
 
-	payload := []byte("hello world")
-	resp, err := http.Post(server.URL, "text/plain", bytes.NewReader(payload))
-	require.NoError(t, err)
-	require.NotNil(t, resp)
+				payload := []byte("hello world")
+				resp, err := http.Post(server.URL, "text/plain", bytes.NewReader(payload))
+				require.NoError(t, err)
+				require.NotNil(t, resp)
 
-	taskResp := NewHTTPTaskResponse(server.Listener.Addr(), resp)
-	defer func() { _ = taskResp.Close() }()
+				taskResp := NewHTTPTaskResponse(server.Listener.Addr(), resp)
+				defer func() {
+					require.NoError(t, taskResp.Close())
+				}()
 
-	// Call Data() to read the entire body
-	data, err := taskResp.Data()
-	require.NoError(t, err)
-	require.Equal(t, payload, data)
+				data, err := taskResp.Data()
+				require.NoError(t, err)
+				require.Equal(t, payload, data)
 
-	// Calling Data() again should return the cached data
-	data2, err2 := taskResp.Data()
-	require.NoError(t, err2)
-	require.Equal(t, data, data2)
+				dataCached, err := taskResp.Data()
+				require.NoError(t, err)
+				require.Equal(t, payload, dataCached)
 
-	// Metadata should be correct
-	md := taskResp.Metadata()
-	require.Equal(t, http.StatusOK, md.StatusCode)
-	require.Equal(t, "text/plain", md.Headers.Get("Content-Type"))
-	require.Equal(t, int64(len(payload)), md.Size)
-	require.Equal(t, server.Listener.Addr(), md.RemoteAddr)
-}
+				r, err := taskResp.Reader()
+				require.NoError(t, err)
+				require.NotNil(t, r)
+				readData, err := io.ReadAll(r)
+				require.NoError(t, err)
+				require.NoError(t, r.Close())
+				require.Equal(t, payload, readData)
 
-func TestHTTPTaskResponse_Data_AfterReaderFails(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(echoHandler))
-	defer server.Close()
+				md := taskResp.Metadata()
+				require.Equal(t, http.StatusOK, md.StatusCode)
+				require.Equal(t, "text/plain", md.Headers.Get("Content-Type"))
+				require.Equal(t, int64(len(payload)), md.Size)
+				require.Equal(t, server.Listener.Addr(), md.RemoteAddr)
+			},
+		},
+		{
+			name: "reader before data errors",
+			run: func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(echoHandler))
+				defer server.Close()
 
-	resp, err := http.Get(server.URL)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
+				resp, err := http.Get(server.URL)
+				require.NoError(t, err)
+				require.NotNil(t, resp)
 
-	taskResp := NewHTTPTaskResponse(nil, resp)
-	defer func() { _ = taskResp.Close() }()
+				taskResp := NewHTTPTaskResponse(nil, resp)
+				defer func() {
+					require.NoError(t, taskResp.Close())
+				}()
 
-	// First, get the Reader
-	r, err := taskResp.Reader()
-	require.NoError(t, err)
-	require.NotNil(t, r)
-	defer func() { _ = r.Close() }()
+				r, err := taskResp.Reader()
+				require.NoError(t, err)
+				require.NotNil(t, r)
+				defer func() {
+					require.NoError(t, r.Close())
+				}()
 
-	// Then attempt Data()
-	data, err := taskResp.Data()
-	require.Nil(t, data)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "cannot call Data() after Reader() was already used")
-}
+				data, err := taskResp.Data()
+				require.Nil(t, data)
+				require.Error(t, err)
+				require.Contains(t,
+					err.Error(), "cannot call Data() after Reader() was already used")
+			},
+		},
+		{
+			name: "nil body",
+			run: func(t *testing.T) {
+				resp := &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       nil,
+				}
 
-func TestHTTPTaskResponse_Reader_AfterDataReturnsMemory(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(echoHandler))
-	defer server.Close()
+				taskResp := NewHTTPTaskResponse(nil, resp)
+				defer func() {
+					require.NoError(t, taskResp.Close())
+				}()
 
-	payload := []byte("response data")
-	resp, err := http.Post(server.URL, "text/plain", bytes.NewReader(payload))
-	require.NoError(t, err)
-	require.NotNil(t, resp)
+				data, err := taskResp.Data()
+				require.Nil(t, data)
+				require.Error(t, err)
 
-	taskResp := NewHTTPTaskResponse(nil, resp)
-	defer func() { _ = taskResp.Close() }()
+				r, err := taskResp.Reader()
+				require.Nil(t, r)
+				require.Error(t, err)
+			},
+		},
+		{
+			name: "metadata headers",
+			run: func(t *testing.T) {
+				server := httptest.NewServer(
+					http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+						w.Header().Set("X-Custom-Header", "Value123")
+						w.WriteHeader(http.StatusTeapot)
+						_, _ = w.Write([]byte("test"))
+					}))
+				defer server.Close()
 
-	// Call Data() first
-	data, err := taskResp.Data()
-	require.NoError(t, err)
-	require.Equal(t, payload, data)
+				resp, err := http.Get(server.URL)
+				require.NoError(t, err)
+				require.NotNil(t, resp)
 
-	// Then call Reader(). Expect an in-memory stream
-	r, err := taskResp.Reader()
-	require.NoError(t, err)
-	require.NotNil(t, r)
+				taskResp := NewHTTPTaskResponse(nil, resp)
+				defer func() {
+					require.NoError(t, taskResp.Close())
+				}()
 
-	// Read the response and close the reader
-	data, err = io.ReadAll(r)
-	require.NoError(t, err)
-	_ = r.Close()
-	require.Equal(t, payload, data)
-}
-
-func TestHTTPTaskResponse_NilBody(t *testing.T) {
-	// Construct a fake response with no body
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		Body:       nil,
+				md := taskResp.Metadata()
+				require.Equal(t, http.StatusTeapot, md.StatusCode)
+				require.Equal(t, "Value123", md.Headers.Get("X-Custom-Header"))
+			},
+		},
 	}
 
-	taskResp := NewHTTPTaskResponse(nil, resp)
-	defer func() { _ = taskResp.Close() }()
-
-	// Data() should return error
-	data, err := taskResp.Data()
-	require.Nil(t, data)
-	require.Error(t, err)
-
-	// Reader() should also fail
-	r, err2 := taskResp.Reader()
-	require.Nil(t, r)
-	require.Error(t, err2)
-}
-
-func TestHTTPTaskResponse_Metadata(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-Custom-Header", "Value123")
-		w.WriteHeader(http.StatusTeapot)
-		_, _ = w.Write([]byte("test"))
-	}))
-	defer server.Close()
-
-	resp, err := http.Get(server.URL)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	taskResp := NewHTTPTaskResponse(nil, resp)
-	defer func() { _ = taskResp.Close() }()
-
-	md := taskResp.Metadata()
-	require.Equal(t, http.StatusTeapot, md.StatusCode)
-	require.Equal(t, "Value123", md.Headers.Get("X-Custom-Header"))
+	for _, tc := range testCases {
+		t.Run(tc.name, tc.run)
+	}
 }
 
 func TestWSTaskResponse_DataAndReader(t *testing.T) {

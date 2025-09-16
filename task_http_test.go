@@ -42,72 +42,167 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 }
 
 func TestHTTPEndpointExecute(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(echoHandler))
-	defer server.Close()
+	testCases := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{
+			name: "basic post",
+			run: func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(echoHandler))
+				defer server.Close()
 
-	parsedURL, err := url.Parse(server.URL)
-	assert.NoError(t, err, "failed to parse HTTP URL")
-	header := make(http.Header)
-	responseChan := make(chan WatcherResponse, 1)
+				parsedURL, err := url.Parse(server.URL)
+				assert.NoError(t, err, "failed to parse HTTP URL")
 
-	header.Add("Content-Type", "application/json")
+				header := make(http.Header)
+				header.Add("Content-Type", "application/json")
+				responseChan := make(chan WatcherResponse, 1)
 
-	endpoint := NewHTTPEndpoint(
-		parsedURL,
-		http.MethodPost,
-		WithHeader(header),
-		WithPayload([]byte(`{"key":"value"}`)),
-		WithID("an-id"),
-	)
+				endpoint := NewHTTPEndpoint(
+					parsedURL,
+					http.MethodPost,
+					WithHeader(header),
+					WithPayload([]byte(`{"key":"value"}`)),
+					WithID("an-id"),
+				)
 
-	err = endpoint.Initialize("some-watcher-id", responseChan)
-	assert.NoError(t, err)
+				err = endpoint.Initialize("some-watcher-id", responseChan)
+				assert.NoError(t, err)
 
-	task := endpoint.Task()
-	assert.NotNil(t, task)
+				task := endpoint.Task()
+				assert.NotNil(t, task)
 
-	go func() {
-		err := task.Execute()
-		assert.NoError(t, err)
-	}()
+				go func() {
+					err := task.Execute()
+					assert.NoError(t, err)
+				}()
 
-	select {
-	case resp := <-responseChan:
-		assert.NotNil(t, resp)
-		assert.Equal(t, endpoint.ID, resp.TaskID)
-		assert.Equal(t, endpoint.watcherID, resp.WatcherID)
-		assert.Equal(t, parsedURL, resp.URL)
-		assert.NoError(t, resp.Err)
-		assert.NotNil(t, resp.Payload)
-		// Check the response metadata
-		metadata := resp.Metadata()
-		assert.NotNil(t, metadata)
-		assert.Equal(t, "application/json", metadata.Headers.Get("Content-Type"))
-		// Timings
-		assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
-		assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
-		assert.Nil(t, metadata.TimeData.DNSLookup) // No DNS lookup in this test
-		assert.Greater(t, *metadata.TimeData.TCPConnect, time.Duration(0))
-		assert.Zero(t, metadata.TimeData.TLSHandshake) // No TLS in this test
-		assert.Greater(t, *metadata.TimeData.ServerProcessing, time.Duration(0))
-		assert.Nil(t, metadata.TimeData.DataTransfer)      // Data not yet read
-		assert.Zero(t, metadata.TimeData.RequestTimeTotal) // Data not yet read
-		// Check the response data
-		data, err := resp.Data()
-		assert.NoError(t, err)
-		assert.JSONEq(t, `{"key":"value"}`, string(data))
-		// Mutating the response URL must not affect the endpoint’s URL.
-		origPath := endpoint.URL.Path // remember original
-		resp.URL.Path = "/tampered"   // mutate the copy
-		assert.NotEqual(t, resp.URL, endpoint.URL, "pointers should differ")
-		assert.Equal(t, origPath, endpoint.URL.Path, "endpoint URL must stay unchanged")
-		assert.Equal(t, "/tampered", resp.URL.Path)
-		// Reload metadata to get updated timings
-		metadata = resp.Metadata()
-		assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))
-		assert.Greater(t, *metadata.TimeData.RequestTimeTotal, time.Duration(0))
-	case <-time.After(1 * time.Second):
-		t.Fatal("timeout waiting for response")
+				select {
+				case resp := <-responseChan:
+					assert.NotNil(t, resp)
+					assert.Equal(t, endpoint.ID, resp.TaskID)
+					assert.Equal(t, endpoint.watcherID, resp.WatcherID)
+					assert.Equal(t, parsedURL, resp.URL)
+					assert.NoError(t, resp.Err)
+					assert.NotNil(t, resp.Payload)
+					metadata := resp.Metadata()
+					assert.NotNil(t, metadata)
+					assert.Equal(t, "application/json", metadata.Headers.Get("Content-Type"))
+					assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
+					assert.Greater(t, metadata.TimeData.ReceivedAt, metadata.TimeData.SentAt)
+					assert.Nil(t, metadata.TimeData.DNSLookup)
+					assert.Greater(t, *metadata.TimeData.TCPConnect, time.Duration(0))
+					assert.Zero(t, metadata.TimeData.TLSHandshake)
+					assert.Greater(t, *metadata.TimeData.ServerProcessing, time.Duration(0))
+					assert.Nil(t, metadata.TimeData.DataTransfer)
+					assert.Zero(t, metadata.TimeData.RequestTimeTotal)
+
+					data, err := resp.Data()
+					assert.NoError(t, err)
+					assert.JSONEq(t, `{"key":"value"}`, string(data))
+
+					origPath := endpoint.URL.Path
+					resp.URL.Path = "/tampered"
+					assert.NotEqual(t, resp.URL, endpoint.URL, "pointers should differ")
+					assert.Equal(t, origPath, endpoint.URL.Path, "endpoint URL must stay unchanged")
+					assert.Equal(t, "/tampered", resp.URL.Path)
+
+					metadata = resp.Metadata()
+					assert.Greater(t, *metadata.TimeData.DataTransfer, time.Duration(0))
+					assert.Greater(t, *metadata.TimeData.RequestTimeTotal, time.Duration(0))
+				case <-time.After(1 * time.Second):
+					t.Fatal("timeout waiting for response")
+				}
+			},
+		},
+		{
+			name: "transport control bypasses DNS",
+			run: func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(echoHandler))
+				defer server.Close()
+
+				u, err := url.Parse(server.URL)
+				require.NoError(t, err)
+				fakeHost := "nonexistent.example.com"
+				u.Host = fakeHost
+
+				realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+				require.True(t, ok, "expected listener address to be *net.TCPAddr")
+
+				tc := &TransportControl{
+					AddrPort:      realAddr.AddrPort(),
+					TLSEnabled:    false,
+					SkipTLSVerify: true,
+				}
+
+				ep := NewHTTPEndpoint(u, http.MethodGet, WithID("id"), WithTransportControl(tc))
+				responseChan := make(chan WatcherResponse, 1)
+				require.NoError(t, ep.Initialize("wid", responseChan))
+
+				go func() { _ = ep.Task().Execute() }()
+
+				select {
+				case resp := <-responseChan:
+					assert.NoError(t, resp.Err)
+					md := resp.Metadata()
+					assert.Nil(t, md.TimeData.DNSLookup)
+					serverAddr := net.TCPAddr{
+						IP:   net.ParseIP(realAddr.IP.String()),
+						Port: realAddr.Port,
+					}
+					assert.Equal(t, serverAddr.String(), resp.Metadata().RemoteAddr.String())
+					assert.Equal(t,
+						realAddr.AddrPort(), resp.Metadata().RemoteAddr.(*net.TCPAddr).AddrPort())
+					assert.Equal(t, fakeHost, resp.URL.Hostname())
+				case <-time.After(time.Second):
+					t.Fatal("timeout waiting for response")
+				}
+			},
+		},
+		{
+			name: "transport control tls",
+			run: func(t *testing.T) {
+				server := httptest.NewTLSServer(http.HandlerFunc(echoHandler))
+				defer server.Close()
+
+				u, err := url.Parse(server.URL)
+				require.NoError(t, err)
+				u.Host = "geo.example.com"
+
+				realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+				require.True(t, ok, "expected listener address to be *net.TCPAddr")
+
+				tc := &TransportControl{
+					AddrPort:      realAddr.AddrPort(),
+					TLSEnabled:    true,
+					SkipTLSVerify: true,
+				}
+
+				ep := NewHTTPEndpoint(u,
+					http.MethodGet, WithID("tls-test"), WithTransportControl(tc))
+				respCh := make(chan WatcherResponse, 1)
+				require.NoError(t, ep.Initialize("wid", respCh))
+
+				go func() { _ = ep.Task().Execute() }()
+
+				select {
+				case resp := <-respCh:
+					assert.NoError(t, resp.Err)
+					md := resp.Metadata()
+					assert.Nil(t, md.TimeData.DNSLookup)
+					assert.NotZero(t, *md.TimeData.TLSHandshake)
+					assert.Equal(t,
+						realAddr.AddrPort(), resp.Metadata().RemoteAddr.(*net.TCPAddr).AddrPort())
+				case <-time.After(time.Second):
+					t.Fatal("timeout")
+				}
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, tc.run)
 	}
 }
 
@@ -210,94 +305,6 @@ func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
 	assert.NotNil(t, metadata)
 	assert.Greater(t, metadata.TimeData.Latency, time.Duration(0))
 	require.Equal(t, server.Listener.Addr(), metadata.RemoteAddr)
-}
-
-func TestTransportControlBypassesDNS(t *testing.T) {
-	// 1. Spin up a test server.
-	server := httptest.NewServer(http.HandlerFunc(echoHandler))
-	defer server.Close()
-
-	// 2. Parse the URL but change the Host to something that cannot resolve.
-	u, err := url.Parse(server.URL)
-	require.NoError(t, err)
-	fakeHost := "nonexistent.example.com"
-	u.Host = fakeHost // keep scheme & port placeholders
-
-	// 3. Extract the real IP:port from the listener for TransportControl.
-	realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
-	require.True(t, ok, "expected listener address to be *net.TCPAddr")
-
-	tc := &TransportControl{
-		// ip:randomPort
-		AddrPort: realAddr.AddrPort(),
-		// httptest.NewServer(http.HandlerFunc(echoHandler)) is http
-		TLSEnabled: false,
-		// accept self-signed cert from httptest
-		SkipTLSVerify: true,
-	}
-
-	// 4. Build endpoint with TransportControl.
-	ep := NewHTTPEndpoint(u, http.MethodGet, WithID("id"), WithTransportControl(tc))
-	responseChan := make(chan WatcherResponse, 1)
-	require.NoError(t, ep.Initialize("wid", responseChan))
-
-	// 5. Execute.
-	go func() { _ = ep.Task().Execute() }()
-
-	// 6. Assert.
-	select {
-	case resp := <-responseChan:
-		assert.NoError(t, resp.Err)
-		md := resp.Metadata()
-		// DNSLookup should be nil because DialContext skipped it.
-		assert.Nil(t, md.TimeData.DNSLookup)
-		// Remote addr should match the server’s IP.
-		serverAddr := net.TCPAddr{
-			IP:   net.ParseIP(realAddr.IP.String()),
-			Port: realAddr.Port,
-		}
-		assert.Equal(t, serverAddr.String(), resp.Metadata().RemoteAddr.String())
-		assert.Equal(t, realAddr.AddrPort(), resp.Metadata().RemoteAddr.(*net.TCPAddr).AddrPort())
-		assert.Equal(t, fakeHost, resp.URL.Hostname())
-	case <-time.After(time.Second):
-		t.Fatal("timeout waiting for response")
-	}
-}
-
-func TestTransportControlTLS(t *testing.T) {
-	// HTTPS test server
-	server := httptest.NewTLSServer(http.HandlerFunc(echoHandler))
-	defer server.Close()
-
-	// Fake hostname that will not resolve
-	u, _ := url.Parse(server.URL)
-	u.Host = "geo.example.com" // keeps :443 from server.URL
-
-	realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
-	require.True(t, ok, "expected listener address to be *net.TCPAddr")
-	tc := &TransportControl{
-		AddrPort:      realAddr.AddrPort(), // ip:randomPort
-		TLSEnabled:    true,
-		SkipTLSVerify: true, // accept self-signed cert from httptest
-	}
-
-	ep := NewHTTPEndpoint(u, http.MethodGet, WithID("tls-test"), WithTransportControl(tc))
-	respCh := make(chan WatcherResponse, 1)
-	require.NoError(t, ep.Initialize("wid", respCh))
-
-	go func() { _ = ep.Task().Execute() }()
-
-	select {
-	case resp := <-respCh:
-		assert.NoError(t, resp.Err)
-		md := resp.Metadata()
-		assert.Nil(t, md.TimeData.DNSLookup)         // bypassed
-		assert.NotZero(t, *md.TimeData.TLSHandshake) // handshake happened
-		assert.Equal(t, realAddr.AddrPort(),         // connected to real IP
-			resp.Metadata().RemoteAddr.(*net.TCPAddr).AddrPort())
-	case <-time.After(time.Second):
-		t.Fatal("timeout")
-	}
 }
 
 func TestConnectionReuse(t *testing.T) {

@@ -24,47 +24,42 @@ func TestWSConnInitialize(t *testing.T) {
 
 	wsURL := "ws" + server.URL[4:] + "/ws"
 	parsedURL, err := url.Parse(wsURL)
-	assert.NoError(t, err, "failed to parse URL")
+	require.NoError(t, err, "failed to parse URL")
 	header := make(http.Header)
-	responseChan := make(chan WatcherResponse)
 
-	t.Run("PersistentJSONRPC", func(t *testing.T) {
-		conn := &WSEndpoint{
-			URL:    parsedURL,
-			Header: header,
-			Mode:   PersistentJSONRPC,
-		}
+	cases := []struct {
+		name       string
+		mode       WSEndpointMode
+		expectConn bool
+	}{
+		{name: "PersistentJSONRPC", mode: PersistentJSONRPC, expectConn: true},
+		{name: "OneHitText", mode: OneHitText, expectConn: false},
+	}
 
-		assert.Equal(t, parsedURL, conn.URL)
-		assert.Equal(t, header, conn.Header)
-		assert.Nil(t, conn.respChan)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conn := &WSEndpoint{
+				URL:    parsedURL,
+				Header: header,
+				Mode:   tc.mode,
+			}
 
-		err = conn.Initialize("some-watcher-id", responseChan)
-		assert.NoError(t, err)
-		assert.NotNil(t, conn.respChan)
-		assert.NotNil(t, conn.conn)
-		assert.NotNil(t, conn.ctx)
-		assert.NotNil(t, conn.cancel)
-	})
+			require.Equal(t, parsedURL, conn.URL)
+			require.Equal(t, header, conn.Header)
+			require.Nil(t, conn.respChan)
 
-	t.Run("OneHitText", func(t *testing.T) {
-		conn := &WSEndpoint{
-			URL:    parsedURL,
-			Header: header,
-			Mode:   OneHitText,
-		}
-
-		assert.Equal(t, parsedURL, conn.URL)
-		assert.Equal(t, header, conn.Header)
-		assert.Nil(t, conn.respChan)
-
-		err = conn.Initialize("some-watcher-id", responseChan)
-		assert.NoError(t, err)
-		assert.NotNil(t, conn.respChan)
-		assert.Nil(t, conn.conn) // no connection should be established since wsOneHit is used
-		assert.NotNil(t, conn.ctx)
-		assert.NotNil(t, conn.cancel)
-	})
+			responseChan := make(chan WatcherResponse)
+			require.NoError(t, conn.Initialize("some-watcher-id", responseChan))
+			require.NotNil(t, conn.respChan)
+			require.NotNil(t, conn.ctx)
+			require.NotNil(t, conn.cancel)
+			if tc.expectConn {
+				require.NotNil(t, conn.conn)
+			} else {
+				require.Nil(t, conn.conn)
+			}
+		})
+	}
 }
 
 func TestWSEndpointExecutewsPersistent(t *testing.T) {
