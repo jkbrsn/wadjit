@@ -447,3 +447,110 @@ func TestNewWSEndpoint(t *testing.T) {
 		assert.Equal(t, PersistentJSONRPC, endpoint.Mode)
 	})
 }
+
+type wsEndpointTestSuite struct {
+	newWS func() *WSEndpoint
+}
+
+func (s *wsEndpointTestSuite) TestWSEndpointExecute(t *testing.T) {
+	ep := s.newWS()
+	header := make(http.Header)
+	responseChan := make(chan WatcherResponse, 1)
+
+	var server *httptest.Server
+	var payload []byte
+	var parsedURL *url.URL
+	var err error
+
+	if ep.Mode == PersistentJSONRPC {
+		server = jsonRPCServer()
+		originalID := xid.New().String()
+		payload = []byte(`{"id":"` + originalID +
+			`","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
+	} else {
+		server = httptest.NewServer(http.HandlerFunc(echoHandler))
+		payload = []byte(`{"key":"value"}`)
+	}
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[4:] + "/ws"
+	parsedURL, err = url.Parse(wsURL)
+	assert.NoError(t, err, "failed to parse URL")
+
+	ep.URL = parsedURL
+	ep.Header = header
+	ep.Payload = payload
+	ep.ID = "an-id"
+
+	err = ep.Initialize("some-watcher-id", responseChan)
+	assert.NoError(t, err)
+
+	task := ep.Task()
+	assert.NotNil(t, task)
+
+	go func() {
+		err := task.Execute()
+		assert.NoError(t, err)
+	}()
+
+	select {
+	case resp := <-responseChan:
+		assert.NotNil(t, resp)
+		assert.Equal(t, ep.ID, resp.TaskID)
+		assert.Equal(t, ep.watcherID, resp.WatcherID)
+		assert.Equal(t, parsedURL, resp.URL)
+		assert.NoError(t, resp.Err)
+		assert.NotNil(t, resp.Payload)
+	case <-time.After(1 * time.Second):
+		t.Fatal("timeout waiting for response")
+	}
+}
+
+func (s *wsEndpointTestSuite) TestWSEndpointReconnect(t *testing.T) {
+	ep := s.newWS()
+	if ep.Mode != PersistentJSONRPC {
+		t.Skip("Reconnect only applies to PersistentJSONRPC mode")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
+	defer server.Close()
+
+	wsURL := "ws" + server.URL[4:] + "/ws"
+	parsedURL, err := url.Parse(wsURL)
+	assert.NoError(t, err, "failed to parse URL")
+	header := make(http.Header)
+
+	ep.URL = parsedURL
+	ep.Header = header
+	ep.Mode = PersistentJSONRPC
+
+	err = ep.Initialize("some-watcher-id", make(chan WatcherResponse))
+	assert.NoError(t, err)
+
+	err = ep.connect()
+	assert.Error(t, err)
+
+	err = ep.reconnect()
+	assert.NoError(t, err)
+}
+
+func runWSEndpointTestSuite(t *testing.T, s *wsEndpointTestSuite) {
+	t.Run("Execute", s.TestWSEndpointExecute)
+	t.Run("Reconnect", s.TestWSEndpointReconnect)
+}
+
+func TestWSEndpointSuite(t *testing.T) {
+	t.Run("PersistentJSONRPC", func(t *testing.T) {
+		newWS := func() *WSEndpoint {
+			return &WSEndpoint{Mode: PersistentJSONRPC}
+		}
+		runWSEndpointTestSuite(t, &wsEndpointTestSuite{newWS: newWS})
+	})
+
+	t.Run("OneHitText", func(t *testing.T) {
+		newWS := func() *WSEndpoint {
+			return &WSEndpoint{Mode: OneHitText}
+		}
+		runWSEndpointTestSuite(t, &wsEndpointTestSuite{newWS: newWS})
+	})
+}
