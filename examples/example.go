@@ -6,10 +6,14 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/jkbrsn/go-wadjit"
+	"github.com/jkbrsn/wadjit"
 )
 
 func main() {
+	fmt.Println("Starting wadjit example:")
+	fmt.Println("- Create and run watchers on HTTP and WS endpoints")
+	fmt.Println()
+
 	// Create the wadjit - the manager of all watchers
 	manager := wadjit.New()
 	defer manager.Close()
@@ -73,9 +77,9 @@ func main() {
 		fmt.Printf("Data: %s\n", data)
 		fmt.Printf("Metadata:\n")
 		fmt.Printf("  Headers:     %v\n", resp.Metadata().Headers)
-		fmt.Printf("  Sent at:     %v\n", resp.Metadata().TimeSent)
-		fmt.Printf("  Received at: %v\n", resp.Metadata().TimeReceived)
-		fmt.Printf("  Latency:     %v\n", resp.Metadata().Latency)
+		fmt.Printf("  Sent at:     %v\n", resp.Metadata().TimeData.SentAt)
+		fmt.Printf("  Received at: %v\n", resp.Metadata().TimeData.ReceivedAt)
+		fmt.Printf("  Latency:     %v\n", resp.Metadata().TimeData.Latency)
 		fmt.Println()
 		fmt.Println()
 	}
