@@ -3,6 +3,9 @@
 ## v0.7.2
 
 - Extend test coverage with test suites and more table driven tests
+- Expose functional options:
+  - `taskman` mode
+  - More...? Or later?
 
 ## v0.x.x
 
@@ -16,7 +19,7 @@
   - Channel pressure
 - (maybe) Support for concurrent add/remove of watchers
   - Might be better to just not support it and let it be clear the management of watchers is left to the user
-- Expose opt-in configuration via functional options, some option ideas:
+- Expose further options:
   - Buffer sizes
   - Metric sink
   - Deadline times
