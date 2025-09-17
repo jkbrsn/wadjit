@@ -1,6 +1,7 @@
 package wadjit
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/jkbrsn/go-jsonrpc"
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
@@ -17,6 +19,12 @@ import (
 func TestWSConnnImplementsWatcherTask(_ *testing.T) {
 	var _ WatcherTask = &WSEndpoint{}
 }
+
+type timeoutNetError struct{}
+
+func (timeoutNetError) Error() string   { return "timeout" }
+func (timeoutNetError) Timeout() bool   { return true }
+func (timeoutNetError) Temporary() bool { return true }
 
 func TestWSConnInitialize(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(echoHandler))
@@ -60,6 +68,65 @@ func TestWSConnInitialize(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWSEndpoint_HandleWebSocketErrors(t *testing.T) {
+	baseURL, err := url.Parse("ws://example.com/socket")
+	require.NoError(t, err)
+
+	t.Run("CloseTryAgainLater", func(t *testing.T) {
+		respChan := make(chan WatcherResponse, 1)
+		endpoint := &WSEndpoint{ID: "task", watcherID: "watcher", respChan: respChan}
+
+		clone := *baseURL
+		endpoint.handleWebSocketCloseError(&websocket.CloseError{Code: websocket.CloseTryAgainLater, Text: "backpressure"}, &clone)
+
+		select {
+		case resp := <-respChan:
+			assert.Equal(t, "task", resp.TaskID)
+			assert.Equal(t, "watcher", resp.WatcherID)
+			require.Error(t, resp.Err)
+			assert.Contains(t, resp.Err.Error(), "try again later (1013)")
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected response from close error handler")
+		}
+	})
+
+	t.Run("CloseAbnormalClosure", func(t *testing.T) {
+		respChan := make(chan WatcherResponse, 1)
+		endpoint := &WSEndpoint{ID: "task", watcherID: "watcher", respChan: respChan, ctx: context.Background()}
+
+		clone := *baseURL
+		endpoint.handleWebSocketReadError(&websocket.CloseError{Code: websocket.CloseAbnormalClosure, Text: "abrupt"}, &clone)
+
+		select {
+		case resp := <-respChan:
+			assert.Equal(t, "task", resp.TaskID)
+			assert.Equal(t, "watcher", resp.WatcherID)
+			require.Error(t, resp.Err)
+			assert.Contains(t, resp.Err.Error(), "closed abnormally (1006)")
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected response from read error handler")
+		}
+	})
+
+	t.Run("NetworkTimeout", func(t *testing.T) {
+		respChan := make(chan WatcherResponse, 1)
+		endpoint := &WSEndpoint{ID: "task", watcherID: "watcher", respChan: respChan}
+
+		clone := *baseURL
+		endpoint.handleNetworkError(timeoutNetError{}, &clone)
+
+		select {
+		case resp := <-respChan:
+			assert.Equal(t, "task", resp.TaskID)
+			assert.Equal(t, "watcher", resp.WatcherID)
+			require.Error(t, resp.Err)
+			assert.Contains(t, resp.Err.Error(), "read timeout")
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected response from network error handler")
+		}
+	})
 }
 
 func TestWSEndpointExecutewsPersistent(t *testing.T) {

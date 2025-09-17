@@ -2,7 +2,6 @@
 
 ## v0.7.2
 
-- Extend test coverage with test suites and more table driven tests
 - Expose functional options:
   - `taskman` mode
   - More...? Or later?
