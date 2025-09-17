@@ -1,18 +1,43 @@
 package wadjit
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jkbrsn/taskman"
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type taskTrigger struct {
+	task taskman.Task
+}
+
+func newTaskTrigger(t *testing.T, wt WatcherTask) (taskTrigger, string) {
+	t.Helper()
+
+	var taskID string
+	switch typed := wt.(type) {
+	case *HTTPEndpoint:
+		taskID = typed.ID
+	case *WSEndpoint:
+		taskID = typed.ID
+	case *MockWatcherTask:
+		taskID = typed.ID
+	default:
+		t.Fatalf("unsupported watcher task type %T", wt)
+	}
+
+	return taskTrigger{task: wt.Task()}, taskID
+}
 
 func TestNewWadjit(t *testing.T) {
 	w := New()
@@ -26,84 +51,277 @@ func TestNewWadjit(t *testing.T) {
 }
 
 func TestWadjit_AddWatcher(t *testing.T) {
+	testCases := []struct {
+		name string
+		test func(t *testing.T, w *Wadjit)
+	}{
+		{
+			name: "add watcher",
+			test: func(t *testing.T, w *Wadjit) {
+				id := xid.New().String()
+				watcher, err := getHTTPWatcher(id, 1*time.Second, []byte("test payload"))
+				require.NoError(t, err, "error creating watcher")
+
+				require.NoError(t, w.AddWatcher(watcher))
+				time.Sleep(3 * time.Millisecond)
+
+				require.Equal(t, 1, syncMapLen(&w.watchers))
+				loaded, ok := w.watchers.Load(id)
+				require.True(t, ok)
+				require.NotNil(t, loaded)
+				loadedWatcher, castOK := loaded.(*Watcher)
+				require.True(t, castOK, "expected loaded value to be *Watcher")
+				assert.Equal(t, watcher, loadedWatcher)
+			},
+		},
+		{
+			name: "add duplicate",
+			test: func(t *testing.T, w *Wadjit) {
+				id := xid.New().String()
+				watcher, err := getHTTPWatcher(id, 1*time.Second, []byte("test payload"))
+				require.NoError(t, err, "error creating watcher")
+
+				require.NoError(t, w.AddWatcher(watcher))
+				time.Sleep(3 * time.Millisecond)
+				assert.Equal(t, 1, syncMapLen(&w.watchers))
+
+				err = w.AddWatcher(watcher)
+				require.Error(t, err, "expected error adding duplicate watcher")
+
+				newWatcher, err := getHTTPWatcher(id, 2*time.Second, []byte("another payload"))
+				require.NoError(t, err, "error creating new watcher")
+				err = w.AddWatcher(newWatcher)
+				require.Error(t, err, "expected error adding duplicate watcher")
+			},
+		},
+		{
+			name: "add watchers",
+			test: func(t *testing.T, w *Wadjit) {
+				targetCount := 10
+				watchers := make([]*Watcher, 0, targetCount)
+				for i := 0; i < targetCount; i++ {
+					id := xid.New().String()
+					watcher, err := getHTTPWatcher(
+						id,
+						1*time.Second,
+						fmt.Appendf(nil, "test payload %d", i),
+					)
+					require.NoError(t, err, "error creating watcher")
+					watchers = append(watchers, watcher)
+				}
+
+				require.NoError(t, w.AddWatchers(watchers...))
+				time.Sleep(10 * time.Millisecond)
+
+				assert.Equal(t, targetCount, syncMapLen(&w.watchers))
+			},
+		},
+		{
+			name: "nil watcher",
+			test: func(t *testing.T, w *Wadjit) {
+				err := w.AddWatcher(nil)
+				assert.Error(t, err, "expected error adding nil watcher")
+			},
+		},
+		{
+			name: "invalid watcher",
+			test: func(t *testing.T, w *Wadjit) {
+				id := xid.New().String()
+				watcher, err := getHTTPWatcher(id, 1*time.Second, []byte("test payload"))
+				require.NoError(t, err, "error creating watcher")
+				watcher.Cadence = 0
+
+				err = w.AddWatcher(watcher)
+				assert.Error(t, err, "expected error removing invalid watcher")
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := New()
+			defer func() {
+				err := w.Close()
+				assert.NoError(t, err, "error closing Wadjit")
+			}()
+
+			tc.test(t, w)
+		})
+	}
+}
+
+func TestWadjit_ConcurrentWatchers(t *testing.T) {
 	w := New()
 	defer func() {
 		err := w.Close()
 		assert.NoError(t, err, "error closing Wadjit")
 	}()
 
-	// Create a watcher
-	id := xid.New().String()
-	watcher, err := getHTTPWatcher(id, 1*time.Second, []byte("test payload"))
-	assert.NoError(t, err, "error creating watcher")
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
+	defer server.Close()
 
-	t.Run("add watcher", func(t *testing.T) {
-		// Add the watcher
-		err = w.AddWatcher(watcher)
-		assert.NoError(t, err, "error adding watcher")
-		// Give watcher time to start up
-		time.Sleep(3 * time.Millisecond)
+	httpBaseURL, err := url.Parse(server.URL)
+	require.NoError(t, err, "failed to parse HTTP URL")
 
-		// Check that the watcher was added correctly
-		assert.Equal(t, 1, syncMapLen(&w.watchers))
-		loaded, _ := w.watchers.Load(id)
-		assert.NotNil(t, loaded)
-		loadedTyped, ok := loaded.(*Watcher)
-		assert.True(t, ok, "expected loaded value to be *Watcher")
-		assert.Equal(t, watcher, loadedTyped)
-	})
+	wsURL := "ws" + server.URL[4:] + "/ws"
+	wsParsedURL, err := url.Parse(wsURL)
+	require.NoError(t, err, "failed to parse WS URL")
 
-	t.Run("add duplicate", func(t *testing.T) {
-		// Add the same watcher again
-		err = w.AddWatcher(watcher)
-		assert.Error(t, err, "expected error adding duplicate watcher")
-		// Give watcher time to start up
-		time.Sleep(3 * time.Millisecond)
+	watchers := []*Watcher{}
 
-		// Add new watcher with the same ID
-		newWatcher, err := getHTTPWatcher(id, 2*time.Second, []byte("another payload"))
-		assert.NoError(t, err, "error creating new watcher")
-		err = w.AddWatcher(newWatcher)
-		assert.Error(t, err, "expected error adding duplicate watcher")
-	})
+	httpWatcher1, err := NewWatcher(
+		xid.New().String(),
+		25*time.Millisecond,
+		WatcherTasksToSlice(
+			NewHTTPEndpoint(
+				httpBaseURL.ResolveReference(&url.URL{Path: "/one"}),
+				http.MethodPost,
+				WithHeader(http.Header{"Content-Type": []string{"application/json"}}),
+				WithPayload([]byte(`{"case":"one"}`)),
+			),
+		),
+	)
+	require.NoError(t, err, "error creating http watcher 1")
+	watchers = append(watchers, httpWatcher1)
 
-	t.Run("add watchers", func(t *testing.T) {
-		// Add multiple watchers
-		watchers := []*Watcher{}
-		for i := range 10 {
-			id := xid.New().String()
-			watcher, err := getHTTPWatcher(
-				id,
-				1*time.Second,
-				fmt.Appendf(nil, "test payload %d", i),
-			)
-			assert.NoError(t, err, "error creating watcher")
-			watchers = append(watchers, watcher)
+	httpWatcher2, err := NewWatcher(
+		xid.New().String(),
+		30*time.Millisecond,
+		WatcherTasksToSlice(
+			NewHTTPEndpoint(
+				httpBaseURL.ResolveReference(&url.URL{Path: "/two"}),
+				http.MethodGet,
+				WithHeader(http.Header{"Accept": []string{"text/plain"}}),
+			),
+		),
+	)
+	require.NoError(t, err, "error creating http watcher 2")
+	watchers = append(watchers, httpWatcher2)
+
+	wsWatcher, err := NewWatcher(
+		xid.New().String(),
+		35*time.Millisecond,
+		WatcherTasksToSlice(
+			NewWSEndpoint(
+				wsParsedURL,
+				http.Header{},
+				OneHitText,
+				[]byte(`{"case":"ws"}`),
+				"",
+			),
+		),
+	)
+	require.NoError(t, err, "error creating ws watcher")
+	watchers = append(watchers, wsWatcher)
+
+	require.NoError(t, w.AddWatchers(watchers...))
+
+	type expectation struct {
+		watcherID string
+	}
+
+	expectedTasks := map[string]expectation{}
+	tasks := []taskTrigger{}
+
+	for _, watcher := range watchers {
+		for _, wt := range watcher.Tasks {
+			trigger, taskID := newTaskTrigger(t, wt)
+			expectedTasks[taskID] = expectation{watcherID: watcher.ID}
+			tasks = append(tasks, trigger)
 		}
-		err = w.AddWatchers(watchers...)
-		assert.NoError(t, err, "error adding watchers")
-		// Give watchers time to start up
-		time.Sleep(10 * time.Millisecond)
+	}
 
-		// Check that the watchers were added correctly
-		assert.Equal(t, 11, syncMapLen(&w.watchers))
-	})
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for _, task := range tasks {
+		wg.Add(1)
+		go func(tr taskTrigger) {
+			defer wg.Done()
+			<-start
+			require.NoError(t, tr.task.Execute())
+		}(task)
+	}
 
-	t.Run("nil watcher", func(t *testing.T) {
-		err := w.AddWatcher(nil)
-		assert.Error(t, err, "expected error adding nil watcher")
-	})
+	close(start)
+	wg.Wait()
 
-	t.Run("invalid watcher", func(t *testing.T) {
-		// Create a watcher with invalid configuration
-		id := xid.New().String()
-		watcher, err := getHTTPWatcher(id, 1*time.Second, []byte("test payload"))
-		assert.NoError(t, err, "error creating watcher")
-		watcher.Cadence = 0
+	received := map[string]bool{}
+	deadline := time.After(500 * time.Millisecond)
+	for len(received) < len(expectedTasks) {
+		select {
+		case resp := <-w.Responses():
+			require.NotNil(t, resp)
+			require.NoError(t, resp.Err)
+			exp, ok := expectedTasks[resp.TaskID]
+			if !ok {
+				continue
+			}
+			assert.Equal(t, exp.watcherID, resp.WatcherID)
+			data, err := resp.Data()
+			require.NoError(t, err)
+			assert.NotEmpty(t, data)
+			received[resp.TaskID] = true
+		case <-deadline:
+			t.Fatal("timeout waiting for responses")
+		}
+	}
+}
 
-		err = w.AddWatcher(watcher)
-		assert.Error(t, err, "expected error removing invalid watcher")
-	})
+func TestWadjit_ErrorResponsesForwarded(t *testing.T) {
+	w := New()
+	defer func() {
+		err := w.Close()
+		assert.NoError(t, err, "error closing Wadjit")
+	}()
+
+	errTask := &MockWatcherTask{
+		URL:             &url.URL{Scheme: "http", Host: "example.com", Path: "/err"},
+		ID:              "err-task",
+		ErrTaskResponse: errors.New("mock failure"),
+	}
+	okTask := &MockWatcherTask{
+		URL:     &url.URL{Scheme: "http", Host: "example.com", Path: "/ok"},
+		ID:      "ok-task",
+		Payload: []byte("ok"),
+	}
+
+	watcher, err := NewWatcher(
+		xid.New().String(),
+		20*time.Millisecond,
+		[]WatcherTask{errTask, okTask},
+	)
+	require.NoError(t, err, "error creating watcher")
+
+	require.NoError(t, w.AddWatcher(watcher))
+
+	errExecute := errTask.Task().Execute()
+	require.Error(t, errExecute)
+
+	select {
+	case resp := <-w.Responses():
+		require.Equal(t, errTask.ID, resp.TaskID)
+		require.Equal(t, watcher.ID, resp.WatcherID)
+		require.Error(t, resp.Err)
+		assert.Contains(t, resp.Err.Error(), "mock failure")
+		assert.Nil(t, resp.Payload)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected error response")
+	}
+
+	okExecute := okTask.Task().Execute()
+	require.NoError(t, okExecute)
+
+	select {
+	case resp := <-w.Responses():
+		require.Equal(t, okTask.ID, resp.TaskID)
+		require.Equal(t, watcher.ID, resp.WatcherID)
+		require.NoError(t, resp.Err)
+		data, err := resp.Data()
+		require.NoError(t, err)
+		assert.Equal(t, []byte("ok"), data)
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("expected success response after error")
+	}
 }
 
 func TestWadjit_RemoveWatcher(t *testing.T) {

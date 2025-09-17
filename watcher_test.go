@@ -8,9 +8,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jkbrsn/taskman"
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+type stubWatcherTask struct {
+	id         string
+	closeErr   error
+	initErr    error
+	sawNilResp bool
+}
+
+func (s *stubWatcherTask) Close() error { return s.closeErr }
+
+func (s *stubWatcherTask) Initialize(_ string, respChan chan<- WatcherResponse) error {
+	if respChan == nil {
+		s.sawNilResp = true
+	}
+	return s.initErr
+}
+
+func (*stubWatcherTask) Task() taskman.Task { return stubTask{} }
+
+func (*stubWatcherTask) Validate() error { return nil }
+
+type stubTask struct{}
+
+func (stubTask) Execute() error { return nil }
 
 func TestWatcherInitialization(t *testing.T) {
 	id := xid.New().String()
@@ -57,6 +83,50 @@ func TestWatcherStart(t *testing.T) {
 
 	// These are not nil, even though uninitialized, since Start initializes them if found nil
 	assert.NotNil(t, watcher.doneChan)
+}
+
+func TestWatcherCloseAggregatesErrors(t *testing.T) {
+	errA := errors.New("close A")
+	errB := errors.New("close B")
+
+	watcher := &Watcher{
+		ID:      "watcher-close",
+		Cadence: 10 * time.Millisecond,
+		Tasks: []WatcherTask{
+			&stubWatcherTask{id: "a", closeErr: errA},
+			&stubWatcherTask{id: "b", closeErr: errB},
+		},
+		doneChan: make(chan struct{}),
+	}
+
+	err := watcher.close()
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, errA))
+	assert.True(t, errors.Is(err, errB))
+
+	select {
+	case <-watcher.doneChan:
+	default:
+		t.Fatal("doneChan should be closed")
+	}
+}
+
+func TestWatcherStartNilResponseChan(t *testing.T) {
+	initErr := errors.New("init failed")
+	task := &stubWatcherTask{id: "stub", initErr: initErr}
+
+	watcher := &Watcher{
+		ID:      "watcher-start",
+		Cadence: 15 * time.Millisecond,
+		Tasks:   []WatcherTask{task},
+	}
+
+	err := watcher.start(nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "response channel is nil")
+	assert.True(t, errors.Is(err, initErr))
+	assert.NotNil(t, watcher.doneChan)
+	assert.True(t, task.sawNilResp)
 }
 
 func TestWatcherExecution(t *testing.T) {

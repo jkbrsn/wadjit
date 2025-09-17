@@ -1,13 +1,15 @@
 # todo
 
-## v0.7.2
+## v0.8.0
 
-- Extend test coverage with test suites and more table driven tests
+- Expose functional options:
+  - `taskman` mode
+  - More...? Or later?
+- Support "pause" and "resume" of watchers
+  - Dependent on future `taskman` features
 
 ## v0.x.x
 
-- Support "pause" and "resume" of watchers
-  - Dependent on future `taskman` features
 - Add `Watcher` metrics (per watcher and/or overall)
   - Timing accuracy/skew
   - Error/success rates
@@ -16,7 +18,7 @@
   - Channel pressure
 - (maybe) Support for concurrent add/remove of watchers
   - Might be better to just not support it and let it be clear the management of watchers is left to the user
-- Expose opt-in configuration via functional options, some option ideas:
+- Expose further options:
   - Buffer sizes
   - Metric sink
   - Deadline times
