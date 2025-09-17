@@ -37,7 +37,7 @@ import (
 )
 
 func main() {
-    // Initialize manager
+    // Initialize manager (options available)
     manager := wadjit.New()
     defer manager.Close()
 
@@ -75,6 +75,8 @@ func main() {
 }
 ```
 
+Need to tweak the scheduler? Wrap the constructor call: `wadjit.New(wadjit.WithTaskmanMode(taskman.ModeOnDemand))` or forward `taskman` options via `wadjit.WithTaskmanOptions(...)`.
+
 ## Examples
 
 See a fuller runnable example in [`examples/example.go`](examples/example.go) and run it with:
@@ -99,7 +101,7 @@ These targets are also used in the GitHub CI pipeline, see [`.github/workflows/c
 
 ### Wadjit
 
-- `New() *Wadjit`: Creates a new Wadjit instance
+- `New(opts ...Option) *Wadjit`: Creates a new Wadjit instance; options can tweak the internal task manager (for example `WithTaskmanMode`).
 - `AddWatcher(watcher *Watcher) error`: Adds a watcher to the manager
 - `AddWatchers(watchers ...*Watcher) error`: Adds multiple watchers at once
 - `RemoveWatcher(id string) error`: Removes a watcher by ID

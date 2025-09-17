@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	// responseChanBufferSize is the buffer size for response channels to prevent blocking
-	responseChanBufferSize = 512
+	// defaultResponseChanBufferSize is the buffer size for response channels to prevent blocking
+	defaultResponseChanBufferSize = 512
 )
 
 // Wadjit is a struct that manages a collection of endpoint watchers.
@@ -187,17 +187,23 @@ func (w *Wadjit) listenForResponses() {
 	}
 }
 
-// New creates, and returns a new Wadjit. Note: Unless sends on the response channel are consumed,
-// a block may occur.
-func New() *Wadjit {
+// New creates and returns a new Wadjit. Optional functional options can be supplied to tune the
+// internal task manager and other configuration. Note: Unless sends on the response channel are
+// consumed, a block may occur.
+func New(opts ...Option) *Wadjit {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	// Apply and validate options
+	options := applyOptions(opts)
+
+	// Create task manager and Wadjit
+	tm := taskman.New(options.taskmanOptions...)
 	w := &Wadjit{
-		watchers:       sync.Map{},
-		taskManager:    taskman.New(),
-		respGatherChan: make(chan WatcherResponse, responseChanBufferSize),
-		respExportChan: make(chan WatcherResponse, responseChanBufferSize),
 		ctx:            ctx,
 		cancel:         cancel,
+		taskManager:    tm,
+		respGatherChan: make(chan WatcherResponse, options.bufferSize),
+		respExportChan: make(chan WatcherResponse, options.bufferSize),
 	}
 
 	w.closeWG.Add(1)
@@ -207,4 +213,73 @@ func New() *Wadjit {
 	}()
 
 	return w
+}
+
+// Option configures the behavior of a Wadjit instance created by New.
+type Option func(*options)
+
+// options holds configuration for creating a Wadjit instance, including options for the internal
+// task manager.
+type options struct {
+	taskmanOptions []taskman.TMOption
+	bufferSize     int
+}
+
+// WithBufferSize configures the buffer size for response channels. A negative value will be
+// ignored.
+func WithBufferSize(size int) Option {
+	return func(o *options) {
+		if size < 0 {
+			return
+		}
+		o.bufferSize = size
+	}
+}
+
+// WithTaskmanOptions forwards the provided task manager options to the internal task manager.
+func WithTaskmanOptions(opts ...taskman.TMOption) Option {
+	return func(o *options) {
+		if len(opts) == 0 {
+			return
+		}
+		var filtered []taskman.TMOption
+		for _, opt := range opts {
+			if opt == nil {
+				continue
+			}
+			filtered = append(filtered, opt)
+		}
+		if len(filtered) == 0 {
+			return
+		}
+		owned := append([]taskman.TMOption(nil), filtered...)
+		o.taskmanOptions = append(o.taskmanOptions, owned...)
+	}
+}
+
+// WithTaskmanMode configures the internal task manager execution mode.
+func WithTaskmanMode(mode taskman.ExecMode) Option {
+	return WithTaskmanOptions(taskman.WithMode(mode))
+}
+
+// applyOptions applies the provided Option slice to the internal options struct. Defaults are
+// applied here, and if an option is nil, it is ignored.
+func applyOptions(opts []Option) options {
+	cfg := options{
+		bufferSize: defaultResponseChanBufferSize,
+	}
+
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(&cfg)
+	}
+
+	// Clamp to sane values
+	if cfg.bufferSize < 0 {
+		cfg.bufferSize = defaultResponseChanBufferSize
+	}
+
+	return cfg
 }
