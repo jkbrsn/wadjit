@@ -1,15 +1,15 @@
 # todo
 
-## v0.7.2
+## v0.8.0
 
 - Expose functional options:
   - `taskman` mode
   - More...? Or later?
+- Support "pause" and "resume" of watchers
+  - Dependent on future `taskman` features
 
 ## v0.x.x
 
-- Support "pause" and "resume" of watchers
-  - Dependent on future `taskman` features
 - Add `Watcher` metrics (per watcher and/or overall)
   - Timing accuracy/skew
   - Error/success rates
