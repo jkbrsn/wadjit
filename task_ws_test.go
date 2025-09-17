@@ -79,7 +79,10 @@ func TestWSEndpoint_HandleWebSocketErrors(t *testing.T) {
 		endpoint := &WSEndpoint{ID: "task", watcherID: "watcher", respChan: respChan}
 
 		clone := *baseURL
-		endpoint.handleWebSocketCloseError(&websocket.CloseError{Code: websocket.CloseTryAgainLater, Text: "backpressure"}, &clone)
+		endpoint.handleWebSocketCloseError(&websocket.CloseError{
+			Code: websocket.CloseTryAgainLater,
+			Text: "backpressure",
+		}, &clone)
 
 		select {
 		case resp := <-respChan:
@@ -94,10 +97,18 @@ func TestWSEndpoint_HandleWebSocketErrors(t *testing.T) {
 
 	t.Run("CloseAbnormalClosure", func(t *testing.T) {
 		respChan := make(chan WatcherResponse, 1)
-		endpoint := &WSEndpoint{ID: "task", watcherID: "watcher", respChan: respChan, ctx: context.Background()}
+		endpoint := &WSEndpoint{
+			ID:        "task",
+			watcherID: "watcher",
+			respChan:  respChan,
+			ctx:       context.Background(),
+		}
 
 		clone := *baseURL
-		endpoint.handleWebSocketReadError(&websocket.CloseError{Code: websocket.CloseAbnormalClosure, Text: "abrupt"}, &clone)
+		endpoint.handleWebSocketReadError(&websocket.CloseError{
+			Code: websocket.CloseAbnormalClosure,
+			Text: "abrupt",
+		}, &clone)
 
 		select {
 		case resp := <-respChan:

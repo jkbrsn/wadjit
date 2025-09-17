@@ -30,9 +30,9 @@ func (s *stubWatcherTask) Initialize(_ string, respChan chan<- WatcherResponse) 
 	return s.initErr
 }
 
-func (s *stubWatcherTask) Task() taskman.Task { return stubTask{} }
+func (*stubWatcherTask) Task() taskman.Task { return stubTask{} }
 
-func (s *stubWatcherTask) Validate() error { return nil }
+func (*stubWatcherTask) Validate() error { return nil }
 
 type stubTask struct{}
 
