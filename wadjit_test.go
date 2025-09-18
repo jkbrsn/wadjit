@@ -40,14 +40,85 @@ func newTaskTrigger(t *testing.T, wt WatcherTask) (taskTrigger, string) {
 }
 
 func TestNewWadjit(t *testing.T) {
-	w := New()
-	defer func() {
-		err := w.Close()
-		assert.NoError(t, err, "error closing Wadjit")
-	}()
+	t.Run("default", func(t *testing.T) {
+		w := New()
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+		}()
 
-	assert.NotNil(t, w)
-	assert.NotNil(t, w.taskManager)
+		assert.NotNil(t, w)
+		assert.NotNil(t, w.taskManager)
+	})
+
+	t.Run("with taskman mode option", func(t *testing.T) {
+		w := New(WithTaskmanMode(taskman.ModeOnDemand))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+		}()
+
+		metrics := w.taskManager.Metrics()
+		assert.Nil(t, metrics.PoolMetrics, "on-demand mode should not expose pool metrics")
+	})
+
+	t.Run("with forwarded taskman options", func(t *testing.T) {
+		w := New(WithTaskmanOptions(taskman.WithMode(taskman.ModeDistributed)))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+		}()
+
+		metrics := w.taskManager.Metrics()
+		assert.Nil(t, metrics.PoolMetrics, "distributed mode should not expose pool metrics")
+	})
+
+	t.Run("default buffer size", func(t *testing.T) {
+		w := New()
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+		}()
+
+		assert.Equal(t, defaultResponseChanBufferSize, cap(w.respGatherChan))
+		assert.Equal(t, defaultResponseChanBufferSize, cap(w.respExportChan))
+	})
+
+	t.Run("custom buffer size", func(t *testing.T) {
+		const size = 8
+		w := New(WithBufferSize(size))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+		}()
+
+		assert.Equal(t, size, cap(w.respGatherChan))
+		assert.Equal(t, size, cap(w.respExportChan))
+	})
+
+	t.Run("zero buffer size", func(t *testing.T) {
+		w := New(WithBufferSize(0))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+		}()
+
+		assert.Equal(t, 0, cap(w.respGatherChan))
+		assert.Equal(t, 0, cap(w.respExportChan))
+	})
+
+	t.Run("negative buffer falls back to default", func(t *testing.T) {
+		w := New(func(o *options) {
+			o.bufferSize = -42
+		})
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+		}()
+
+		assert.Equal(t, defaultResponseChanBufferSize, cap(w.respGatherChan))
+		assert.Equal(t, defaultResponseChanBufferSize, cap(w.respExportChan))
+	})
 }
 
 func TestWadjit_AddWatcher(t *testing.T) {
@@ -378,7 +449,7 @@ func TestWadjit_Clear(t *testing.T) {
 		watchers = append(watchers, watcher)
 	}
 	err := w.AddWatchers(watchers...)
-	assert.NoError(t, err, "error adding watchers")
+	require.NoError(t, err, "error adding watchers")
 	// Give watchers time to start up
 	time.Sleep(5 * time.Millisecond)
 

@@ -2,9 +2,6 @@
 
 ## v0.8.0
 
-- Expose functional options:
-  - `taskman` mode
-  - More...? Or later?
 - Support "pause" and "resume" of watchers
   - Dependent on future `taskman` features
 
