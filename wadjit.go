@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/jkbrsn/taskman"
+	"github.com/rs/zerolog"
 )
 
 const (
@@ -199,8 +200,9 @@ func New(opts ...Option) *Wadjit {
 	// Create task manager and Wadjit
 	tm := taskman.New(options.taskmanOptions...)
 	w := &Wadjit{
-		ctx:            ctx,
-		cancel:         cancel,
+		ctx:    ctx,
+		cancel: cancel,
+		// TODO: set logger
 		taskManager:    tm,
 		respGatherChan: make(chan WatcherResponse, options.bufferSize),
 		respExportChan: make(chan WatcherResponse, options.bufferSize),
@@ -221,8 +223,11 @@ type Option func(*options)
 // options holds configuration for creating a Wadjit instance, including options for the internal
 // task manager.
 type options struct {
+	bufferSize int
+	logger     zerolog.Logger
+	loggerSet  bool
+
 	taskmanOptions []taskman.TMOption
-	bufferSize     int
 }
 
 // WithBufferSize configures the buffer size for response channels. A negative value will be
@@ -233,6 +238,15 @@ func WithBufferSize(size int) Option {
 			return
 		}
 		o.bufferSize = size
+	}
+}
+
+// WithLogger sets the Wadjit and the internal task manager's loggers.
+func WithLogger(logger zerolog.Logger) Option {
+	return func(o *options) {
+		o.logger = logger
+		o.loggerSet = true
+		o.taskmanOptions = append(o.taskmanOptions, taskman.WithLogger(logger))
 	}
 }
 
@@ -276,9 +290,12 @@ func applyOptions(opts []Option) options {
 		opt(&cfg)
 	}
 
-	// Clamp to sane values
+	// Ensure sane values and defaults
 	if cfg.bufferSize < 0 {
 		cfg.bufferSize = defaultResponseChanBufferSize
+	}
+	if !cfg.loggerSet {
+		cfg.logger = zerolog.Nop()
 	}
 
 	return cfg
