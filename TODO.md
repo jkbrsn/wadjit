@@ -2,7 +2,6 @@
 
 ## v0.8.0
 
-- Fix TTL respect for HTTP
 - Support "pause" and "resume" of watchers
   - Dependent on future `taskman` features
 
