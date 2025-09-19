@@ -37,6 +37,7 @@ type dnsPolicyManager struct {
 	guard       guardRailState
 }
 
+// newDNSPolicyManager wires the supplied policy and optional decision hook into a manager ready to drive dial decisions.
 func newDNSPolicyManager(policy DNSPolicy, hook DNSDecisionCallback) *dnsPolicyManager {
 	mgr := &dnsPolicyManager{policy: policy, hook: hook}
 	if mgr.policy.Resolver != nil {
@@ -56,6 +57,7 @@ type dnsDialPlan struct {
 
 type dnsDecisionKey struct{}
 
+// prepareRequest determines the dial target for the upcoming request, applies guard-rail actions, and enriches the context with DNS decision data.
 func (m *dnsPolicyManager) prepareRequest(ctx context.Context, u *url.URL, transport *http.Transport) (context.Context, bool, error) {
 	host := u.Hostname()
 	port := u.Port()
@@ -103,6 +105,7 @@ func (m *dnsPolicyManager) prepareRequest(ctx context.Context, u *url.URL, trans
 	return ctx, forceNewConn, nil
 }
 
+// resolve selects the connection strategy for the given host/port based on the configured refresh mode.
 func (m *dnsPolicyManager) resolve(ctx context.Context, host, port string) (string, bool, *DNSDecision, error) {
 	switch m.policy.Mode {
 	case DNSRefreshDefault:
@@ -125,6 +128,7 @@ func (m *dnsPolicyManager) resolve(ctx context.Context, host, port string) (stri
 	}
 }
 
+// resolveSingle caches the first lookup result and reuses it for subsequent requests.
 func (m *dnsPolicyManager) resolveSingle(ctx context.Context, host, port string) (string, bool, *DNSDecision, error) {
 	m.mu.Lock()
 	cached := m.cache
@@ -151,6 +155,7 @@ func (m *dnsPolicyManager) resolveSingle(ctx context.Context, host, port string)
 	return addr, true, &decision, nil
 }
 
+// resolveTTL refreshes addresses when the stored TTL expires while optionally preserving the last good answer.
 func (m *dnsPolicyManager) resolveTTL(ctx context.Context, host, port string) (string, bool, *DNSDecision, error) {
 	now := time.Now()
 	m.mu.Lock()
@@ -194,6 +199,7 @@ func (m *dnsPolicyManager) resolveTTL(ctx context.Context, host, port string) (s
 	return addr, true, &decision, nil
 }
 
+// resolveCadence forces DNS refreshes on a fixed schedule independent of observed TTLs.
 func (m *dnsPolicyManager) resolveCadence(ctx context.Context, host, port string) (string, bool, *DNSDecision, error) {
 	now := time.Now()
 
@@ -233,6 +239,7 @@ func (m *dnsPolicyManager) resolveCadence(ctx context.Context, host, port string
 	return addr, true, &decision, nil
 }
 
+// lookup delegates to the configured resolver and ensures a non-empty address list is returned.
 func (m *dnsPolicyManager) lookup(ctx context.Context, host string) ([]netip.Addr, time.Duration, error) {
 	if m.resolver == nil {
 		return nil, 0, errors.New("resolver not configured")
@@ -247,6 +254,7 @@ func (m *dnsPolicyManager) lookup(ctx context.Context, host string) ([]netip.Add
 	return addrs, ttl, nil
 }
 
+// dialContext injects the manager's dial plan into the provided net.Dialer.
 func (m *dnsPolicyManager) dialContext(dialer *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		if plan, ok := ctx.Value(dnsPlanKey{}).(dnsDialPlan); ok {
@@ -258,6 +266,7 @@ func (m *dnsPolicyManager) dialContext(dialer *net.Dialer) func(context.Context,
 	}
 }
 
+// observeResult records request outcomes to drive guard-rail thresholds.
 func (m *dnsPolicyManager) observeResult(statusCode int, resultErr error) {
 	if !m.guard.policy.Enabled() {
 		return
@@ -270,6 +279,7 @@ func (m *dnsPolicyManager) observeResult(statusCode int, resultErr error) {
 	m.resetGuard()
 }
 
+// registerGuardFailure increments guard counters and triggers configured actions once thresholds are met.
 func (m *dnsPolicyManager) registerGuardFailure(now time.Time) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -301,6 +311,7 @@ func (m *dnsPolicyManager) registerGuardFailure(now time.Time) {
 	}
 }
 
+// resetGuard clears the failure counters after a successful request.
 func (m *dnsPolicyManager) resetGuard() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -309,6 +320,7 @@ func (m *dnsPolicyManager) resetGuard() {
 	m.guard.lastFailure = time.Time{}
 }
 
+// consumeGuardTrigger reports whether a guard action should influence the current request and resets the flag.
 func (m *dnsPolicyManager) consumeGuardTrigger() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -324,6 +336,7 @@ type policyTransport struct {
 	mgr  *dnsPolicyManager
 }
 
+// RoundTrip injects DNS policy context into the request before delegating to the underlying transport.
 func (p *policyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx, forceClose, err := p.mgr.prepareRequest(req.Context(), req.URL, p.base)
 	if err != nil {
@@ -338,6 +351,7 @@ func (p *policyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return p.base.RoundTrip(newReq)
 }
 
+// defaultPort maps common URL schemes to their implicit TCP port.
 func defaultPort(scheme string) string {
 	switch scheme {
 	case "http":

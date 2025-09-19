@@ -126,7 +126,7 @@ func (p DNSPolicy) Validate() error {
 	return nil
 }
 
-// normalize bounds TTL durations ensuring sane defaults and ordering.
+// normalizeTTL bounds the resolver-provided TTL using the policy clamping rules and zero handling.
 func (p DNSPolicy) normalizeTTL(ttl time.Duration) time.Duration {
 	if ttl <= 0 {
 		return p.TTLMin

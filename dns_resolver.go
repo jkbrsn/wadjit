@@ -23,6 +23,7 @@ type defaultTTLResolver struct {
 	stdResolver *net.Resolver
 }
 
+// newDefaultTTLResolver builds a resolver that can report record TTLs using the system configuration.
 func newDefaultTTLResolver() *defaultTTLResolver {
 	return &defaultTTLResolver{client: &dns.Client{}, stdResolver: net.DefaultResolver}
 }
@@ -55,6 +56,7 @@ func (r *defaultTTLResolver) Lookup(ctx context.Context, host string) ([]netip.A
 	return addrList, 0, nil
 }
 
+// lookupWithTTL performs raw DNS queries to extract addresses and the minimum TTL when available.
 func (r *defaultTTLResolver) lookupWithTTL(ctx context.Context, host string) ([]netip.Addr, time.Duration, error) {
 	r.once.Do(func() {
 		r.cfg, r.cfgErr = dns.ClientConfigFromFile("/etc/resolv.conf")
