@@ -51,10 +51,8 @@ func (r *defaultTTLResolver) Lookup(ctx context.Context, host string) ([]netip.A
 
 	// Convert []net.IP to []netip.Addr
 	var addrList []netip.Addr
-	for _, ip := range ips {
-		addrList = append(addrList, ip)
-	}
-	return addrList, 0, err
+	addrList = append(addrList, ips...)
+	return addrList, 0, nil
 }
 
 func (r *defaultTTLResolver) lookupWithTTL(ctx context.Context, host string) ([]netip.Addr, time.Duration, error) {

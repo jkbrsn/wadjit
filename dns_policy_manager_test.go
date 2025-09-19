@@ -174,6 +174,40 @@ func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
 	assert.GreaterOrEqual(t, resolver.Calls(), 2)
 }
 
+func TestDNSPolicyManagerTTLZeroTTLExpiresImmediately(t *testing.T) {
+	host := "ttl-zero.example"
+	u := &url.URL{Scheme: "https", Host: host}
+
+	policy := DNSPolicy{Mode: DNSRefreshTTL}
+	mgr := newDNSPolicyManager(policy, nil)
+
+	addr := netip.MustParseAddr("203.0.113.55")
+	resolver := newTestResolver([]netip.Addr{addr}, 0)
+	mgr.resolver = resolver
+
+	transport := &http.Transport{}
+
+	ctx, force, err := mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.True(t, force, "first lookup should force new connection")
+
+	decision, ok := ctx.Value(dnsDecisionKey{}).(DNSDecision)
+	require.True(t, ok)
+	assert.Equal(t, time.Duration(0), decision.TTL)
+	require.False(t, decision.ExpiresAt.IsZero())
+
+	firstCalls := resolver.Calls()
+	assert.Equal(t, 1, firstCalls)
+
+	ctx, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.True(t, force, "zero TTL entries must trigger new lookup on next request")
+	decision, ok = ctx.Value(dnsDecisionKey{}).(DNSDecision)
+	require.True(t, ok)
+	assert.Equal(t, time.Duration(0), decision.TTL)
+	assert.Equal(t, 2, resolver.Calls(), "resolver should run again after zero TTL cache entry")
+}
+
 func TestHTTPTaskResponseMetadataIncludesDNS(t *testing.T) {
 	request, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
 	require.NoError(t, err)

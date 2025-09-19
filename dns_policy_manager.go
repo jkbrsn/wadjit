@@ -161,7 +161,7 @@ func (m *dnsPolicyManager) resolveTTL(ctx context.Context, host, port string) (s
 
 	if !forceLookup {
 		addr := net.JoinHostPort(cached.addrs[0].String(), port)
-		ttl := cached.expiresAt.Sub(cached.lastLookup)
+		ttl := max(cached.expiresAt.Sub(cached.lastLookup), 0)
 		decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: cached.addrs, TTL: ttl, ExpiresAt: cached.expiresAt}
 		return addr, false, &decision, nil
 	}
@@ -170,7 +170,7 @@ func (m *dnsPolicyManager) resolveTTL(ctx context.Context, host, port string) (s
 	if err != nil {
 		if m.policy.AllowFallback && len(cached.addrs) > 0 {
 			addr := net.JoinHostPort(cached.addrs[0].String(), port)
-			ttl := cached.expiresAt.Sub(cached.lastLookup)
+			ttl := max(cached.expiresAt.Sub(cached.lastLookup), 0)
 			decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: cached.addrs, TTL: ttl, ExpiresAt: cached.expiresAt, Err: err}
 			return addr, false, &decision, nil
 		}
@@ -179,7 +179,9 @@ func (m *dnsPolicyManager) resolveTTL(ctx context.Context, host, port string) (s
 
 	ttl = m.policy.normalizeTTL(ttl)
 	entry := dnsCacheEntry{addrs: addrs, lastLookup: now}
-	if ttl > 0 {
+	if ttl <= 0 {
+		entry.expiresAt = now
+	} else {
 		entry.expiresAt = now.Add(ttl)
 	}
 
