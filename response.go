@@ -130,7 +130,8 @@ func (m TaskResponseMetadata) String() string {
 			addrStrs = append(addrStrs, addr.String())
 		}
 		dnsStr = fmt.Sprintf("{Mode: %d, TTL: %s, ExpiresAt: %s, Addrs: [%s], GuardRail: %t}",
-			m.DNS.Mode, m.DNS.TTL, m.DNS.ExpiresAt, strings.Join(addrStrs, ", "), m.DNS.GuardRailTriggered)
+			m.DNS.Mode, m.DNS.TTL, m.DNS.ExpiresAt, strings.Join(addrStrs, ", "),
+			m.DNS.GuardRailTriggered)
 	}
 
 	return fmt.Sprintf("TaskResponseMetadata{StatusCode: %d%sHeaders: %s%sSize: "+

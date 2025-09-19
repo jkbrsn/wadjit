@@ -128,10 +128,7 @@ func (e *HTTPEndpoint) Validate() error {
 			return errors.New("TransportControl.AddrPort is empty")
 		}
 	}
-	if err := e.dnsPolicy.Validate(); err != nil {
-		return err
-	}
-	return nil
+	return e.dnsPolicy.Validate()
 }
 
 // WithHeader configures the HTTPEndpoint to use the provided header.

@@ -223,7 +223,12 @@ func TestHTTPTaskResponseMetadataIncludesDNS(t *testing.T) {
 	ctx := context.WithValue(request.Context(), dnsDecisionKey{}, decision)
 	request = request.WithContext(ctx)
 
-	resp := &http.Response{StatusCode: 200, Header: make(http.Header), Request: request, ContentLength: 123}
+	resp := &http.Response{
+		StatusCode:    200,
+		Header:        make(http.Header),
+		Request:       request,
+		ContentLength: 123,
+	}
 	h := NewHTTPTaskResponse(&net.TCPAddr{}, resp)
 
 	md := h.Metadata()

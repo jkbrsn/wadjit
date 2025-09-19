@@ -16,11 +16,12 @@ var (
 type DNSRefreshMode uint8
 
 const (
-	// DNSRefreshDefault mirrors the current Go http.Transport behaviour without extra policies.
+	// DNSRefreshDefault mirrors the current Go http.Transport behavior without extra policies.
 	DNSRefreshDefault DNSRefreshMode = iota
 	// DNSRefreshStatic keeps using a literal address, bypassing DNS entirely.
 	DNSRefreshStatic
-	// DNSRefreshSingleLookup performs a single DNS lookup during Initialize and reuses it indefinitely.
+	// DNSRefreshSingleLookup performs a single DNS lookup during Initialize and reuses it
+	// indefinitely.
 	DNSRefreshSingleLookup
 	// DNSRefreshTTL refreshes DNS when the observed TTL expires.
 	DNSRefreshTTL
@@ -42,9 +43,11 @@ const (
 
 // GuardRailPolicy configures optional safety overrides that activate on repeated errors.
 type GuardRailPolicy struct {
-	// ConsecutiveErrorThreshold triggers the guard rail after this many sequential failures. Zero disables guard rails.
+	// ConsecutiveErrorThreshold triggers the guard rail after this many sequential failures. Zero
+	// disables guard rails.
 	ConsecutiveErrorThreshold int
-	// Window is the rolling time window used for counting errors. Zero means no windowing (errors counted indefinitely).
+	// Window is the rolling time window used for counting errors. Zero means no windowing (errors
+	// counted indefinitely).
 	Window time.Duration
 	// Action determines what happens once the threshold is hit.
 	Action GuardRailAction
@@ -55,7 +58,7 @@ func (p GuardRailPolicy) Enabled() bool {
 	return p.ConsecutiveErrorThreshold > 0 && p.Action != GuardRailActionNone
 }
 
-// DNSPolicy encapsulates the DNS refresh behaviour for an endpoint.
+// DNSPolicy encapsulates the DNS refresh behavior for an endpoint.
 type DNSPolicy struct {
 	Mode DNSRefreshMode
 
@@ -72,7 +75,7 @@ type DNSPolicy struct {
 	// AllowFallback retains the last known address if a refresh fails.
 	AllowFallback bool
 
-	// GuardRail configures optional guard rail behaviour.
+	// GuardRail configures optional guard rail behavior.
 	GuardRail GuardRailPolicy
 
 	// Resolver optionally overrides the default TTL resolver implementation.
@@ -108,16 +111,15 @@ func (p DNSPolicy) Validate() error {
 			return errors.Join(ErrInvalidDNSPolicy, errors.New("static mode requires StaticAddr"))
 		}
 	case DNSRefreshSingleLookup:
-		if (p.StaticAddr == netip.AddrPort{}) && p.Resolver == nil {
-			// We allow relying on the default resolver if StaticAddr is empty.
-		}
+		// Allow using the default resolver when no static address override is provided.
 	case DNSRefreshTTL:
 		if p.TTLMax > 0 && p.TTLMin > p.TTLMax {
 			return errors.Join(ErrInvalidDNSPolicy, errors.New("TTLMin must be <= TTLMax"))
 		}
 	case DNSRefreshCadence:
 		if p.Cadence <= 0 {
-			return errors.Join(ErrInvalidDNSPolicy, errors.New("cadence mode requires positive Cadence"))
+			return errors.Join(ErrInvalidDNSPolicy,
+				errors.New("cadence mode requires positive Cadence"))
 		}
 	default:
 		return errors.Join(ErrInvalidDNSPolicy, errors.New("unknown DNS refresh mode"))

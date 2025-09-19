@@ -45,6 +45,8 @@ linters:
           disabled: false
           exclude: [TEST]
           arguments: [0, 80]
+        - name: max-public-structs
+          disabled: true
     misspell:
       locale: US
 
