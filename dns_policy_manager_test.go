@@ -2,6 +2,7 @@ package wadjit
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/netip"
@@ -13,26 +14,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type stubTTLResolver struct {
-	addrs []netip.Addr
-	ttl   time.Duration
-	err   error
-}
-
-func (s stubTTLResolver) Lookup(ctx context.Context, host string) ([]netip.Addr, time.Duration, error) {
-	return s.addrs, s.ttl, s.err
-}
-
 func TestDNSPolicyManagerTTLRefresh(t *testing.T) {
 	host := "example.com"
 	u := &url.URL{Scheme: "https", Host: host}
 
 	policy := DNSPolicy{Mode: DNSRefreshTTL, TTLMin: time.Second, TTLMax: 10 * time.Second}
 	mgr := newDNSPolicyManager(policy, nil)
-	mgr.resolver = stubTTLResolver{
-		addrs: []netip.Addr{netip.MustParseAddr("192.0.2.10")},
-		ttl:   5 * time.Second,
-	}
+	mgr.resolver = newTestResolver([]netip.Addr{netip.MustParseAddr("192.0.2.10")}, 5*time.Second)
 
 	transport := &http.Transport{}
 
@@ -68,7 +56,7 @@ func TestDNSPolicyManagerGuardRailForcesFlush(t *testing.T) {
 		GuardRail: GuardRailPolicy{ConsecutiveErrorThreshold: 1, Action: GuardRailActionFlush},
 	}
 	mgr := newDNSPolicyManager(policy, nil)
-	mgr.resolver = stubTTLResolver{addrs: []netip.Addr{netip.MustParseAddr("198.51.100.1")}}
+	mgr.resolver = newTestResolver([]netip.Addr{netip.MustParseAddr("198.51.100.1")}, 0)
 
 	transport := &http.Transport{}
 
@@ -87,6 +75,103 @@ func TestDNSPolicyManagerGuardRailForcesFlush(t *testing.T) {
 	decision, ok := ctx.Value(dnsDecisionKey{}).(DNSDecision)
 	require.True(t, ok)
 	assert.True(t, decision.GuardRailTriggered)
+}
+
+func TestDNSPolicyManagerCadenceRefresh(t *testing.T) {
+	host := "cadence.example"
+	u := &url.URL{Scheme: "https", Host: host}
+
+	policy := DNSPolicy{Mode: DNSRefreshCadence, Cadence: 40 * time.Millisecond}
+	mgr := newDNSPolicyManager(policy, nil)
+	mgr.resolver = newTestResolver([]netip.Addr{netip.MustParseAddr("198.51.100.42")}, 0)
+
+	transport := &http.Transport{}
+
+	ctx, force, err := mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.True(t, force, "first cadence lookup should force new connection")
+
+	decision, ok := ctx.Value(dnsDecisionKey{}).(DNSDecision)
+	require.True(t, ok)
+	firstExpiry := decision.ExpiresAt
+	require.False(t, firstExpiry.IsZero())
+
+	ctx, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.False(t, force, "within cadence window should reuse connection")
+	decision, ok = ctx.Value(dnsDecisionKey{}).(DNSDecision)
+	require.True(t, ok)
+	assert.Equal(t, firstExpiry, decision.ExpiresAt)
+
+	time.Sleep(policy.Cadence + 10*time.Millisecond)
+
+	ctx, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.True(t, force, "after cadence expiry should force reconnect")
+	decision, ok = ctx.Value(dnsDecisionKey{}).(DNSDecision)
+	require.True(t, ok)
+	assert.True(t, decision.ExpiresAt.After(firstExpiry))
+}
+
+func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
+	host := "ttl-guard.example"
+	u := &url.URL{Scheme: "https", Host: host}
+
+	policy := DNSPolicy{
+		Mode:          DNSRefreshTTL,
+		TTLMin:        15 * time.Millisecond,
+		TTLMax:        50 * time.Millisecond,
+		AllowFallback: true,
+		GuardRail: GuardRailPolicy{
+			ConsecutiveErrorThreshold: 2,
+			Window:                    200 * time.Millisecond,
+			Action:                    GuardRailActionForceLookup,
+		},
+	}
+	mgr := newDNSPolicyManager(policy, nil)
+	initialAddr := netip.MustParseAddr("192.0.2.80")
+	resolver := newTestResolver([]netip.Addr{initialAddr}, 20*time.Millisecond)
+	mgr.resolver = resolver
+
+	transport := &http.Transport{}
+
+	ctx, force, err := mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.True(t, force, "first TTL lookup should force new connection")
+	decision, ok := ctx.Value(dnsDecisionKey{}).(DNSDecision)
+	require.True(t, ok)
+	firstExpiry := decision.ExpiresAt
+	require.False(t, firstExpiry.IsZero())
+	assert.Equal(t, initialAddr, decision.ResolvedAddrs[0])
+
+	time.Sleep(2 * policy.TTLMin)
+
+	resolver.SetError(errors.New("lookup failed"))
+
+	ctx, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.False(t, force, "fallback should reuse cached address when lookup fails")
+	decision, ok = ctx.Value(dnsDecisionKey{}).(DNSDecision)
+	require.True(t, ok)
+	require.NotNil(t, decision.Err)
+	assert.Equal(t, initialAddr, decision.ResolvedAddrs[0])
+	assert.Equal(t, firstExpiry, decision.ExpiresAt)
+
+	mgr.observeResult(503, nil)
+	mgr.observeResult(500, nil)
+
+	newAddr := netip.MustParseAddr("192.0.2.81")
+	resolver.SetResult([]netip.Addr{newAddr}, 30*time.Millisecond)
+
+	ctx, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.True(t, force, "guard rail should force new lookup after threshold")
+	decision, ok = ctx.Value(dnsDecisionKey{}).(DNSDecision)
+	require.True(t, ok)
+	assert.True(t, decision.GuardRailTriggered)
+	assert.Equal(t, newAddr, decision.ResolvedAddrs[0])
+	assert.True(t, decision.ExpiresAt.After(firstExpiry))
+	assert.GreaterOrEqual(t, resolver.Calls(), 2)
 }
 
 func TestHTTPTaskResponseMetadataIncludesDNS(t *testing.T) {

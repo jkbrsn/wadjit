@@ -28,6 +28,7 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 		http.MethodGet,
 		WithHeader(header),
 		WithID("an-id"),
+		WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
 	)
 
 	assert.Equal(t, testURL, endpoint.URL)
@@ -39,6 +40,7 @@ func TestHTTPEndpointInitialize(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, endpoint.respChan)
 	assert.Equal(t, "a-watcher-id", endpoint.watcherID)
+	assert.Equal(t, DNSRefreshDefault, endpoint.dnsPolicy.Mode)
 }
 
 func TestHTTPEndpointExecute(t *testing.T) {
@@ -65,10 +67,12 @@ func TestHTTPEndpointExecute(t *testing.T) {
 					WithHeader(header),
 					WithPayload([]byte(`{"key":"value"}`)),
 					WithID("an-id"),
+					WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
 				)
 
 				err = endpoint.Initialize("some-watcher-id", responseChan)
 				assert.NoError(t, err)
+				assert.Equal(t, DNSRefreshDefault, endpoint.dnsPolicy.Mode)
 
 				task := endpoint.Task()
 				assert.NotNil(t, task)
@@ -136,9 +140,16 @@ func TestHTTPEndpointExecute(t *testing.T) {
 					SkipTLSVerify: true,
 				}
 
-				ep := NewHTTPEndpoint(u, http.MethodGet, WithID("id"), WithTransportControl(tc))
+				ep := NewHTTPEndpoint(
+					u,
+					http.MethodGet,
+					WithID("id"),
+					WithTransportControl(tc),
+					WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
+				)
 				responseChan := make(chan WatcherResponse, 1)
 				require.NoError(t, ep.Initialize("wid", responseChan))
+				require.Equal(t, DNSRefreshStatic, ep.dnsPolicy.Mode)
 
 				go func() { _ = ep.Task().Execute() }()
 
@@ -179,10 +190,16 @@ func TestHTTPEndpointExecute(t *testing.T) {
 					SkipTLSVerify: true,
 				}
 
-				ep := NewHTTPEndpoint(u,
-					http.MethodGet, WithID("tls-test"), WithTransportControl(tc))
+				ep := NewHTTPEndpoint(
+					u,
+					http.MethodGet,
+					WithID("tls-test"),
+					WithTransportControl(tc),
+					WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
+				)
 				respCh := make(chan WatcherResponse, 1)
 				require.NoError(t, ep.Initialize("wid", respCh))
+				require.Equal(t, DNSRefreshStatic, ep.dnsPolicy.Mode)
 
 				go func() { _ = ep.Task().Execute() }()
 
@@ -199,11 +216,104 @@ func TestHTTPEndpointExecute(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "dns policy static",
+			run: func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(echoHandler))
+				defer server.Close()
+
+				u, err := url.Parse(server.URL)
+				require.NoError(t, err)
+				realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+				require.True(t, ok, "expected listener address to be *net.TCPAddr")
+
+				u.Host = "static.example.com"
+
+				policy := DNSPolicy{Mode: DNSRefreshStatic, StaticAddr: realAddr.AddrPort()}
+				respCh := make(chan WatcherResponse, 1)
+				ep := NewHTTPEndpoint(
+					u,
+					http.MethodGet,
+					WithID("static"),
+					WithDNSPolicy(policy),
+				)
+
+				require.NoError(t, ep.Initialize("static-watcher", respCh))
+				require.Equal(t, DNSRefreshStatic, ep.dnsPolicy.Mode)
+
+				go func() { _ = ep.Task().Execute() }()
+
+				select {
+				case resp := <-respCh:
+					require.NoError(t, resp.Err)
+					md := resp.Metadata()
+					require.NotNil(t, md)
+					assert.Nil(t, md.TimeData.DNSLookup)
+					received, ok := md.RemoteAddr.(*net.TCPAddr)
+					require.True(t, ok)
+					assert.Equal(t, realAddr.AddrPort(), received.AddrPort())
+					require.NotNil(t, md.DNS)
+					assert.Equal(t, DNSRefreshStatic, md.DNS.Mode)
+					require.Len(t, md.DNS.ResolvedAddrs, 1)
+					assert.Equal(t, realAddr.IP.String(), md.DNS.ResolvedAddrs[0].String())
+				case <-time.After(time.Second):
+					t.Fatal("timeout waiting for response")
+				}
+			},
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.run)
 	}
+}
+
+func TestHTTPEndpointDNSRefreshSingleLookup(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok, "expected listener address to be *net.TCPAddr")
+
+	resolver := newTestResolver([]netip.Addr{realAddr.AddrPort().Addr()}, 30*time.Second)
+	policy := DNSPolicy{Mode: DNSRefreshSingleLookup, Resolver: resolver}
+
+	respCh := make(chan WatcherResponse, 2)
+	ep := NewHTTPEndpoint(
+		u,
+		http.MethodGet,
+		WithID("single-lookup"),
+		WithReadFast(),
+		WithDNSPolicy(policy),
+	)
+
+	require.NoError(t, ep.Initialize("watcher-single", respCh))
+	require.Equal(t, DNSRefreshSingleLookup, ep.dnsPolicy.Mode)
+
+	require.NoError(t, ep.Task().Execute())
+	require.NoError(t, ep.Task().Execute())
+
+	resp1 := <-respCh
+	resp2 := <-respCh
+
+	require.NoError(t, resp1.Err)
+	require.NoError(t, resp2.Err)
+
+	assert.Equal(t, 1, resolver.Calls(), "resolver should be invoked once for single lookup")
+
+	md1 := resp1.Metadata()
+	require.NotNil(t, md1.DNS)
+	assert.Equal(t, DNSRefreshSingleLookup, md1.DNS.Mode)
+	md2 := resp2.Metadata()
+	require.NotNil(t, md2.DNS)
+	assert.Equal(t, DNSRefreshSingleLookup, md2.DNS.Mode)
+
+	require.NotNil(t, md1.RemoteAddr)
+	require.NotNil(t, md2.RemoteAddr)
+	assert.Equal(t, md1.RemoteAddr.String(), md2.RemoteAddr.String())
 }
 
 func TestHTTPEndpointExecuteMethods(t *testing.T) {
@@ -240,9 +350,11 @@ func TestHTTPEndpointExecuteMethods(t *testing.T) {
 				WithHeader(header),
 				WithPayload(c.payload),
 				WithID("an-id"),
+				WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
 			)
 			err = endpoint.Initialize("some-watcher-id", responseChan)
 			assert.NoError(t, err)
+			assert.Equal(t, DNSRefreshDefault, endpoint.dnsPolicy.Mode)
 
 			task := endpoint.Task()
 			assert.NotNil(t, task)
@@ -290,9 +402,16 @@ func TestHTTPEndpoint_ResponseRemoteAddr(t *testing.T) {
 
 	// Build a minimal endpoint that hits the test server
 	u, _ := url.Parse(server.URL)
-	ep := NewHTTPEndpoint(u, http.MethodGet, WithHeader(http.Header{}), WithID("id1"))
+	ep := NewHTTPEndpoint(
+		u,
+		http.MethodGet,
+		WithHeader(http.Header{}),
+		WithID("id1"),
+		WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
+	)
 	respChan := make(chan WatcherResponse, 1)
 	require.NoError(t, ep.Initialize("watcher-1", respChan))
+	assert.Equal(t, DNSRefreshDefault, ep.dnsPolicy.Mode)
 
 	// Run one request synchronously
 	task, ok := ep.Task().(*httpRequest)
@@ -322,10 +441,12 @@ func TestConnectionReuse(t *testing.T) {
 		http.MethodGet,
 		WithID("reuse"),
 		WithReadFast(), // ensure body is read/closed so the conn can be reused
+		WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
 	)
 
 	respCh := make(chan WatcherResponse, 1)
 	require.NoError(t, ep.Initialize("wid", respCh))
+	require.Equal(t, DNSRefreshDefault, ep.dnsPolicy.Mode)
 
 	// 1st request – should establish a new TCP connection.
 	require.NoError(t, ep.Task().Execute())
@@ -353,12 +474,14 @@ func TestNewHTTPEndpoint(t *testing.T) {
 	assert.NoError(t, err, "failed to parse URL")
 
 	cases := []struct {
-		name    string
-		options []HTTPEndpointOption
+		name         string
+		options      []HTTPEndpointOption
+		expectedMode DNSRefreshMode
 	}{
 		{
-			name:    "minimal construction",
-			options: []HTTPEndpointOption{},
+			name:         "minimal construction",
+			options:      []HTTPEndpointOption{},
+			expectedMode: DNSRefreshDefault,
 		},
 		{
 			name: "with header",
@@ -367,12 +490,14 @@ func TestNewHTTPEndpoint(t *testing.T) {
 					"X-Test": []string{"value"},
 				}),
 			},
+			expectedMode: DNSRefreshDefault,
 		},
 		{
 			name: "with payload",
 			options: []HTTPEndpointOption{
 				WithPayload([]byte(`{"key":"value"}`)),
 			},
+			expectedMode: DNSRefreshDefault,
 		},
 		{
 			name: "with transport control",
@@ -383,6 +508,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 					SkipTLSVerify: true,
 				}),
 			},
+			expectedMode: DNSRefreshDefault,
 		},
 		{
 			name: "with everything",
@@ -397,6 +523,14 @@ func TestNewHTTPEndpoint(t *testing.T) {
 					SkipTLSVerify: true,
 				}),
 			},
+			expectedMode: DNSRefreshDefault,
+		},
+		{
+			name: "with dns policy",
+			options: []HTTPEndpointOption{
+				WithDNSPolicy(DNSPolicy{Mode: DNSRefreshCadence, Cadence: time.Second}),
+			},
+			expectedMode: DNSRefreshCadence,
 		},
 	}
 
@@ -407,6 +541,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 
 			assert.Equal(t, testURL, endpoint.URL)
 			assert.Equal(t, http.MethodPost, endpoint.Method)
+			assert.Equal(t, c.expectedMode, endpoint.dnsPolicy.Mode)
 		})
 	}
 
