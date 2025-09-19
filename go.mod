@@ -7,6 +7,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/jkbrsn/go-jsonrpc v0.6.0
 	github.com/jkbrsn/taskman v0.5.1
+	github.com/miekg/dns v1.1.68
 	github.com/rs/xid v1.6.0
 	github.com/rs/zerolog v1.34.0
 	go.uber.org/atomic v1.11.0
@@ -22,6 +23,10 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	golang.org/x/arch v0.21.0 // indirect
+	golang.org/x/mod v0.24.0 // indirect
+	golang.org/x/net v0.40.0 // indirect
+	golang.org/x/sync v0.14.0 // indirect
+	golang.org/x/tools v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -96,6 +97,18 @@ type TaskResponseMetadata struct {
 
 	// TimeData contains the timing information for the request.
 	TimeData RequestTimes
+
+	// DNS contains the DNS decision metadata for the request, when available.
+	DNS *DNSMetadata
+}
+
+// DNSMetadata describes the DNS resolution data tied to a request.
+type DNSMetadata struct {
+	Mode               DNSRefreshMode
+	TTL                time.Duration
+	ExpiresAt          time.Time
+	ResolvedAddrs      []netip.Addr
+	GuardRailTriggered bool
 }
 
 // String returns a string representation of the metadata.
@@ -110,14 +123,25 @@ func (m TaskResponseMetadata) String() string {
 	}
 	headersStr := "{" + strings.Join(headerParts, ", ") + "}"
 
+	dnsStr := "<nil>"
+	if m.DNS != nil {
+		var addrStrs []string
+		for _, addr := range m.DNS.ResolvedAddrs {
+			addrStrs = append(addrStrs, addr.String())
+		}
+		dnsStr = fmt.Sprintf("{Mode: %d, TTL: %s, ExpiresAt: %s, Addrs: [%s], GuardRail: %t}",
+			m.DNS.Mode, m.DNS.TTL, m.DNS.ExpiresAt, strings.Join(addrStrs, ", "), m.DNS.GuardRailTriggered)
+	}
+
 	return fmt.Sprintf("TaskResponseMetadata{StatusCode: %d%sHeaders: %s%sSize: "+
-		"%d%sLatency: %s%sTimeSent: %s%sTimeReceived: %s}",
+		"%d%sLatency: %s%sTimeSent: %s%sTimeReceived: %s%sDNS: %s}",
 		m.StatusCode, ", ",
 		headersStr, ", ",
 		m.Size, ", ",
 		m.TimeData.Latency.String(), ", ",
 		m.TimeData.SentAt.String(), ", ",
-		m.TimeData.ReceivedAt.String())
+		m.TimeData.ReceivedAt.String(), ", ",
+		dnsStr)
 }
 
 // revive:enable:add-constant
@@ -138,12 +162,20 @@ type HTTPTaskResponse struct {
 
 	timestamps requestTimestamps
 
+	dnsDecision *DNSDecision
+
 	usedReader atomic.Bool // flags if we returned a Reader
 }
 
 // NewHTTPTaskResponse creates a new HTTPTaskResponse from an http.Response.
 func NewHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *HTTPTaskResponse {
-	return &HTTPTaskResponse{remoteAddr: remoteAddr, resp: r}
+	h := &HTTPTaskResponse{remoteAddr: remoteAddr, resp: r}
+	if r != nil && r.Request != nil {
+		if decision, ok := r.Request.Context().Value(dnsDecisionKey{}).(DNSDecision); ok {
+			h.dnsDecision = &decision
+		}
+	}
+	return h
 }
 
 // readBody reads the HTTP response body into memory exactly once and then closes the body.
@@ -243,6 +275,17 @@ func (h *HTTPTaskResponse) Metadata() TaskResponseMetadata {
 		TimeData:   TimeDataFromTimestamps(h.timestamps),
 	}
 	maps.Copy(md.Headers, h.resp.Header)
+
+	if h.dnsDecision != nil {
+		decision := *h.dnsDecision
+		md.DNS = &DNSMetadata{
+			Mode:               decision.Mode,
+			TTL:                decision.TTL,
+			ExpiresAt:          decision.ExpiresAt,
+			ResolvedAddrs:      append([]netip.Addr(nil), decision.ResolvedAddrs...),
+			GuardRailTriggered: decision.GuardRailTriggered,
+		}
+	}
 
 	return md
 }

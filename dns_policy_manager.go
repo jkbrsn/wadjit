@@ -1,0 +1,348 @@
+package wadjit
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/http"
+	"net/netip"
+	"net/url"
+	"sync"
+	"time"
+)
+
+type dnsCacheEntry struct {
+	addrs      []netip.Addr
+	expiresAt  time.Time
+	lastLookup time.Time
+}
+
+type guardRailState struct {
+	policy       GuardRailPolicy
+	count        int
+	firstFailure time.Time
+	lastFailure  time.Time
+	triggered    bool
+}
+
+type dnsPolicyManager struct {
+	policy   DNSPolicy
+	resolver TTLResolver
+	hook     DNSDecisionCallback
+
+	mu          sync.Mutex
+	cache       dnsCacheEntry
+	cadenceNext time.Time
+	forceLookup bool
+	guard       guardRailState
+}
+
+func newDNSPolicyManager(policy DNSPolicy, hook DNSDecisionCallback) *dnsPolicyManager {
+	mgr := &dnsPolicyManager{policy: policy, hook: hook}
+	if mgr.policy.Resolver != nil {
+		mgr.resolver = mgr.policy.Resolver
+	} else {
+		mgr.resolver = newDefaultTTLResolver()
+	}
+	mgr.guard.policy = policy.GuardRail
+	return mgr
+}
+
+type dnsPlanKey struct{}
+
+type dnsDialPlan struct {
+	target string
+}
+
+type dnsDecisionKey struct{}
+
+func (m *dnsPolicyManager) prepareRequest(ctx context.Context, u *url.URL, transport *http.Transport) (context.Context, bool, error) {
+	host := u.Hostname()
+	port := u.Port()
+	if port == "" {
+		port = defaultPort(u.Scheme)
+	}
+	if port == "" {
+		return ctx, false, errors.New("cannot determine port for URL")
+	}
+
+	address, forceNewConn, decision, err := m.resolve(ctx, host, port)
+	if err != nil {
+		if decision != nil && m.hook != nil {
+			decision.Err = err
+			m.hook(ctx, *decision)
+		}
+		return ctx, false, err
+	}
+	guardTriggered := m.consumeGuardTrigger()
+	if decision == nil && (m.hook != nil || guardTriggered) {
+		decision = &DNSDecision{Host: host, Mode: m.policy.Mode}
+	}
+
+	if guardTriggered && decision != nil {
+		forceNewConn = true
+		decision.GuardRailTriggered = true
+	}
+
+	if address != "" {
+		plan := dnsDialPlan{target: address}
+		ctx = context.WithValue(ctx, dnsPlanKey{}, plan)
+	}
+
+	if decision != nil {
+		ctx = context.WithValue(ctx, dnsDecisionKey{}, *decision)
+		if m.hook != nil {
+			m.hook(ctx, *decision)
+		}
+	}
+
+	if forceNewConn {
+		transport.CloseIdleConnections()
+	}
+
+	return ctx, forceNewConn, nil
+}
+
+func (m *dnsPolicyManager) resolve(ctx context.Context, host, port string) (string, bool, *DNSDecision, error) {
+	switch m.policy.Mode {
+	case DNSRefreshDefault:
+		return "", false, nil, nil
+	case DNSRefreshStatic:
+		addr := m.policy.StaticAddr
+		if (addr == netip.AddrPort{}) {
+			return "", false, nil, errors.Join(ErrInvalidDNSPolicy, errors.New("static address missing"))
+		}
+		decision := &DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: []netip.Addr{addr.Addr()}}
+		return addr.String(), false, decision, nil
+	case DNSRefreshSingleLookup:
+		return m.resolveSingle(ctx, host, port)
+	case DNSRefreshTTL:
+		return m.resolveTTL(ctx, host, port)
+	case DNSRefreshCadence:
+		return m.resolveCadence(ctx, host, port)
+	default:
+		return "", false, nil, errors.Join(ErrInvalidDNSPolicy, errors.New("unsupported DNS mode"))
+	}
+}
+
+func (m *dnsPolicyManager) resolveSingle(ctx context.Context, host, port string) (string, bool, *DNSDecision, error) {
+	m.mu.Lock()
+	cached := m.cache
+	m.mu.Unlock()
+
+	if len(cached.addrs) > 0 {
+		addr := net.JoinHostPort(cached.addrs[0].String(), port)
+		decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: cached.addrs}
+		return addr, false, &decision, nil
+	}
+
+	addrs, ttl, err := m.lookup(ctx, host)
+	if err != nil {
+		return "", false, nil, err
+	}
+	entry := dnsCacheEntry{addrs: addrs, lastLookup: time.Now()}
+
+	m.mu.Lock()
+	m.cache = entry
+	m.mu.Unlock()
+
+	addr := net.JoinHostPort(addrs[0].String(), port)
+	decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: addrs, TTL: ttl}
+	return addr, true, &decision, nil
+}
+
+func (m *dnsPolicyManager) resolveTTL(ctx context.Context, host, port string) (string, bool, *DNSDecision, error) {
+	now := time.Now()
+	m.mu.Lock()
+	cached := m.cache
+	forceLookup := m.forceLookup || len(cached.addrs) == 0 || (!cached.expiresAt.IsZero() && now.After(cached.expiresAt))
+	m.forceLookup = false
+	m.mu.Unlock()
+
+	if !forceLookup {
+		addr := net.JoinHostPort(cached.addrs[0].String(), port)
+		ttl := cached.expiresAt.Sub(cached.lastLookup)
+		decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: cached.addrs, TTL: ttl, ExpiresAt: cached.expiresAt}
+		return addr, false, &decision, nil
+	}
+
+	addrs, ttl, err := m.lookup(ctx, host)
+	if err != nil {
+		if m.policy.AllowFallback && len(cached.addrs) > 0 {
+			addr := net.JoinHostPort(cached.addrs[0].String(), port)
+			ttl := cached.expiresAt.Sub(cached.lastLookup)
+			decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: cached.addrs, TTL: ttl, ExpiresAt: cached.expiresAt, Err: err}
+			return addr, false, &decision, nil
+		}
+		return "", false, nil, err
+	}
+
+	ttl = m.policy.normalizeTTL(ttl)
+	entry := dnsCacheEntry{addrs: addrs, lastLookup: now}
+	if ttl > 0 {
+		entry.expiresAt = now.Add(ttl)
+	}
+
+	m.mu.Lock()
+	m.cache = entry
+	m.mu.Unlock()
+
+	decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: addrs, TTL: ttl, ExpiresAt: entry.expiresAt}
+	addr := net.JoinHostPort(addrs[0].String(), port)
+	return addr, true, &decision, nil
+}
+
+func (m *dnsPolicyManager) resolveCadence(ctx context.Context, host, port string) (string, bool, *DNSDecision, error) {
+	now := time.Now()
+
+	m.mu.Lock()
+	cached := m.cache
+	cadenceNext := m.cadenceNext
+	forceLookup := m.forceLookup || len(cached.addrs) == 0 || (!cadenceNext.IsZero() && now.After(cadenceNext))
+	m.forceLookup = false
+	m.mu.Unlock()
+
+	if !forceLookup && len(cached.addrs) > 0 {
+		addr := net.JoinHostPort(cached.addrs[0].String(), port)
+		decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: cached.addrs, ExpiresAt: cadenceNext}
+		return addr, false, &decision, nil
+	}
+
+	addrs, ttl, err := m.lookup(ctx, host)
+	if err != nil {
+		if m.policy.AllowFallback && len(cached.addrs) > 0 {
+			addr := net.JoinHostPort(cached.addrs[0].String(), port)
+			decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: cached.addrs, ExpiresAt: cadenceNext, Err: err}
+			return addr, false, &decision, nil
+		}
+		return "", false, nil, err
+	}
+
+	entry := dnsCacheEntry{addrs: addrs, lastLookup: now}
+	next := now.Add(m.policy.Cadence)
+
+	m.mu.Lock()
+	m.cache = entry
+	m.cadenceNext = next
+	m.mu.Unlock()
+
+	decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: addrs, TTL: ttl, ExpiresAt: next}
+	addr := net.JoinHostPort(addrs[0].String(), port)
+	return addr, true, &decision, nil
+}
+
+func (m *dnsPolicyManager) lookup(ctx context.Context, host string) ([]netip.Addr, time.Duration, error) {
+	if m.resolver == nil {
+		return nil, 0, errors.New("resolver not configured")
+	}
+	addrs, ttl, err := m.resolver.Lookup(ctx, host)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(addrs) == 0 {
+		return nil, 0, errors.New("resolver returned no addresses")
+	}
+	return addrs, ttl, nil
+}
+
+func (m *dnsPolicyManager) dialContext(dialer *net.Dialer) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		if plan, ok := ctx.Value(dnsPlanKey{}).(dnsDialPlan); ok {
+			if plan.target != "" {
+				address = plan.target
+			}
+		}
+		return dialer.DialContext(ctx, network, address)
+	}
+}
+
+func (m *dnsPolicyManager) observeResult(statusCode int, resultErr error) {
+	if !m.guard.policy.Enabled() {
+		return
+	}
+	now := time.Now()
+	if resultErr != nil || statusCode >= 500 {
+		m.registerGuardFailure(now)
+		return
+	}
+	m.resetGuard()
+}
+
+func (m *dnsPolicyManager) registerGuardFailure(now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	policy := m.guard.policy
+	if !policy.Enabled() {
+		return
+	}
+
+	if policy.Window > 0 {
+		if m.guard.firstFailure.IsZero() || now.Sub(m.guard.firstFailure) > policy.Window {
+			m.guard.count = 0
+			m.guard.firstFailure = now
+		}
+	} else if m.guard.firstFailure.IsZero() {
+		m.guard.firstFailure = now
+	}
+
+	m.guard.count++
+	m.guard.lastFailure = now
+
+	if m.guard.count >= policy.ConsecutiveErrorThreshold {
+		m.guard.triggered = true
+		m.guard.count = 0
+		m.guard.firstFailure = time.Time{}
+		if policy.Action == GuardRailActionForceLookup {
+			m.forceLookup = true
+		}
+	}
+}
+
+func (m *dnsPolicyManager) resetGuard() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.guard.count = 0
+	m.guard.firstFailure = time.Time{}
+	m.guard.lastFailure = time.Time{}
+}
+
+func (m *dnsPolicyManager) consumeGuardTrigger() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.guard.triggered {
+		return false
+	}
+	m.guard.triggered = false
+	return m.guard.policy.Action != GuardRailActionNone
+}
+
+type policyTransport struct {
+	base *http.Transport
+	mgr  *dnsPolicyManager
+}
+
+func (p *policyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx, forceClose, err := p.mgr.prepareRequest(req.Context(), req.URL, p.base)
+	if err != nil {
+		return nil, err
+	}
+
+	newReq := req.Clone(ctx)
+	if forceClose {
+		newReq.Close = true
+	}
+
+	return p.base.RoundTrip(newReq)
+}
+
+func defaultPort(scheme string) string {
+	switch scheme {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
+}
