@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// testResolver implements TTLResolver for testing purposes.
 type testResolver struct {
 	mu    sync.Mutex
 	addrs []netip.Addr
@@ -19,7 +20,10 @@ func newTestResolver(addrs []netip.Addr, ttl time.Duration) *testResolver {
 	return &testResolver{addrs: append([]netip.Addr(nil), addrs...), ttl: ttl}
 }
 
-func (r *testResolver) Lookup(ctx context.Context, host string) ([]netip.Addr, time.Duration, error) {
+func (r *testResolver) Lookup(
+	ctx context.Context,
+	host string,
+) ([]netip.Addr, time.Duration, error) {
 	_ = ctx
 	_ = host
 	r.mu.Lock()
