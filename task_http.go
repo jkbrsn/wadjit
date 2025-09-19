@@ -2,9 +2,9 @@ package wadjit
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -36,6 +36,9 @@ type HTTPEndpoint struct {
 	// TransportControl facilitates DNS-bypass when non-nil.
 	TransportControl *TransportControl
 	client           *http.Client
+	dnsPolicy        DNSPolicy
+	dnsDecisionHook  DNSDecisionCallback
+	dnsMgr           *dnsPolicyManager
 
 	// OptReadFast is a flag that, when set, makes the task execution read the response body into
 	// memory and close the body as soon as the full response has been received. This completes the
@@ -57,31 +60,41 @@ func (e *HTTPEndpoint) Initialize(watcherID string, responseChannel chan<- Watch
 	e.watcherID = watcherID
 	e.respChan = responseChannel
 
-	if e.TransportControl == nil {
-		e.client = http.DefaultClient
-	} else {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	policy := e.dnsPolicy
+
+	if e.TransportControl != nil {
 		tc := e.TransportControl
-
-		// Clone the default transport to keep sensible settings
-		tr := http.DefaultTransport.(*http.Transport).Clone()
-
-		// Override name–resolution only
-		tr.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
-			// TODO: move timeout to configuration
-			d := &net.Dialer{Timeout: defaultDialTimeout}
-			return d.DialContext(ctx, "tcp", tc.AddrPort.String())
+		if policy.Mode != DNSRefreshDefault && policy.Mode != DNSRefreshStatic {
+			return fmt.Errorf("transport control incompatible with DNS mode %d", policy.Mode)
+		}
+		if policy.Mode == DNSRefreshDefault {
+			policy.Mode = DNSRefreshStatic
+		}
+		if (policy.StaticAddr == netip.AddrPort{}) {
+			policy.StaticAddr = tc.AddrPort
 		}
 
-		// Optional TLS wrapping with correct SNI
 		if tc.TLSEnabled {
 			tr.TLSClientConfig = &tls.Config{
 				ServerName:         e.URL.Hostname(),
 				InsecureSkipVerify: tc.SkipTLSVerify,
 			}
 		}
-
-		e.client = &http.Client{Transport: tr}
 	}
+
+	if err := policy.Validate(); err != nil {
+		return err
+	}
+
+	mgr := newDNSPolicyManager(policy, e.dnsDecisionHook)
+	dialer := &net.Dialer{Timeout: defaultDialTimeout}
+	tr.DialContext = mgr.dialContext(dialer)
+
+	e.dnsMgr = mgr
+	e.dnsPolicy = policy
+
+	e.client = &http.Client{Transport: &policyTransport{base: tr, mgr: mgr}}
 
 	// TODO: set mode based on payload, e.g. JSON RPC, text ete.
 	return nil
@@ -115,7 +128,7 @@ func (e *HTTPEndpoint) Validate() error {
 			return errors.New("TransportControl.AddrPort is empty")
 		}
 	}
-	return nil
+	return e.dnsPolicy.Validate()
 }
 
 // WithHeader configures the HTTPEndpoint to use the provided header.
@@ -181,8 +194,14 @@ func (r httpRequest) Execute() error {
 	// Send the request
 	response, err := r.endpoint.client.Do(request)
 	if err != nil {
+		if r.endpoint.dnsMgr != nil {
+			r.endpoint.dnsMgr.observeResult(0, err)
+		}
 		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, &urlClone)
 		return err
+	}
+	if r.endpoint.dnsMgr != nil {
+		r.endpoint.dnsMgr.observeResult(response.StatusCode, nil)
 	}
 
 	var remoteAddr net.Addr
