@@ -33,12 +33,17 @@ type HTTPEndpoint struct {
 	URL     *url.URL
 	ID      string
 
-	// TransportControl facilitates DNS-bypass when non-nil.
-	TransportControl *TransportControl
-	client           *http.Client
-	dnsPolicy        DNSPolicy
-	dnsDecisionHook  DNSDecisionCallback
-	dnsMgr           *dnsPolicyManager
+	// staticDialOverride forces the transport to dial a literal address instead of resolving DNS.
+	staticDialOverride netip.AddrPort
+	// hasStaticDialOverride indicates whether the override should be applied.
+	hasStaticDialOverride bool
+	// tlsSkipVerify disables TLS verification when issuing HTTPS requests.
+	tlsSkipVerify bool
+
+	client          *http.Client
+	dnsPolicy       DNSPolicy
+	dnsDecisionHook DNSDecisionCallback
+	dnsMgr          *dnsPolicyManager
 
 	// OptReadFast is a flag that, when set, makes the task execution read the response body into
 	// memory and close the body as soon as the full response has been received. This completes the
@@ -63,23 +68,22 @@ func (e *HTTPEndpoint) Initialize(watcherID string, responseChannel chan<- Watch
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	policy := e.dnsPolicy
 
-	if e.TransportControl != nil {
-		tc := e.TransportControl
+	if e.hasStaticDialOverride {
 		if policy.Mode != DNSRefreshDefault && policy.Mode != DNSRefreshStatic {
-			return fmt.Errorf("transport control incompatible with DNS mode %d", policy.Mode)
+			return fmt.Errorf("static dial override incompatible with DNS mode %d", policy.Mode)
 		}
 		if policy.Mode == DNSRefreshDefault {
 			policy.Mode = DNSRefreshStatic
 		}
 		if (policy.StaticAddr == netip.AddrPort{}) {
-			policy.StaticAddr = tc.AddrPort
+			policy.StaticAddr = e.staticDialOverride
 		}
+	}
 
-		if tc.TLSEnabled {
-			tr.TLSClientConfig = &tls.Config{
-				ServerName:         e.URL.Hostname(),
-				InsecureSkipVerify: tc.SkipTLSVerify,
-			}
+	if e.tlsSkipVerify && e.URL.Scheme == "https" {
+		tr.TLSClientConfig = &tls.Config{
+			ServerName:         e.URL.Hostname(),
+			InsecureSkipVerify: true,
 		}
 	}
 
@@ -123,10 +127,8 @@ func (e *HTTPEndpoint) Validate() error {
 		// Set random ID if nil
 		e.ID = xid.New().String()
 	}
-	if e.TransportControl != nil {
-		if e.TransportControl.AddrPort == (netip.AddrPort{}) {
-			return errors.New("TransportControl.AddrPort is empty")
-		}
+	if e.hasStaticDialOverride && e.staticDialOverride == (netip.AddrPort{}) {
+		return errors.New("static dial override is empty")
 	}
 	return e.dnsPolicy.Validate()
 }
@@ -152,9 +154,18 @@ func WithReadFast() HTTPEndpointOption {
 	return func(ep *HTTPEndpoint) { ep.OptReadFast = true }
 }
 
-// WithTransportControl configures the HTTPEndpoint to use the provided TransportControl.
-func WithTransportControl(tc *TransportControl) HTTPEndpointOption {
-	return func(ep *HTTPEndpoint) { ep.TransportControl = tc }
+// WithStaticDialOverride forces HTTP requests to bypass DNS and dial the provided address.
+func WithStaticDialOverride(addr netip.AddrPort) HTTPEndpointOption {
+	return func(ep *HTTPEndpoint) {
+		ep.staticDialOverride = addr
+		ep.hasStaticDialOverride = true
+	}
+}
+
+// WithTLSSkipVerify disables TLS certificate verification for HTTPS requests. Intended for tests or
+// trusted environments only.
+func WithTLSSkipVerify() HTTPEndpointOption {
+	return func(ep *HTTPEndpoint) { ep.tlsSkipVerify = true }
 }
 
 // httpRequest is an implementation of taskman.Task that sends an HTTP request to an endpoint.
@@ -213,7 +224,7 @@ func (r httpRequest) Execute() error {
 	}
 
 	// Create a task response
-	taskResponse := NewHTTPTaskResponse(remoteAddr, response)
+	taskResponse := newHTTPTaskResponse(remoteAddr, response)
 	taskResponse.timestamps = tStore.Snapshot()
 	if r.endpoint.OptReadFast {
 		taskResponse.readBody()
@@ -266,11 +277,10 @@ func NewHTTPEndpoint(
 	opts ...HTTPEndpointOption,
 ) *HTTPEndpoint {
 	ep := &HTTPEndpoint{
-		URL:              u,
-		Method:           method,
-		Header:           make(http.Header),
-		ID:               xid.New().String(),
-		TransportControl: nil,
+		URL:    u,
+		Method: method,
+		Header: make(http.Header),
+		ID:     xid.New().String(),
 	}
 
 	for _, opt := range opts {

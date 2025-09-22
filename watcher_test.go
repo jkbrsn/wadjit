@@ -173,12 +173,12 @@ func TestWatcherExecution(t *testing.T) {
 		assert.Equal(t, payload, responsePayload)
 		switch response.URL.Scheme {
 		case "http":
-			_, ok := response.Payload.(*HTTPTaskResponse)
-			assert.True(t, ok, "response.Payload is not of type HTTPTaskResponse")
+			_, ok := response.Payload.(*httpTaskResponse)
+			assert.True(t, ok, "response.Payload is not of type httpTaskResponse")
 			assert.Equal(t, "an-id", response.TaskID)
 		case "ws":
-			_, ok := response.Payload.(*WSTaskResponse)
-			assert.True(t, ok, "response.Payload is not of type WSTaskResponse")
+			_, ok := response.Payload.(*wsTaskResponse)
+			assert.True(t, ok, "response.Payload is not of type wsTaskResponse")
 			assert.Equal(t, "another-id", response.TaskID)
 		default:
 			t.Fail()

@@ -1,6 +1,6 @@
 # todo
 
-## v0.8.0
+## v0.9.0
 
 - Support "pause" and "resume" of watchers
   - Dependent on future `taskman` features

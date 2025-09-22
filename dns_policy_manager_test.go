@@ -270,7 +270,7 @@ func TestHTTPTaskResponseMetadataIncludesDNS(t *testing.T) {
 		Request:       request,
 		ContentLength: 123,
 	}
-	h := NewHTTPTaskResponse(&net.TCPAddr{}, resp)
+	h := newHTTPTaskResponse(&net.TCPAddr{}, resp)
 
 	md := h.Metadata()
 	require.NotNil(t, md.DNS)

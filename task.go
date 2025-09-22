@@ -1,7 +1,6 @@
 package wadjit
 
 import (
-	"net/netip"
 	"net/url"
 
 	"github.com/jkbrsn/taskman"
@@ -21,17 +20,6 @@ type WatcherTask interface {
 
 	// Validate checks that the WatcherTask is ready for initialization.
 	Validate() error
-}
-
-// TransportControl contains information about the transport layer of a connection.
-type TransportControl struct {
-	// A literal address to connect to.
-	AddrPort netip.AddrPort
-	// Set to true to negotiate a TLS connection after the TCP call.
-	TLSEnabled bool
-	// SkipTLSVerify disables validation of the server certificate when TLSEnabled is true.
-	// Use with caution – intended mainly for tests or trusted internal endpoints.
-	SkipTLSVerify bool
 }
 
 // errorResponse is a helper to create a WatcherResponse with an error.
