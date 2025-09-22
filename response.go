@@ -151,8 +151,8 @@ func (m TaskResponseMetadata) String() string {
 // HTTP
 //
 
-// HTTPTaskResponse is a TaskResponse for HTTP responses.
-type HTTPTaskResponse struct {
+// httpTaskResponse is a TaskResponse for HTTP responses.
+type httpTaskResponse struct {
 	remoteAddr net.Addr
 	resp       *http.Response
 
@@ -168,19 +168,13 @@ type HTTPTaskResponse struct {
 	usedReader atomic.Bool // flags if we returned a Reader
 }
 
-// NewHTTPTaskResponse creates a new HTTPTaskResponse from an http.Response.
-func NewHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *HTTPTaskResponse {
-	h := &HTTPTaskResponse{remoteAddr: remoteAddr, resp: r}
-	if r != nil && r.Request != nil {
-		if decision, ok := r.Request.Context().Value(dnsDecisionKey{}).(DNSDecision); ok {
-			h.dnsDecision = &decision
-		}
-	}
-	return h
+// dataDone checks if the sync.Once for Data() has run.
+func (h *httpTaskResponse) dataDone() bool {
+	return h.dataOnce.Load()
 }
 
 // readBody reads the HTTP response body into memory exactly once and then closes the body.
-func (h *HTTPTaskResponse) readBody() {
+func (h *httpTaskResponse) readBody() {
 	if h.resp.Body == nil {
 		h.dataErr = errors.New("http.Response.Body is nil")
 		return
@@ -203,7 +197,7 @@ func (h *HTTPTaskResponse) readBody() {
 }
 
 // Close closes the HTTP response body.
-func (h *HTTPTaskResponse) Close() error {
+func (h *httpTaskResponse) Close() error {
 	if h.resp.Body == nil {
 		return nil
 	}
@@ -212,7 +206,7 @@ func (h *HTTPTaskResponse) Close() error {
 
 // Data reads the entire HTTP response body into memory exactly once and then closes the body.
 // Further calls return the data from memory.
-func (h *HTTPTaskResponse) Data() ([]byte, error) {
+func (h *httpTaskResponse) Data() ([]byte, error) {
 	// If the user already called Reader(), we disallow Data().
 	if h.usedReader.Load() {
 		return nil, errors.New("cannot call Data() after Reader() was already used")
@@ -228,7 +222,7 @@ func (h *HTTPTaskResponse) Data() ([]byte, error) {
 // Reader returns an io.ReadCloser for streaming. If Data() has already been called, we return
 // an in-memory buffer to stream from instead.
 // Note: the caller is responsible for closing the reader. Closing is a no-op if Data() was called.
-func (h *HTTPTaskResponse) Reader() (io.ReadCloser, error) {
+func (h *httpTaskResponse) Reader() (io.ReadCloser, error) {
 	// If Data() was invoked, disallow reading from the raw body.
 	if h.dataDone() {
 		if h.dataErr != nil {
@@ -263,7 +257,7 @@ func (h *HTTPTaskResponse) Reader() (io.ReadCloser, error) {
 }
 
 // Metadata returns the HTTP status code and headers.
-func (h *HTTPTaskResponse) Metadata() TaskResponseMetadata {
+func (h *httpTaskResponse) Metadata() TaskResponseMetadata {
 	if h.resp == nil {
 		return TaskResponseMetadata{}
 	}
@@ -291,9 +285,15 @@ func (h *HTTPTaskResponse) Metadata() TaskResponseMetadata {
 	return md
 }
 
-// dataDone checks if the sync.Once for Data() has run.
-func (h *HTTPTaskResponse) dataDone() bool {
-	return h.dataOnce.Load()
+// NewHTTPTaskResponse creates a new httpTaskResponse from an http.Response.
+func NewHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *httpTaskResponse {
+	h := &httpTaskResponse{remoteAddr: remoteAddr, resp: r}
+	if r != nil && r.Request != nil {
+		if decision, ok := r.Request.Context().Value(dnsDecisionKey{}).(DNSDecision); ok {
+			h.dnsDecision = &decision
+		}
+	}
+	return h
 }
 
 //
