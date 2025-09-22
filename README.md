@@ -135,6 +135,8 @@ Guard rails add safety nets on top of any mode. Configure `GuardRailPolicy` with
 - `GuardRailActionFlush` drops idle connections after the threshold, ensuring the next request redials.
 - `GuardRailActionForceLookup` also sets a `forceLookup` flag so the next request performs a fresh DNS resolution before dialing.
 
+Set a global default for every watcher by supplying `wadjit.WithDefaultDNSPolicy(...)` when creating the Wadjit. Endpoints that do not call `WithDNSPolicy` inherit this default automatically, while explicit endpoint policies still win.
+
 ##### Examples
 
 Assuming a parsed target URL:

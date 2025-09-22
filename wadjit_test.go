@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -219,6 +220,46 @@ func TestWadjit_AddWatcher(t *testing.T) {
 			tc.test(t, w)
 		})
 	}
+}
+
+func TestWadjit_DefaultDNSPolicyApplied(t *testing.T) {
+	defaultPolicy := DNSPolicy{
+		Mode:       DNSRefreshStatic,
+		StaticAddr: netip.MustParseAddrPort("127.0.0.1:8080"),
+	}
+	overridePolicy := DNSPolicy{
+		Mode:    DNSRefreshCadence,
+		Cadence: 2 * time.Second,
+		TTLMin:  0,
+		TTLMax:  0,
+	}
+
+	w := New(WithDefaultDNSPolicy(defaultPolicy))
+	t.Cleanup(func() {
+		require.NoError(t, w.Close())
+	})
+
+	baseURL, err := url.Parse("http://example.com/health")
+	require.NoError(t, err)
+
+	endpointWithoutPolicy := NewHTTPEndpoint(baseURL, http.MethodGet)
+	endpointWithPolicy := NewHTTPEndpoint(baseURL, http.MethodGet, WithDNSPolicy(overridePolicy))
+
+	watcher, err := NewWatcher(
+		xid.New().String(),
+		time.Hour,
+		WatcherTasksToSlice(endpointWithoutPolicy, endpointWithPolicy),
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, w.AddWatcher(watcher))
+
+	assert.True(t, endpointWithoutPolicy.dnsPolicySet, "expected default policy to mark endpoint")
+	assert.Equal(t, defaultPolicy.Mode, endpointWithoutPolicy.dnsPolicy.Mode)
+	assert.Equal(t, defaultPolicy.StaticAddr, endpointWithoutPolicy.dnsPolicy.StaticAddr)
+
+	assert.True(t, endpointWithPolicy.dnsPolicySet, "explicit policy should remain marked")
+	assert.Equal(t, overridePolicy, endpointWithPolicy.dnsPolicy)
 }
 
 func TestWadjit_ConcurrentWatchers(t *testing.T) {

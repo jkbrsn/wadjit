@@ -24,6 +24,9 @@ type Wadjit struct {
 	respGatherChan chan WatcherResponse
 	respExportChan chan WatcherResponse
 
+	defaultDNSPolicy    DNSPolicy
+	hasDefaultDNSPolicy bool
+
 	ctx    context.Context
 	cancel context.CancelFunc
 
@@ -34,6 +37,8 @@ type Wadjit struct {
 
 // AddWatcher adds a Watcher to the Wadjit, starting it in the process.
 func (w *Wadjit) AddWatcher(watcher *Watcher) error {
+	w.applyDefaultDNSPolicy(watcher)
+
 	if err := watcher.Validate(); err != nil {
 		return fmt.Errorf("error validating watcher: %v", err)
 	}
@@ -56,6 +61,22 @@ func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	w.watchers.Store(watcher.ID, watcher)
 
 	return nil
+}
+
+func (w *Wadjit) applyDefaultDNSPolicy(watcher *Watcher) {
+	if !w.hasDefaultDNSPolicy || watcher == nil {
+		return
+	}
+
+	for i := range watcher.Tasks {
+		if endpoint, ok := watcher.Tasks[i].(*HTTPEndpoint); ok && endpoint != nil {
+			if endpoint.dnsPolicySet {
+				continue
+			}
+			endpoint.dnsPolicy = w.defaultDNSPolicy
+			endpoint.dnsPolicySet = true
+		}
+	}
 }
 
 // AddWatchers adds multiple Watchers to the Wadjit, starting them in the process.
@@ -203,9 +224,11 @@ func New(opts ...Option) *Wadjit {
 		ctx:    ctx,
 		cancel: cancel,
 		// TODO: set logger
-		taskManager:    tm,
-		respGatherChan: make(chan WatcherResponse, options.bufferSize),
-		respExportChan: make(chan WatcherResponse, options.bufferSize),
+		taskManager:         tm,
+		respGatherChan:      make(chan WatcherResponse, options.bufferSize),
+		respExportChan:      make(chan WatcherResponse, options.bufferSize),
+		defaultDNSPolicy:    options.defaultDNSPolicy,
+		hasDefaultDNSPolicy: options.hasDefaultDNSPolicy,
 	}
 
 	w.closeWG.Add(1)
@@ -223,9 +246,11 @@ type Option func(*options)
 // options holds configuration for creating a Wadjit instance, including options for the internal
 // task manager.
 type options struct {
-	bufferSize int
-	logger     zerolog.Logger
-	loggerSet  bool
+	bufferSize          int
+	defaultDNSPolicy    DNSPolicy
+	hasDefaultDNSPolicy bool
+	logger              zerolog.Logger
+	loggerSet           bool
 
 	taskmanOptions []taskman.TMOption
 }
@@ -238,6 +263,15 @@ func WithBufferSize(size int) Option {
 			return
 		}
 		o.bufferSize = size
+	}
+}
+
+// WithDefaultDNSPolicy sets a default DNS policy for HTTP endpoints created without an explicit
+// policy. Endpoints configured via WithDNSPolicy override this default.
+func WithDefaultDNSPolicy(policy DNSPolicy) Option {
+	return func(o *options) {
+		o.defaultDNSPolicy = policy
+		o.hasDefaultDNSPolicy = true
 	}
 }
 

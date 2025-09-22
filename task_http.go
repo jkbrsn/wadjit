@@ -44,6 +44,7 @@ type HTTPEndpoint struct {
 	dnsPolicy       DNSPolicy
 	dnsDecisionHook DNSDecisionCallback
 	dnsMgr          *dnsPolicyManager
+	dnsPolicySet    bool
 
 	// OptReadFast is a flag that, when set, makes the task execution read the response body into
 	// memory and close the body as soon as the full response has been received. This completes the
@@ -137,6 +138,7 @@ func (e *HTTPEndpoint) Validate() error {
 func WithDNSPolicy(policy DNSPolicy) HTTPEndpointOption {
 	return func(ep *HTTPEndpoint) {
 		ep.dnsPolicy = policy
+		ep.dnsPolicySet = true
 	}
 }
 
