@@ -29,20 +29,20 @@ const (
 	DNSRefreshCadence
 )
 
-// GuardRailAction describes how to react when guard rail conditions are met.
-type GuardRailAction uint8
+// DNSGuardRailAction describes how to react when guard rail conditions are met.
+type DNSGuardRailAction uint8
 
 const (
-	// GuardRailActionNone leaves connections untouched when guard rail triggers.
-	GuardRailActionNone GuardRailAction = iota
-	// GuardRailActionFlush drops idle connections so the next request dials afresh.
-	GuardRailActionFlush
-	// GuardRailActionForceLookup flushes and also forces a fresh DNS lookup on next use.
-	GuardRailActionForceLookup
+	// DNSGuardRailActionNone leaves connections untouched when guard rail triggers.
+	DNSGuardRailActionNone DNSGuardRailAction = iota
+	// DNSGuardRailActionFlush drops idle connections so the next request dials afresh.
+	DNSGuardRailActionFlush
+	// DNSGuardRailActionForceLookup flushes and also forces a fresh DNS lookup on next use.
+	DNSGuardRailActionForceLookup
 )
 
-// GuardRailPolicy configures optional safety overrides that activate on repeated errors.
-type GuardRailPolicy struct {
+// DNSGuardRailPolicy configures optional safety overrides that activate on repeated errors.
+type DNSGuardRailPolicy struct {
 	// ConsecutiveErrorThreshold triggers the guard rail after this many sequential failures. Zero
 	// disables guard rails.
 	ConsecutiveErrorThreshold int
@@ -50,12 +50,12 @@ type GuardRailPolicy struct {
 	// counted indefinitely).
 	Window time.Duration
 	// Action determines what happens once the threshold is hit.
-	Action GuardRailAction
+	Action DNSGuardRailAction
 }
 
 // Enabled reports whether the guard rail is active.
-func (p GuardRailPolicy) Enabled() bool {
-	return p.ConsecutiveErrorThreshold > 0 && p.Action != GuardRailActionNone
+func (p DNSGuardRailPolicy) Enabled() bool {
+	return p.ConsecutiveErrorThreshold > 0 && p.Action != DNSGuardRailActionNone
 }
 
 // DNSPolicy encapsulates the DNS refresh behavior for an endpoint.
@@ -77,7 +77,7 @@ type DNSPolicy struct {
 	DisableFallback bool
 
 	// GuardRail configures optional guard rail behavior.
-	GuardRail GuardRailPolicy
+	GuardRail DNSGuardRailPolicy
 
 	// Resolver optionally overrides the default TTL resolver implementation.
 	Resolver TTLResolver

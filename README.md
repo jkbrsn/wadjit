@@ -130,10 +130,10 @@ Wadjit's HTTP task can stay on long-lived keep-alive connections or routinely fo
 - `DNSRefreshTTL` honors observed DNS TTLs (clamped by optional `TTLMin`/`TTLMax`) and forces a fresh lookup once the TTL elapses. Failed refreshes reuse the cached address by default; set `DisableFallback` to drop it instead. TTLs ≤ 0 are treated as “expire immediately,” ensuring the next request resolves again unless fallback keeps the previous address alive.
 - `DNSRefreshCadence` ignores TTL and instead re-lookups on a fixed cadence you supply; it still records the resolver's TTL for observability. Failed refreshes reuse the cached address unless `DisableFallback` is set.
 
-Guard rails add safety nets on top of any mode. Configure `GuardRailPolicy` with a consecutive error threshold, optional rolling window, and an action:
+Guard rails add safety nets on top of any mode. Configure `DNSGuardRailPolicy` with a consecutive error threshold, optional rolling window, and an action:
 
-- `GuardRailActionFlush` drops idle connections after the threshold, ensuring the next request redials.
-- `GuardRailActionForceLookup` also sets a `forceLookup` flag so the next request performs a fresh DNS resolution before dialing.
+- `DNSGuardRailActionFlush` drops idle connections after the threshold, ensuring the next request redials.
+- `DNSGuardRailActionForceLookup` also sets a `forceLookup` flag so the next request performs a fresh DNS resolution before dialing.
 
 Set a global default for every watcher by supplying `wadjit.WithDefaultDNSPolicy(...)` when creating the Wadjit. Endpoints that do not call `WithDNSPolicy` inherit this default automatically, while explicit endpoint policies still win.
 
@@ -185,10 +185,10 @@ targetURL, _ := url.Parse("https://service.example.com/healthz")
           TTLMin:        5 * time.Second,
           TTLMax:        30 * time.Second,
           // DisableFallback: true, // opt out of reusing cached addresses when lookups fail
-          GuardRail: wadjit.GuardRailPolicy{
+          GuardRail: wadjit.DNSGuardRailPolicy{
               ConsecutiveErrorThreshold: 4,
               Window:                    1 * time.Minute,
-              Action:                    wadjit.GuardRailActionForceLookup,
+              Action:                    wadjit.DNSGuardRailActionForceLookup,
           },
       }),
   )
@@ -203,9 +203,9 @@ targetURL, _ := url.Parse("https://service.example.com/healthz")
       wadjit.WithDNSPolicy(wadjit.DNSPolicy{
           Mode:    wadjit.DNSRefreshCadence,
           Cadence: 10 * time.Second,
-          GuardRail: wadjit.GuardRailPolicy{
+          GuardRail: wadjit.DNSGuardRailPolicy{
               ConsecutiveErrorThreshold: 2,
-              Action:                    wadjit.GuardRailActionFlush,
+              Action:                    wadjit.DNSGuardRailActionFlush,
           },
       }),
   )

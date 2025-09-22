@@ -63,9 +63,12 @@ func TestDNSPolicyManagerGuardRailForcesFlush(t *testing.T) {
 	u := &url.URL{Scheme: "http", Host: host}
 
 	policy := DNSPolicy{
-		Mode:      DNSRefreshCadence,
-		Cadence:   10 * time.Second,
-		GuardRail: GuardRailPolicy{ConsecutiveErrorThreshold: 1, Action: GuardRailActionFlush},
+		Mode:    DNSRefreshCadence,
+		Cadence: 10 * time.Second,
+		GuardRail: DNSGuardRailPolicy{
+			ConsecutiveErrorThreshold: 1,
+			Action:                    DNSGuardRailActionFlush,
+		},
 	}
 	mgr := newDNSPolicyManager(policy, nil)
 	mgr.resolver = newTestResolver([]netip.Addr{netip.MustParseAddr("198.51.100.1")}, 0)
@@ -133,10 +136,10 @@ func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
 		Mode:   DNSRefreshTTL,
 		TTLMin: 15 * time.Millisecond,
 		TTLMax: 50 * time.Millisecond,
-		GuardRail: GuardRailPolicy{
+		GuardRail: DNSGuardRailPolicy{
 			ConsecutiveErrorThreshold: 2,
 			Window:                    200 * time.Millisecond,
-			Action:                    GuardRailActionForceLookup,
+			Action:                    DNSGuardRailActionForceLookup,
 		},
 	}
 	mgr := newDNSPolicyManager(policy, nil)

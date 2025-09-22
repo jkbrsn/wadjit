@@ -18,7 +18,7 @@ type dnsCacheEntry struct {
 }
 
 type guardRailState struct {
-	policy       GuardRailPolicy
+	policy       DNSGuardRailPolicy
 	count        int
 	firstFailure time.Time
 	lastFailure  time.Time
@@ -396,7 +396,7 @@ func (m *dnsPolicyManager) registerGuardFailure(now time.Time) {
 		m.guard.triggered = true
 		m.guard.count = 0
 		m.guard.firstFailure = time.Time{}
-		if policy.Action == GuardRailActionForceLookup {
+		if policy.Action == DNSGuardRailActionForceLookup {
 			m.forceLookup = true
 		}
 	}
@@ -420,7 +420,7 @@ func (m *dnsPolicyManager) consumeGuardTrigger() bool {
 		return false
 	}
 	m.guard.triggered = false
-	return m.guard.policy.Action != GuardRailActionNone
+	return m.guard.policy.Action != DNSGuardRailActionNone
 }
 
 type policyTransport struct {

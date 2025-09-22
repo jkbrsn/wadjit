@@ -32,7 +32,7 @@
   - Introduce a pre-execute check that the connection is alive and ready to be used
 - Make WS use read and write deadlines to avoid blocking
 
-### Extend DNS GuardRailPolicy patterns
+### Extend DNSGuardRailPolicy patterns
 
 Ideas on additional guard-rail patterns that could be useful, especially for long-lived monitoring tasks:
 
