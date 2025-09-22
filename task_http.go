@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptrace"
-	"net/netip"
 	"net/url"
 	"time"
 
@@ -33,18 +31,13 @@ type HTTPEndpoint struct {
 	URL     *url.URL
 	ID      string
 
-	// staticDialOverride forces the transport to dial a literal address instead of resolving DNS.
-	staticDialOverride netip.AddrPort
-	// hasStaticDialOverride indicates whether the override should be applied.
-	hasStaticDialOverride bool
-	// tlsSkipVerify disables TLS verification when issuing HTTPS requests.
-	tlsSkipVerify bool
-
 	client          *http.Client
 	dnsPolicy       DNSPolicy
 	dnsDecisionHook DNSDecisionCallback
 	dnsMgr          *dnsPolicyManager
 	dnsPolicySet    bool
+	// tlsSkipVerify disables TLS verification when issuing HTTPS requests.
+	tlsSkipVerify bool
 
 	// OptReadFast is a flag that, when set, makes the task execution read the response body into
 	// memory and close the body as soon as the full response has been received. This completes the
@@ -68,18 +61,6 @@ func (e *HTTPEndpoint) Initialize(watcherID string, responseChannel chan<- Watch
 
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	policy := e.dnsPolicy
-
-	if e.hasStaticDialOverride {
-		if policy.Mode != DNSRefreshDefault && policy.Mode != DNSRefreshStatic {
-			return fmt.Errorf("static dial override incompatible with DNS mode %d", policy.Mode)
-		}
-		if policy.Mode == DNSRefreshDefault {
-			policy.Mode = DNSRefreshStatic
-		}
-		if (policy.StaticAddr == netip.AddrPort{}) {
-			policy.StaticAddr = e.staticDialOverride
-		}
-	}
 
 	if e.tlsSkipVerify && e.URL.Scheme == "https" {
 		tr.TLSClientConfig = &tls.Config{
@@ -128,9 +109,6 @@ func (e *HTTPEndpoint) Validate() error {
 		// Set random ID if nil
 		e.ID = xid.New().String()
 	}
-	if e.hasStaticDialOverride && e.staticDialOverride == (netip.AddrPort{}) {
-		return errors.New("static dial override is empty")
-	}
 	return e.dnsPolicy.Validate()
 }
 
@@ -168,14 +146,6 @@ func WithPayload(b []byte) HTTPEndpointOption {
 // the body as soon as the full response is received.
 func WithReadFast() HTTPEndpointOption {
 	return func(ep *HTTPEndpoint) { ep.OptReadFast = true }
-}
-
-// WithStaticDialOverride forces HTTP requests to bypass DNS and dial the provided address.
-func WithStaticDialOverride(addr netip.AddrPort) HTTPEndpointOption {
-	return func(ep *HTTPEndpoint) {
-		ep.staticDialOverride = addr
-		ep.hasStaticDialOverride = true
-	}
 }
 
 // WithTLSSkipVerify disables TLS certificate verification for HTTPS requests. Intended for tests or
