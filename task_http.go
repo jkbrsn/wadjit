@@ -24,6 +24,17 @@ const (
 // HTTPEndpointOption is a functional option for the HTTPEndpoint struct.
 type HTTPEndpointOption func(*HTTPEndpoint)
 
+// TransportControl contains information about the transport layer of a connection.
+type TransportControl struct {
+	// A literal address to connect to.
+	AddrPort netip.AddrPort
+	// Set to true to negotiate a TLS connection after the TCP call.
+	TLSEnabled bool
+	// SkipTLSVerify disables validation of the server certificate when TLSEnabled is true.
+	// Use with caution – intended mainly for tests or trusted internal endpoints.
+	SkipTLSVerify bool
+}
+
 // HTTPEndpoint spawns tasks to make HTTP requests towards the defined endpoint. Implements the
 // WatcherTask interface and is meant for use in a Watcher.
 type HTTPEndpoint struct {
