@@ -300,35 +300,35 @@ func NewHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *httpTaskRespons
 // WebSocket
 //
 
-// WSTaskResponse is a TaskResponse for WebSocket responses.
-type WSTaskResponse struct {
+// wsTaskResponse is a TaskResponse for WebSocket responses.
+type wsTaskResponse struct {
 	remoteAddr net.Addr
 	data       []byte
 	timestamps requestTimestamps
 }
 
 // NewWSTaskResponse can store an incoming WS message as a byte slice.
-func NewWSTaskResponse(remoteAddr net.Addr, data []byte) *WSTaskResponse {
-	return &WSTaskResponse{remoteAddr: remoteAddr, data: data}
+func NewWSTaskResponse(remoteAddr net.Addr, data []byte) *wsTaskResponse {
+	return &wsTaskResponse{remoteAddr: remoteAddr, data: data}
 }
 
 // Close implements the TaskResponse interface but does nothing for WS responses.
-func (*WSTaskResponse) Close() error {
+func (*wsTaskResponse) Close() error {
 	return nil
 }
 
 // Data returns the WS message of the response.
-func (w *WSTaskResponse) Data() ([]byte, error) {
+func (w *wsTaskResponse) Data() ([]byte, error) {
 	return w.data, nil
 }
 
 // Reader returns an io.ReadCloser for the data. Closing is a no-op.
-func (w *WSTaskResponse) Reader() (io.ReadCloser, error) {
+func (w *wsTaskResponse) Reader() (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(w.data)), nil
 }
 
 // Metadata returns metadata connected to the response.
-func (w *WSTaskResponse) Metadata() TaskResponseMetadata {
+func (w *wsTaskResponse) Metadata() TaskResponseMetadata {
 	return TaskResponseMetadata{
 		RemoteAddr: w.remoteAddr,
 		Size:       int64(len(w.data)),
