@@ -223,7 +223,7 @@ func (m *dnsPolicyManager) resolveTTL(
 
 	addrs, ttl, err := m.lookup(ctx, host)
 	if err != nil {
-		if m.policy.AllowFallback && len(cached.addrs) > 0 {
+		if len(cached.addrs) > 0 && m.policy.fallbackEnabled() {
 			addr := net.JoinHostPort(cached.addrs[0].String(), port)
 			ttl := nonNegativeDuration(cached.expiresAt.Sub(cached.lastLookup))
 			decision := DNSDecision{
@@ -291,7 +291,7 @@ func (m *dnsPolicyManager) resolveCadence(
 
 	addrs, ttl, err := m.lookup(ctx, host)
 	if err != nil {
-		if m.policy.AllowFallback && len(cached.addrs) > 0 {
+		if len(cached.addrs) > 0 && m.policy.fallbackEnabled() {
 			addr := net.JoinHostPort(cached.addrs[0].String(), port)
 			decision := DNSDecision{
 				Host:          host,

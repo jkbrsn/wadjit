@@ -127,8 +127,8 @@ Wadjit's HTTP task can stay on long-lived keep-alive connections or routinely fo
 - `DNSRefreshDefault` mirrors Go's standard `http.Transport`: connections stay warm until some other condition closes them.
 - `DNSRefreshStatic` bypasses DNS entirely by dialing a fixed `netip.AddrPort`, making every reuse hit the same IP.
 - `DNSRefreshSingleLookup` does one resolution during initialization, caches the addresses, and keeps reusing that result indefinitely.
-- `DNSRefreshTTL` honors observed DNS TTLs (clamped by optional `TTLMin`/`TTLMax`) and forces a fresh lookup once the TTL elapses; failed refreshes can optionally fall back to the cached address. TTLs ≤ 0 are treated as “expire immediately,” ensuring the next request resolves again unless `AllowFallback` reuses the previous address when lookups fail.
-- `DNSRefreshCadence` ignores TTL and instead re-lookups on a fixed cadence you supply; it still records the resolver's TTL for observability.
+- `DNSRefreshTTL` honors observed DNS TTLs (clamped by optional `TTLMin`/`TTLMax`) and forces a fresh lookup once the TTL elapses. Failed refreshes reuse the cached address by default; set `DisableFallback` to drop it instead. TTLs ≤ 0 are treated as “expire immediately,” ensuring the next request resolves again unless fallback keeps the previous address alive.
+- `DNSRefreshCadence` ignores TTL and instead re-lookups on a fixed cadence you supply; it still records the resolver's TTL for observability. Failed refreshes reuse the cached address unless `DisableFallback` is set.
 
 Guard rails add safety nets on top of any mode. Configure `GuardRailPolicy` with a consecutive error threshold, optional rolling window, and an action:
 
@@ -182,7 +182,7 @@ targetURL, _ := url.Parse("https://service.example.com/healthz")
           Mode:          wadjit.DNSRefreshTTL,
           TTLMin:        5 * time.Second,
           TTLMax:        30 * time.Second,
-          AllowFallback: true,
+          // DisableFallback: true, // opt out of reusing cached addresses when lookups fail
           GuardRail: wadjit.GuardRailPolicy{
               ConsecutiveErrorThreshold: 4,
               Window:                    1 * time.Minute,

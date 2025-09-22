@@ -72,8 +72,9 @@ type DNSPolicy struct {
 	TTLMin time.Duration
 	TTLMax time.Duration
 
-	// AllowFallback retains the last known address if a refresh fails.
-	AllowFallback bool
+	// DisableFallback forces the policy to drop cached addresses when lookups fail instead of
+	// reusing the previous address.
+	DisableFallback bool
 
 	// GuardRail configures optional guard rail behavior.
 	GuardRail GuardRailPolicy
@@ -140,4 +141,10 @@ func (p DNSPolicy) normalizeTTL(ttl time.Duration) time.Duration {
 		return p.TTLMax
 	}
 	return ttl
+}
+
+// fallbackEnabled reports whether the policy allows fallback to the cached address on
+// failed lookups.
+func (p DNSPolicy) fallbackEnabled() bool {
+	return !p.DisableFallback
 }

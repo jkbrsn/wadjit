@@ -14,6 +14,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestDNSPolicyManagerDefaultMode(t *testing.T) {
+	u := &url.URL{Scheme: "https", Host: "default.example"}
+
+	mgr := newDNSPolicyManager(DNSPolicy{Mode: DNSRefreshDefault}, nil)
+	transport := &http.Transport{}
+
+	ctx, force, err := mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.False(t, force)
+	assert.Nil(t, ctx.Value(dnsPlanKey{}))
+}
+
 func TestDNSPolicyManagerTTLRefresh(t *testing.T) {
 	host := "example.com"
 	u := &url.URL{Scheme: "https", Host: host}
@@ -118,10 +130,9 @@ func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
 	u := &url.URL{Scheme: "https", Host: host}
 
 	policy := DNSPolicy{
-		Mode:          DNSRefreshTTL,
-		TTLMin:        15 * time.Millisecond,
-		TTLMax:        50 * time.Millisecond,
-		AllowFallback: true,
+		Mode:   DNSRefreshTTL,
+		TTLMin: 15 * time.Millisecond,
+		TTLMax: 50 * time.Millisecond,
 		GuardRail: GuardRailPolicy{
 			ConsecutiveErrorThreshold: 2,
 			Window:                    200 * time.Millisecond,
@@ -172,6 +183,36 @@ func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
 	assert.Equal(t, newAddr, decision.ResolvedAddrs[0])
 	assert.True(t, decision.ExpiresAt.After(firstExpiry))
 	assert.GreaterOrEqual(t, resolver.Calls(), 2)
+}
+
+func TestDNSPolicyManagerTTLFallbackDisabled(t *testing.T) {
+	host := "ttl-disable.example"
+	u := &url.URL{Scheme: "https", Host: host}
+
+	policy := DNSPolicy{
+		Mode:            DNSRefreshTTL,
+		TTLMin:          10 * time.Millisecond,
+		TTLMax:          30 * time.Millisecond,
+		DisableFallback: true,
+	}
+	mgr := newDNSPolicyManager(policy, nil)
+	initialAddr := netip.MustParseAddr("192.0.2.90")
+	resolver := newTestResolver([]netip.Addr{initialAddr}, 15*time.Millisecond)
+	mgr.resolver = resolver
+
+	transport := &http.Transport{}
+
+	_, force, err := mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.True(t, force, "first TTL lookup should force new connection")
+
+	time.Sleep(2 * policy.TTLMin)
+	resolver.SetError(errors.New("lookup failed"))
+
+	_, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "lookup failed")
+	assert.False(t, force, "no dial plan provided on error")
 }
 
 func TestDNSPolicyManagerTTLZeroTTLExpiresImmediately(t *testing.T) {
