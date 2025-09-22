@@ -19,7 +19,7 @@ func TestHTTPTaskResponse_Close(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	taskResp := NewHTTPTaskResponse(nil, resp)
+	taskResp := newHTTPTaskResponse(nil, resp)
 	require.NoError(t, taskResp.Close())
 }
 
@@ -39,7 +39,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 
-				taskResp := NewHTTPTaskResponse(server.Listener.Addr(), resp)
+				taskResp := newHTTPTaskResponse(server.Listener.Addr(), resp)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -77,7 +77,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 
-				taskResp := NewHTTPTaskResponse(nil, resp)
+				taskResp := newHTTPTaskResponse(nil, resp)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -104,7 +104,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 					Body:       nil,
 				}
 
-				taskResp := NewHTTPTaskResponse(nil, resp)
+				taskResp := newHTTPTaskResponse(nil, resp)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -133,7 +133,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 
-				taskResp := NewHTTPTaskResponse(nil, resp)
+				taskResp := newHTTPTaskResponse(nil, resp)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -153,7 +153,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 func TestWSTaskResponse_DataAndReader(t *testing.T) {
 	remoteAddr := net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1234}
 	wsData := []byte("hello from websocket")
-	wsResp := NewWSTaskResponse(&remoteAddr, wsData)
+	wsResp := newWSTaskResponse(&remoteAddr, wsData)
 	defer func() { _ = wsResp.Close() }()
 
 	data, err := wsResp.Data()

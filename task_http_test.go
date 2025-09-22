@@ -121,7 +121,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 			},
 		},
 		{
-			name: "transport control bypasses DNS",
+			name: "static dial override bypasses DNS",
 			run: func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(echoHandler))
 				defer server.Close()
@@ -134,17 +134,11 @@ func TestHTTPEndpointExecute(t *testing.T) {
 				realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
 				require.True(t, ok, "expected listener address to be *net.TCPAddr")
 
-				tc := &TransportControl{
-					AddrPort:      realAddr.AddrPort(),
-					TLSEnabled:    false,
-					SkipTLSVerify: true,
-				}
-
 				ep := NewHTTPEndpoint(
 					u,
 					http.MethodGet,
 					WithID("id"),
-					WithTransportControl(tc),
+					WithStaticDialOverride(realAddr.AddrPort()),
 					WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
 				)
 				responseChan := make(chan WatcherResponse, 1)
@@ -172,7 +166,7 @@ func TestHTTPEndpointExecute(t *testing.T) {
 			},
 		},
 		{
-			name: "transport control tls",
+			name: "static dial override tls",
 			run: func(t *testing.T) {
 				server := httptest.NewTLSServer(http.HandlerFunc(echoHandler))
 				defer server.Close()
@@ -184,17 +178,12 @@ func TestHTTPEndpointExecute(t *testing.T) {
 				realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
 				require.True(t, ok, "expected listener address to be *net.TCPAddr")
 
-				tc := &TransportControl{
-					AddrPort:      realAddr.AddrPort(),
-					TLSEnabled:    true,
-					SkipTLSVerify: true,
-				}
-
 				ep := NewHTTPEndpoint(
 					u,
 					http.MethodGet,
 					WithID("tls-test"),
-					WithTransportControl(tc),
+					WithStaticDialOverride(realAddr.AddrPort()),
+					WithTLSSkipVerify(),
 					WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
 				)
 				respCh := make(chan WatcherResponse, 1)
@@ -500,13 +489,9 @@ func TestNewHTTPEndpoint(t *testing.T) {
 			expectedMode: DNSRefreshDefault,
 		},
 		{
-			name: "with transport control",
+			name: "with static dial override",
 			options: []HTTPEndpointOption{
-				WithTransportControl(&TransportControl{
-					AddrPort:      netip.AddrPort{},
-					TLSEnabled:    false,
-					SkipTLSVerify: true,
-				}),
+				WithStaticDialOverride(netip.MustParseAddrPort("192.0.2.50:8080")),
 			},
 			expectedMode: DNSRefreshDefault,
 		},
@@ -517,11 +502,8 @@ func TestNewHTTPEndpoint(t *testing.T) {
 					"X-Test": []string{"value"},
 				}),
 				WithPayload([]byte(`{"key":"value"}`)),
-				WithTransportControl(&TransportControl{
-					AddrPort:      netip.AddrPort{},
-					TLSEnabled:    false,
-					SkipTLSVerify: true,
-				}),
+				WithStaticDialOverride(netip.MustParseAddrPort("198.51.100.20:80")),
+				WithTLSSkipVerify(),
 			},
 			expectedMode: DNSRefreshDefault,
 		},
@@ -551,11 +533,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 		}
 		id := xid.New().String()
 		payload := []byte(`{"key":"value"}`)
-		tc := &TransportControl{
-			AddrPort:      netip.AddrPort{},
-			TLSEnabled:    false,
-			SkipTLSVerify: true,
-		}
+		staticAddr := netip.MustParseAddrPort("192.0.2.60:8080")
 		endpoint := NewHTTPEndpoint(
 			testURL,
 			http.MethodPost,
@@ -563,7 +541,8 @@ func TestNewHTTPEndpoint(t *testing.T) {
 			WithID(id),
 			WithPayload(payload),
 			WithReadFast(),
-			WithTransportControl(tc),
+			WithStaticDialOverride(staticAddr),
+			WithTLSSkipVerify(),
 		)
 		require.NotNil(t, endpoint)
 
@@ -573,6 +552,8 @@ func TestNewHTTPEndpoint(t *testing.T) {
 		assert.Equal(t, header, endpoint.Header)
 		assert.Equal(t, payload, endpoint.Payload)
 		assert.True(t, endpoint.OptReadFast)
-		assert.Equal(t, tc, endpoint.TransportControl)
+		assert.True(t, endpoint.hasStaticDialOverride)
+		assert.Equal(t, staticAddr, endpoint.staticDialOverride)
+		assert.True(t, endpoint.tlsSkipVerify)
 	})
 }

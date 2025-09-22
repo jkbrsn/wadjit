@@ -285,8 +285,8 @@ func (h *httpTaskResponse) Metadata() TaskResponseMetadata {
 	return md
 }
 
-// NewHTTPTaskResponse creates a new httpTaskResponse from an http.Response.
-func NewHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *httpTaskResponse {
+// newHTTPTaskResponse creates a new httpTaskResponse from an http.Response.
+func newHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *httpTaskResponse {
 	h := &httpTaskResponse{remoteAddr: remoteAddr, resp: r}
 	if r != nil && r.Request != nil {
 		if decision, ok := r.Request.Context().Value(dnsDecisionKey{}).(DNSDecision); ok {
@@ -307,8 +307,8 @@ type wsTaskResponse struct {
 	timestamps requestTimestamps
 }
 
-// NewWSTaskResponse can store an incoming WS message as a byte slice.
-func NewWSTaskResponse(remoteAddr net.Addr, data []byte) *wsTaskResponse {
+// newWSTaskResponse can store an incoming WS message as a byte slice.
+func newWSTaskResponse(remoteAddr net.Addr, data []byte) *wsTaskResponse {
 	return &wsTaskResponse{remoteAddr: remoteAddr, data: data}
 }
 

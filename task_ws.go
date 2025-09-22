@@ -403,7 +403,7 @@ func (e *WSEndpoint) processInflightMessage(
 	}
 
 	// Set metadata to the taskresponse: original id, time measurements
-	taskResponse := NewWSTaskResponse(e.remoteAddr, data)
+	taskResponse := newWSTaskResponse(e.remoteAddr, data)
 	taskResponse.timestamps = timestamps
 
 	// Send the message to the read channel
@@ -483,7 +483,7 @@ func (e *WSEndpoint) handleRegularResponse(p []byte, urlClone *url.URL) {
 		WatcherID: e.watcherID,
 		URL:       urlClone,
 		Err:       nil,
-		Payload:   NewWSTaskResponse(e.remoteAddr, p),
+		Payload:   newWSTaskResponse(e.remoteAddr, p),
 	}
 	e.respChan <- response
 }
@@ -625,7 +625,7 @@ func (oh *wsOneHit) Execute() error {
 		}
 
 		// Create and send task response
-		taskResponse := NewWSTaskResponse(remoteAddr, message)
+		taskResponse := newWSTaskResponse(remoteAddr, message)
 		taskResponse.timestamps = timestamps
 		oh.wsEndpoint.respChan <- WatcherResponse{
 			TaskID:    oh.wsEndpoint.ID,
