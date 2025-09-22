@@ -121,51 +121,6 @@ func TestHTTPEndpointExecute(t *testing.T) {
 			},
 		},
 		{
-			name: "static dial override bypasses DNS",
-			run: func(t *testing.T) {
-				server := httptest.NewServer(http.HandlerFunc(echoHandler))
-				defer server.Close()
-
-				u, err := url.Parse(server.URL)
-				require.NoError(t, err)
-				fakeHost := "nonexistent.example.com"
-				u.Host = fakeHost
-
-				realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
-				require.True(t, ok, "expected listener address to be *net.TCPAddr")
-
-				ep := NewHTTPEndpoint(
-					u,
-					http.MethodGet,
-					WithID("id"),
-					WithStaticDialOverride(realAddr.AddrPort()),
-					WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
-				)
-				responseChan := make(chan WatcherResponse, 1)
-				require.NoError(t, ep.Initialize("wid", responseChan))
-				require.Equal(t, DNSRefreshStatic, ep.dnsPolicy.Mode)
-
-				go func() { _ = ep.Task().Execute() }()
-
-				select {
-				case resp := <-responseChan:
-					assert.NoError(t, resp.Err)
-					md := resp.Metadata()
-					assert.Nil(t, md.TimeData.DNSLookup)
-					serverAddr := net.TCPAddr{
-						IP:   net.ParseIP(realAddr.IP.String()),
-						Port: realAddr.Port,
-					}
-					assert.Equal(t, serverAddr.String(), resp.Metadata().RemoteAddr.String())
-					assert.Equal(t,
-						realAddr.AddrPort(), resp.Metadata().RemoteAddr.(*net.TCPAddr).AddrPort())
-					assert.Equal(t, fakeHost, resp.URL.Hostname())
-				case <-time.After(time.Second):
-					t.Fatal("timeout waiting for response")
-				}
-			},
-		},
-		{
 			name: "static dial override tls",
 			run: func(t *testing.T) {
 				server := httptest.NewTLSServer(http.HandlerFunc(echoHandler))
@@ -182,9 +137,11 @@ func TestHTTPEndpointExecute(t *testing.T) {
 					u,
 					http.MethodGet,
 					WithID("tls-test"),
-					WithStaticDialOverride(realAddr.AddrPort()),
 					WithTLSSkipVerify(),
-					WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
+					WithDNSPolicy(DNSPolicy{
+						Mode:       DNSRefreshStatic,
+						StaticAddr: realAddr.AddrPort(),
+					}),
 				)
 				respCh := make(chan WatcherResponse, 1)
 				require.NoError(t, ep.Initialize("wid", respCh))
@@ -218,13 +175,15 @@ func TestHTTPEndpointExecute(t *testing.T) {
 
 				u.Host = "static.example.com"
 
-				policy := DNSPolicy{Mode: DNSRefreshStatic, StaticAddr: realAddr.AddrPort()}
 				respCh := make(chan WatcherResponse, 1)
 				ep := NewHTTPEndpoint(
 					u,
 					http.MethodGet,
 					WithID("static"),
-					WithDNSPolicy(policy),
+					WithDNSPolicy(DNSPolicy{
+						Mode:       DNSRefreshStatic,
+						StaticAddr: realAddr.AddrPort(),
+					}),
 				)
 
 				require.NoError(t, ep.Initialize("static-watcher", respCh))
@@ -489,11 +448,13 @@ func TestNewHTTPEndpoint(t *testing.T) {
 			expectedMode: DNSRefreshDefault,
 		},
 		{
-			name: "with static dial override",
+			name: "with static dns policy",
 			options: []HTTPEndpointOption{
-				WithStaticDialOverride(netip.MustParseAddrPort("192.0.2.50:8080")),
+				WithDNSPolicy(DNSPolicy{Mode: DNSRefreshStatic,
+					StaticAddr: netip.MustParseAddrPort("192.0.2.50:8080"),
+				}),
 			},
-			expectedMode: DNSRefreshDefault,
+			expectedMode: DNSRefreshStatic,
 		},
 		{
 			name: "with everything",
@@ -502,7 +463,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 					"X-Test": []string{"value"},
 				}),
 				WithPayload([]byte(`{"key":"value"}`)),
-				WithStaticDialOverride(netip.MustParseAddrPort("198.51.100.20:80")),
+				WithDNSPolicy(DNSPolicy{Mode: DNSRefreshDefault}),
 				WithTLSSkipVerify(),
 			},
 			expectedMode: DNSRefreshDefault,
@@ -541,7 +502,7 @@ func TestNewHTTPEndpoint(t *testing.T) {
 			WithID(id),
 			WithPayload(payload),
 			WithReadFast(),
-			WithStaticDialOverride(staticAddr),
+			WithDNSPolicy(DNSPolicy{Mode: DNSRefreshStatic, StaticAddr: staticAddr}),
 			WithTLSSkipVerify(),
 		)
 		require.NotNil(t, endpoint)
@@ -552,8 +513,6 @@ func TestNewHTTPEndpoint(t *testing.T) {
 		assert.Equal(t, header, endpoint.Header)
 		assert.Equal(t, payload, endpoint.Payload)
 		assert.True(t, endpoint.OptReadFast)
-		assert.True(t, endpoint.hasStaticDialOverride)
-		assert.Equal(t, staticAddr, endpoint.staticDialOverride)
 		assert.True(t, endpoint.tlsSkipVerify)
 	})
 }
