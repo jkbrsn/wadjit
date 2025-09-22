@@ -20,6 +20,7 @@
   - Metric sink
   - Deadline times
   - Read upon response received, to avoid adding lag to the timing of DataTransferTime or RequestTimeTotal
+  - `taskman` specific log level
 
 ## Various
 
