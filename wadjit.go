@@ -193,6 +193,16 @@ func (w *Wadjit) RemoveWatcher(id string) error {
 	return nil
 }
 
+// PauseWatcher pauses a watcher's job in the underlying task manager.
+func (w *Wadjit) PauseWatcher(id string) error {
+	return w.taskManager.PauseJob(id)
+}
+
+// ResumeWatcher resumes a watcher's job in the underlying task manager.
+func (w *Wadjit) ResumeWatcher(id string) error {
+	return w.taskManager.ResumeJob(id)
+}
+
 // Responses returns a channel that will receive all watchers' responses. The channel will
 // be closed when the Wadjit is closed. Note: Unless sends on the response channel are
 // consumed, a block may occur.
