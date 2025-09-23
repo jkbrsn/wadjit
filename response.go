@@ -286,6 +286,16 @@ func (h *httpTaskResponse) Metadata() TaskResponseMetadata {
 		// If httptrace didn't capture DNS timings but the policy did, surface it in TimeData.
 		if md.TimeData.DNSLookup == nil && decision.LookupDuration > 0 {
 			md.TimeData.DNSLookup = ptr(decision.LookupDuration)
+			// Merge DNS lookup into aggregate durations so exported totals reflect end-to-end
+			// user‑perceived time. Only adjust existing duration fields to avoid changing
+			// early lifecycle semantics (e.g. RequestTimeTotal may intentionally be nil).
+			if md.TimeData.Latency > 0 {
+				md.TimeData.Latency += decision.LookupDuration
+			}
+			if md.TimeData.RequestTimeTotal != nil {
+				v := *md.TimeData.RequestTimeTotal + decision.LookupDuration
+				md.TimeData.RequestTimeTotal = ptr(v)
+			}
 		}
 	}
 
