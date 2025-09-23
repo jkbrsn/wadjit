@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"testing"
@@ -15,6 +16,8 @@ import (
 )
 
 func TestDNSPolicyManagerDefaultMode(t *testing.T) {
+	t.Parallel()
+
 	u := &url.URL{Scheme: "https", Host: "default.example"}
 
 	mgr := newDNSPolicyManager(DNSPolicy{Mode: DNSRefreshDefault}, nil)
@@ -27,6 +30,8 @@ func TestDNSPolicyManagerDefaultMode(t *testing.T) {
 }
 
 func TestDNSPolicyManagerTTLRefresh(t *testing.T) {
+	t.Parallel()
+
 	host := "example.com"
 	u := &url.URL{Scheme: "https", Host: host}
 
@@ -59,6 +64,8 @@ func TestDNSPolicyManagerTTLRefresh(t *testing.T) {
 }
 
 func TestDNSPolicyManagerGuardRailForcesFlush(t *testing.T) {
+	t.Parallel()
+
 	host := "example.org"
 	u := &url.URL{Scheme: "http", Host: host}
 
@@ -93,6 +100,8 @@ func TestDNSPolicyManagerGuardRailForcesFlush(t *testing.T) {
 }
 
 func TestDNSPolicyManagerCadenceRefresh(t *testing.T) {
+	t.Parallel()
+
 	host := "cadence.example"
 	u := &url.URL{Scheme: "https", Host: host}
 
@@ -129,6 +138,8 @@ func TestDNSPolicyManagerCadenceRefresh(t *testing.T) {
 }
 
 func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
+	t.Parallel()
+
 	host := "ttl-guard.example"
 	u := &url.URL{Scheme: "https", Host: host}
 
@@ -189,6 +200,8 @@ func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
 }
 
 func TestDNSPolicyManagerTTLFallbackDisabled(t *testing.T) {
+	t.Parallel()
+
 	host := "ttl-disable.example"
 	u := &url.URL{Scheme: "https", Host: host}
 
@@ -219,6 +232,8 @@ func TestDNSPolicyManagerTTLFallbackDisabled(t *testing.T) {
 }
 
 func TestDNSPolicyManagerTTLZeroTTLExpiresImmediately(t *testing.T) {
+	t.Parallel()
+
 	host := "ttl-zero.example"
 	u := &url.URL{Scheme: "https", Host: host}
 
@@ -253,6 +268,8 @@ func TestDNSPolicyManagerTTLZeroTTLExpiresImmediately(t *testing.T) {
 }
 
 func TestHTTPTaskResponseMetadataIncludesDNS(t *testing.T) {
+	t.Parallel()
+
 	request, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
 	require.NoError(t, err)
 
@@ -286,6 +303,8 @@ func TestHTTPTaskResponseMetadataIncludesDNS(t *testing.T) {
 }
 
 func TestDNSPolicyValidateErrors(t *testing.T) {
+	t.Parallel()
+
 	err := (DNSPolicy{Mode: DNSRefreshStatic}).Validate()
 	assert.Error(t, err)
 
@@ -297,4 +316,39 @@ func TestDNSPolicyValidateErrors(t *testing.T) {
 
 	err = (DNSPolicy{Mode: DNSRefreshTTL, TTLMin: 2 * time.Second, TTLMax: time.Second}).Validate()
 	assert.Error(t, err)
+}
+
+func TestHTTPEndpoint_PolicyLookupPopulatesDNSLookupTiming(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(echoHandler))
+	defer server.Close()
+
+	u, err := url.Parse(server.URL)
+	require.NoError(t, err)
+
+	// Use a test resolver that simulates a small TTL and allows us to measure
+	// the lookup duration surfaced by the DNS policy manager.
+	realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+	require.True(t, ok)
+
+	resolver := newTestResolver([]netip.Addr{realAddr.AddrPort().Addr()}, 50*time.Millisecond)
+	policy := DNSPolicy{Mode: DNSRefreshSingleLookup, Resolver: resolver}
+
+	respCh := make(chan WatcherResponse, 1)
+	ep := NewHTTPEndpoint(u, http.MethodGet, WithID("test"), WithDNSPolicy(policy), WithReadFast())
+	require.NoError(t, ep.Initialize("wid", respCh))
+
+	// Execute the task; manager should perform a lookup and embed timing into metadata
+	require.NoError(t, ep.Task().Execute())
+
+	resp := <-respCh
+	require.NoError(t, resp.Err)
+	md := resp.Metadata()
+	require.NotNil(t, md.DNS)
+	// The policy-provided LookupDuration should be present in DNS metadata
+	require.Greater(t, md.DNS.LookupDuration, time.Duration(0))
+	// Ensure TimeData.DNSLookup is also populated (mirrors DNS metadata when httptrace lacks it)
+	require.NotNil(t, md.TimeData.DNSLookup)
+	require.Equal(t, md.DNS.LookupDuration, *md.TimeData.DNSLookup)
 }
