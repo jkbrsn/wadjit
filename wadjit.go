@@ -35,6 +35,45 @@ type Wadjit struct {
 	closeWG   sync.WaitGroup
 }
 
+// applyDefaultDNSPolicy applies the default DNS policy to the watcher if it is not already set.
+func (w *Wadjit) applyDefaultDNSPolicy(watcher *Watcher) {
+	if !w.hasDefaultDNSPolicy || watcher == nil {
+		return
+	}
+
+	for i := range watcher.Tasks {
+		if endpoint, ok := watcher.Tasks[i].(*HTTPEndpoint); ok && endpoint != nil {
+			if endpoint.dnsPolicySet {
+				continue
+			}
+			endpoint.dnsPolicy = w.defaultDNSPolicy
+			endpoint.dnsPolicySet = true
+		}
+	}
+}
+
+// listenForResponses consumes the channel where Watchers send responses from their monitoring jobs
+// and forwards those responses to the externally facing channel.
+func (w *Wadjit) listenForResponses() {
+	for {
+		select {
+		case resp, ok := <-w.respGatherChan:
+			if !ok {
+				return // Channel closed
+			}
+			if w.ctx.Err() != nil {
+				return // Context canceled
+			}
+
+			// Send the response to the external facing channel
+			// TODO: consider adding Watcher response metrics here
+			w.respExportChan <- resp
+		case <-w.ctx.Done():
+			return
+		}
+	}
+}
+
 // AddWatcher adds a Watcher to the Wadjit, starting it in the process.
 func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	w.applyDefaultDNSPolicy(watcher)
@@ -61,22 +100,6 @@ func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	w.watchers.Store(watcher.ID, watcher)
 
 	return nil
-}
-
-func (w *Wadjit) applyDefaultDNSPolicy(watcher *Watcher) {
-	if !w.hasDefaultDNSPolicy || watcher == nil {
-		return
-	}
-
-	for i := range watcher.Tasks {
-		if endpoint, ok := watcher.Tasks[i].(*HTTPEndpoint); ok && endpoint != nil {
-			if endpoint.dnsPolicySet {
-				continue
-			}
-			endpoint.dnsPolicy = w.defaultDNSPolicy
-			endpoint.dnsPolicySet = true
-		}
-	}
 }
 
 // AddWatchers adds multiple Watchers to the Wadjit, starting them in the process.
@@ -185,28 +208,6 @@ func (w *Wadjit) WatcherIDs() []string {
 		return true
 	})
 	return ids
-}
-
-// listenForResponses consumes the channel where Watchers send responses from their monitoring jobs
-// and forwards those responses to the externally facing channel.
-func (w *Wadjit) listenForResponses() {
-	for {
-		select {
-		case resp, ok := <-w.respGatherChan:
-			if !ok {
-				return // Channel closed
-			}
-			if w.ctx.Err() != nil {
-				return // Context canceled
-			}
-
-			// Send the response to the external facing channel
-			// TODO: consider adding Watcher response metrics here
-			w.respExportChan <- resp
-		case <-w.ctx.Done():
-			return
-		}
-	}
 }
 
 // New creates and returns a new Wadjit. Optional functional options can be supplied to tune the

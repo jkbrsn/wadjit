@@ -72,7 +72,8 @@ func (w *Watcher) close() error {
 	return errs
 }
 
-// job returns a taskman.Job that executes the Watcher's tasks.
+// job returns a taskman.Job that executes the Watcher's tasks. The job is configured to run at the
+// watcher's cadence, using the watcher's ID as the job ID.
 func (w *Watcher) job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.Tasks))
 	for i := range w.Tasks {
