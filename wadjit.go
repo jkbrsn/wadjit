@@ -293,7 +293,7 @@ func WithLogger(logger zerolog.Logger) Option {
 		o.loggerSet = true
 
 		// Clamp taskman log level to at least INFO
-		logLevel := max(logger.GetLevel(), zerolog.InfoLevel)
+		logLevel := max(logger.GetLevel(), zerolog.DebugLevel)
 		log := logger.Level(logLevel)
 		o.taskmanOptions = append(o.taskmanOptions, taskman.WithLogger(log))
 	}
