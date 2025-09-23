@@ -252,7 +252,7 @@ type options struct {
 	logger              zerolog.Logger
 	loggerSet           bool
 
-	taskmanOptions []taskman.TMOption
+	taskmanOptions []taskman.Option
 }
 
 // WithBufferSize configures the buffer size for response channels. A negative value will be
@@ -289,12 +289,12 @@ func WithLogger(logger zerolog.Logger) Option {
 }
 
 // WithTaskmanOptions forwards the provided task manager options to the internal task manager.
-func WithTaskmanOptions(opts ...taskman.TMOption) Option {
+func WithTaskmanOptions(opts ...taskman.Option) Option {
 	return func(o *options) {
 		if len(opts) == 0 {
 			return
 		}
-		var filtered []taskman.TMOption
+		var filtered []taskman.Option
 		for _, opt := range opts {
 			if opt == nil {
 				continue
@@ -304,7 +304,7 @@ func WithTaskmanOptions(opts ...taskman.TMOption) Option {
 		if len(filtered) == 0 {
 			return
 		}
-		owned := append([]taskman.TMOption(nil), filtered...)
+		owned := append([]taskman.Option(nil), filtered...)
 		o.taskmanOptions = append(o.taskmanOptions, owned...)
 	}
 }
