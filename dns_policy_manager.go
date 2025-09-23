@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type dnsCacheEntry struct {
@@ -35,6 +37,8 @@ type dnsPolicyManager struct {
 	cadenceNext time.Time
 	forceLookup bool
 	guard       guardRailState
+
+	lookupGroup singleflight.Group
 }
 
 // newDNSPolicyManager wires the supplied policy and optional decision hook into a manager ready to
@@ -178,7 +182,7 @@ func (m *dnsPolicyManager) resolveSingle(
 		return dnsResolveOutcome{address: addr, decision: &decision}, nil
 	}
 
-	addrs, ttl, err := m.lookup(ctx, host)
+	addrs, ttl, lookupDur, err := m.lookup(ctx, host)
 	if err != nil {
 		return dnsResolveOutcome{}, err
 	}
@@ -189,7 +193,13 @@ func (m *dnsPolicyManager) resolveSingle(
 	m.mu.Unlock()
 
 	addr := net.JoinHostPort(addrs[0].String(), port)
-	decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: addrs, TTL: ttl}
+	decision := DNSDecision{
+		Host:           host,
+		Mode:           m.policy.Mode,
+		ResolvedAddrs:  addrs,
+		TTL:            ttl,
+		LookupDuration: lookupDur,
+	}
 	return dnsResolveOutcome{address: addr, forceNewConn: true, decision: &decision}, nil
 }
 
@@ -221,7 +231,7 @@ func (m *dnsPolicyManager) resolveTTL(
 		return dnsResolveOutcome{address: addr, decision: &decision}, nil
 	}
 
-	addrs, ttl, err := m.lookup(ctx, host)
+	addrs, ttl, lookupDur, err := m.lookup(ctx, host)
 	if err != nil {
 		if len(cached.addrs) > 0 && m.policy.fallbackEnabled() {
 			addr := net.JoinHostPort(cached.addrs[0].String(), port)
@@ -252,11 +262,12 @@ func (m *dnsPolicyManager) resolveTTL(
 	m.mu.Unlock()
 
 	decision := DNSDecision{
-		Host:          host,
-		Mode:          m.policy.Mode,
-		ResolvedAddrs: addrs,
-		TTL:           ttl,
-		ExpiresAt:     entry.expiresAt,
+		Host:           host,
+		Mode:           m.policy.Mode,
+		ResolvedAddrs:  addrs,
+		TTL:            ttl,
+		ExpiresAt:      entry.expiresAt,
+		LookupDuration: lookupDur,
 	}
 	addr := net.JoinHostPort(addrs[0].String(), port)
 	return dnsResolveOutcome{address: addr, forceNewConn: true, decision: &decision}, nil
@@ -289,7 +300,7 @@ func (m *dnsPolicyManager) resolveCadence(
 		return dnsResolveOutcome{address: addr, decision: &decision}, nil
 	}
 
-	addrs, ttl, err := m.lookup(ctx, host)
+	addrs, ttl, lookupDur, err := m.lookup(ctx, host)
 	if err != nil {
 		if len(cached.addrs) > 0 && m.policy.fallbackEnabled() {
 			addr := net.JoinHostPort(cached.addrs[0].String(), port)
@@ -314,33 +325,74 @@ func (m *dnsPolicyManager) resolveCadence(
 	m.mu.Unlock()
 
 	decision := DNSDecision{
-		Host:          host,
-		Mode:          m.policy.Mode,
-		ResolvedAddrs: addrs,
-		TTL:           ttl,
-		ExpiresAt:     next,
+		Host:           host,
+		Mode:           m.policy.Mode,
+		ResolvedAddrs:  addrs,
+		TTL:            ttl,
+		ExpiresAt:      next,
+		LookupDuration: lookupDur,
 	}
 	addr := net.JoinHostPort(addrs[0].String(), port)
 	return dnsResolveOutcome{address: addr, forceNewConn: true, decision: &decision}, nil
 }
 
 // lookup delegates to the configured resolver and ensures a non-empty address list is returned.
+// Concurrent lookups for the same host are coalesced via singleflight to avoid thundering
+// DNS queries when many callers arrive simultaneously.
+//
+// revive:disable:function-result-limit exception valid
 func (m *dnsPolicyManager) lookup(
 	ctx context.Context,
 	host string,
-) ([]netip.Addr, time.Duration, error) {
+) (addrs []netip.Addr, ttl time.Duration, lookupDuration time.Duration, err error) {
 	if m.resolver == nil {
-		return nil, 0, errors.New("resolver not configured")
+		return nil, 0, 0, errors.New("resolver not configured")
 	}
-	addrs, ttl, err := m.resolver.Lookup(ctx, host)
-	if err != nil {
-		return nil, 0, err
+
+	type lfResult struct {
+		addrs     []netip.Addr
+		ttl       time.Duration
+		lookupDur time.Duration
 	}
-	if len(addrs) == 0 {
-		return nil, 0, errors.New("resolver returned no addresses")
+
+	ch := m.lookupGroup.DoChan(host, func() (any, error) {
+		// Use a bounded background context so the lookup makes progress even if the caller
+		// cancels; the singleflight result will be shared with concurrent callers.
+		lookupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		start := time.Now()
+		addrs, ttl, err := m.resolver.Lookup(lookupCtx, host)
+		dur := time.Since(start)
+		if err != nil {
+			return nil, err
+		}
+		if len(addrs) == 0 {
+			return nil, errors.New("resolver returned no addresses")
+		}
+		copied := make([]netip.Addr, len(addrs))
+		copy(copied, addrs)
+		return lfResult{addrs: copied, ttl: ttl, lookupDur: dur}, nil
+	})
+
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, 0, 0, res.Err
+		}
+		out, ok := res.Val.(lfResult)
+		if !ok {
+			return nil, 0, 0, errors.New("unexpected result type")
+		}
+		return out.addrs, out.ttl, out.lookupDur, nil
+	case <-ctx.Done():
+		// Caller canceled while waiting; return the cancellation error. The shared lookup
+		// will still complete in the background and satisfy other callers.
+		return nil, 0, 0, ctx.Err()
 	}
-	return addrs, ttl, nil
 }
+
+// revive:enable:function-result-limit
 
 // dialContext injects the manager's dial plan into the provided net.Dialer.
 func (*dnsPolicyManager) dialContext(
@@ -431,16 +483,15 @@ type policyTransport struct {
 // RoundTrip injects DNS policy context into the request before delegating to the underlying
 // transport.
 func (p *policyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	ctx, forceClose, err := p.mgr.prepareRequest(req.Context(), req.URL, p.base)
+	ctx, _, err := p.mgr.prepareRequest(req.Context(), req.URL, p.base)
 	if err != nil {
 		return nil, err
 	}
 
 	newReq := req.Clone(ctx)
-	if forceClose {
-		newReq.Close = true
-	}
-
+	// Do not force-close the new request's connection; CloseIdleConnections() above will
+	// purge old idle connections while allowing the freshly-established connection to become
+	// idle and be reused by subsequent requests.
 	return p.base.RoundTrip(newReq)
 }
 
