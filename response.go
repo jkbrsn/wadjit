@@ -104,10 +104,12 @@ type TaskResponseMetadata struct {
 
 // DNSMetadata describes the DNS resolution data tied to a request.
 type DNSMetadata struct {
-	Mode               DNSRefreshMode
-	TTL                time.Duration
-	ExpiresAt          time.Time
-	ResolvedAddrs      []netip.Addr
+	Mode          DNSRefreshMode
+	TTL           time.Duration
+	ExpiresAt     time.Time
+	ResolvedAddrs []netip.Addr
+	// LookupDuration is the duration taken by the policy-managed DNS lookup, when applicable.
+	LookupDuration     time.Duration
 	GuardRailTriggered bool
 }
 
@@ -278,7 +280,12 @@ func (h *httpTaskResponse) Metadata() TaskResponseMetadata {
 			TTL:                decision.TTL,
 			ExpiresAt:          decision.ExpiresAt,
 			ResolvedAddrs:      append([]netip.Addr(nil), decision.ResolvedAddrs...),
+			LookupDuration:     decision.LookupDuration,
 			GuardRailTriggered: decision.GuardRailTriggered,
+		}
+		// If httptrace didn't capture DNS timings but the policy did, surface it in TimeData.
+		if md.TimeData.DNSLookup == nil && decision.LookupDuration > 0 {
+			md.TimeData.DNSLookup = ptr(decision.LookupDuration)
 		}
 	}
 

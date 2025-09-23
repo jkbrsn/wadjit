@@ -182,7 +182,7 @@ func (m *dnsPolicyManager) resolveSingle(
 		return dnsResolveOutcome{address: addr, decision: &decision}, nil
 	}
 
-	addrs, ttl, err := m.lookup(ctx, host)
+	addrs, ttl, lookupDur, err := m.lookup(ctx, host)
 	if err != nil {
 		return dnsResolveOutcome{}, err
 	}
@@ -193,7 +193,7 @@ func (m *dnsPolicyManager) resolveSingle(
 	m.mu.Unlock()
 
 	addr := net.JoinHostPort(addrs[0].String(), port)
-	decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: addrs, TTL: ttl}
+	decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: addrs, TTL: ttl, LookupDuration: lookupDur}
 	return dnsResolveOutcome{address: addr, forceNewConn: true, decision: &decision}, nil
 }
 
@@ -225,7 +225,7 @@ func (m *dnsPolicyManager) resolveTTL(
 		return dnsResolveOutcome{address: addr, decision: &decision}, nil
 	}
 
-	addrs, ttl, err := m.lookup(ctx, host)
+	addrs, ttl, lookupDur, err := m.lookup(ctx, host)
 	if err != nil {
 		if len(cached.addrs) > 0 && m.policy.fallbackEnabled() {
 			addr := net.JoinHostPort(cached.addrs[0].String(), port)
@@ -256,11 +256,12 @@ func (m *dnsPolicyManager) resolveTTL(
 	m.mu.Unlock()
 
 	decision := DNSDecision{
-		Host:          host,
-		Mode:          m.policy.Mode,
-		ResolvedAddrs: addrs,
-		TTL:           ttl,
-		ExpiresAt:     entry.expiresAt,
+		Host:           host,
+		Mode:           m.policy.Mode,
+		ResolvedAddrs:  addrs,
+		TTL:            ttl,
+		ExpiresAt:      entry.expiresAt,
+		LookupDuration: lookupDur,
 	}
 	addr := net.JoinHostPort(addrs[0].String(), port)
 	return dnsResolveOutcome{address: addr, forceNewConn: true, decision: &decision}, nil
@@ -293,7 +294,7 @@ func (m *dnsPolicyManager) resolveCadence(
 		return dnsResolveOutcome{address: addr, decision: &decision}, nil
 	}
 
-	addrs, ttl, err := m.lookup(ctx, host)
+	addrs, ttl, lookupDur, err := m.lookup(ctx, host)
 	if err != nil {
 		if len(cached.addrs) > 0 && m.policy.fallbackEnabled() {
 			addr := net.JoinHostPort(cached.addrs[0].String(), port)
@@ -318,11 +319,12 @@ func (m *dnsPolicyManager) resolveCadence(
 	m.mu.Unlock()
 
 	decision := DNSDecision{
-		Host:          host,
-		Mode:          m.policy.Mode,
-		ResolvedAddrs: addrs,
-		TTL:           ttl,
-		ExpiresAt:     next,
+		Host:           host,
+		Mode:           m.policy.Mode,
+		ResolvedAddrs:  addrs,
+		TTL:            ttl,
+		ExpiresAt:      next,
+		LookupDuration: lookupDur,
 	}
 	addr := net.JoinHostPort(addrs[0].String(), port)
 	return dnsResolveOutcome{address: addr, forceNewConn: true, decision: &decision}, nil
@@ -334,14 +336,15 @@ func (m *dnsPolicyManager) resolveCadence(
 func (m *dnsPolicyManager) lookup(
 	ctx context.Context,
 	host string,
-) ([]netip.Addr, time.Duration, error) {
+) ([]netip.Addr, time.Duration, time.Duration, error) {
 	if m.resolver == nil {
-		return nil, 0, errors.New("resolver not configured")
+		return nil, 0, 0, errors.New("resolver not configured")
 	}
 
 	type lfResult struct {
-		addrs []netip.Addr
-		ttl   time.Duration
+		addrs     []netip.Addr
+		ttl       time.Duration
+		lookupDur time.Duration
 	}
 
 	ch := m.lookupGroup.DoChan(host, func() (any, error) {
@@ -349,7 +352,10 @@ func (m *dnsPolicyManager) lookup(
 		// cancels; the singleflight result will be shared with concurrent callers.
 		lookupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+
+		start := time.Now()
 		addrs, ttl, err := m.resolver.Lookup(lookupCtx, host)
+		dur := time.Since(start)
 		if err != nil {
 			return nil, err
 		}
@@ -358,20 +364,20 @@ func (m *dnsPolicyManager) lookup(
 		}
 		copied := make([]netip.Addr, len(addrs))
 		copy(copied, addrs)
-		return lfResult{addrs: copied, ttl: ttl}, nil
+		return lfResult{addrs: copied, ttl: ttl, lookupDur: dur}, nil
 	})
 
 	select {
 	case res := <-ch:
 		if res.Err != nil {
-			return nil, 0, res.Err
+			return nil, 0, 0, res.Err
 		}
 		out := res.Val.(lfResult)
-		return out.addrs, out.ttl, nil
+		return out.addrs, out.ttl, out.lookupDur, nil
 	case <-ctx.Done():
 		// Caller canceled while waiting; return the cancellation error. The shared lookup
 		// will still complete in the background and satisfy other callers.
-		return nil, 0, ctx.Err()
+		return nil, 0, 0, ctx.Err()
 	}
 }
 

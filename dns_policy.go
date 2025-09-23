@@ -93,11 +93,13 @@ type DNSDecisionCallback func(ctx context.Context, decision DNSDecision)
 
 // DNSDecision captures metadata about a DNS refresh decision.
 type DNSDecision struct {
-	Host               string
-	Mode               DNSRefreshMode
-	ResolvedAddrs      []netip.Addr
-	TTL                time.Duration
-	ExpiresAt          time.Time
+	Host          string
+	Mode          DNSRefreshMode
+	ResolvedAddrs []netip.Addr
+	TTL           time.Duration
+	ExpiresAt     time.Time
+	// LookupDuration records how long the policy-managed DNS lookup took.
+	LookupDuration     time.Duration
 	GuardRailTriggered bool
 	Err                error
 }
