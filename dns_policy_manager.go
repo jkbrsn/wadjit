@@ -193,7 +193,13 @@ func (m *dnsPolicyManager) resolveSingle(
 	m.mu.Unlock()
 
 	addr := net.JoinHostPort(addrs[0].String(), port)
-	decision := DNSDecision{Host: host, Mode: m.policy.Mode, ResolvedAddrs: addrs, TTL: ttl, LookupDuration: lookupDur}
+	decision := DNSDecision{
+		Host:           host,
+		Mode:           m.policy.Mode,
+		ResolvedAddrs:  addrs,
+		TTL:            ttl,
+		LookupDuration: lookupDur,
+	}
 	return dnsResolveOutcome{address: addr, forceNewConn: true, decision: &decision}, nil
 }
 
@@ -333,10 +339,12 @@ func (m *dnsPolicyManager) resolveCadence(
 // lookup delegates to the configured resolver and ensures a non-empty address list is returned.
 // Concurrent lookups for the same host are coalesced via singleflight to avoid thundering
 // DNS queries when many callers arrive simultaneously.
+//
+// revive:disable:function-result-limit exception valid
 func (m *dnsPolicyManager) lookup(
 	ctx context.Context,
 	host string,
-) ([]netip.Addr, time.Duration, time.Duration, error) {
+) (addrs []netip.Addr, ttl time.Duration, lookupDuration time.Duration, err error) {
 	if m.resolver == nil {
 		return nil, 0, 0, errors.New("resolver not configured")
 	}
@@ -372,7 +380,10 @@ func (m *dnsPolicyManager) lookup(
 		if res.Err != nil {
 			return nil, 0, 0, res.Err
 		}
-		out := res.Val.(lfResult)
+		out, ok := res.Val.(lfResult)
+		if !ok {
+			return nil, 0, 0, errors.New("unexpected result type")
+		}
 		return out.addrs, out.ttl, out.lookupDur, nil
 	case <-ctx.Done():
 		// Caller canceled while waiting; return the cancellation error. The shared lookup
@@ -380,6 +391,8 @@ func (m *dnsPolicyManager) lookup(
 		return nil, 0, 0, ctx.Err()
 	}
 }
+
+// revive:enable:function-result-limit
 
 // dialContext injects the manager's dial plan into the provided net.Dialer.
 func (*dnsPolicyManager) dialContext(
