@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type dnsCacheEntry struct {
@@ -35,6 +37,8 @@ type dnsPolicyManager struct {
 	cadenceNext time.Time
 	forceLookup bool
 	guard       guardRailState
+
+	lookupGroup singleflight.Group
 }
 
 // newDNSPolicyManager wires the supplied policy and optional decision hook into a manager ready to
@@ -325,6 +329,8 @@ func (m *dnsPolicyManager) resolveCadence(
 }
 
 // lookup delegates to the configured resolver and ensures a non-empty address list is returned.
+// Concurrent lookups for the same host are coalesced via singleflight to avoid thundering
+// DNS queries when many callers arrive simultaneously.
 func (m *dnsPolicyManager) lookup(
 	ctx context.Context,
 	host string,
@@ -332,14 +338,41 @@ func (m *dnsPolicyManager) lookup(
 	if m.resolver == nil {
 		return nil, 0, errors.New("resolver not configured")
 	}
-	addrs, ttl, err := m.resolver.Lookup(ctx, host)
-	if err != nil {
-		return nil, 0, err
+
+	type lfResult struct {
+		addrs []netip.Addr
+		ttl   time.Duration
 	}
-	if len(addrs) == 0 {
-		return nil, 0, errors.New("resolver returned no addresses")
+
+	ch := m.lookupGroup.DoChan(host, func() (any, error) {
+		// Use a bounded background context so the lookup makes progress even if the caller
+		// cancels; the singleflight result will be shared with concurrent callers.
+		lookupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		addrs, ttl, err := m.resolver.Lookup(lookupCtx, host)
+		if err != nil {
+			return nil, err
+		}
+		if len(addrs) == 0 {
+			return nil, errors.New("resolver returned no addresses")
+		}
+		copied := make([]netip.Addr, len(addrs))
+		copy(copied, addrs)
+		return lfResult{addrs: copied, ttl: ttl}, nil
+	})
+
+	select {
+	case res := <-ch:
+		if res.Err != nil {
+			return nil, 0, res.Err
+		}
+		out := res.Val.(lfResult)
+		return out.addrs, out.ttl, nil
+	case <-ctx.Done():
+		// Caller canceled while waiting; return the cancellation error. The shared lookup
+		// will still complete in the background and satisfy other callers.
+		return nil, 0, ctx.Err()
 	}
-	return addrs, ttl, nil
 }
 
 // dialContext injects the manager's dial plan into the provided net.Dialer.
@@ -431,16 +464,15 @@ type policyTransport struct {
 // RoundTrip injects DNS policy context into the request before delegating to the underlying
 // transport.
 func (p *policyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	ctx, forceClose, err := p.mgr.prepareRequest(req.Context(), req.URL, p.base)
+	ctx, _, err := p.mgr.prepareRequest(req.Context(), req.URL, p.base)
 	if err != nil {
 		return nil, err
 	}
 
 	newReq := req.Clone(ctx)
-	if forceClose {
-		newReq.Close = true
-	}
-
+	// Do not force-close the new request's connection; CloseIdleConnections() above will
+	// purge old idle connections while allowing the freshly-established connection to become
+	// idle and be reused by subsequent requests.
 	return p.base.RoundTrip(newReq)
 }
 
