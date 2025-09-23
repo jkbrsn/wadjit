@@ -19,6 +19,8 @@ github.com/jkbrsn/go-jsonrpc v0.6.0 h1:797IcCXdDRAOzI55+vJ88WrLRv4ZesG0bBrWuONlC
 github.com/jkbrsn/go-jsonrpc v0.6.0/go.mod h1:3rsj7I1oyKAB1RmyjpzHJpcJgeIJ6xLTOsHYSKOS7iU=
 github.com/jkbrsn/taskman v0.5.1 h1:txRWd8hqME9kWqwGz9FSTGEPco8vYp5eb69GT3GN0Ko=
 github.com/jkbrsn/taskman v0.5.1/go.mod h1:c07AVtbgG5HRDnfeUpoinubwnWALz16pk0Cu8dC4FYI=
+github.com/jkbrsn/taskman v0.6.0 h1:5H/XSucY/espkVqwpwIflx7o67MkxZZ9KDPl4fQCOM0=
+github.com/jkbrsn/taskman v0.6.0/go.mod h1:c07AVtbgG5HRDnfeUpoinubwnWALz16pk0Cu8dC4FYI=
 github.com/jkbrsn/threadsafe v0.5.0 h1:Iev5+agv64qxXa0QnTUnsvMkBhicnEMQ3YsVZ+KU9cY=
 github.com/jkbrsn/threadsafe v0.5.0/go.mod h1:f8lewyuKXmcsoapAekEXgoCDsM2tWPys8jiNeVC+8Kk=
 github.com/klauspost/cpuid/v2 v2.3.0 h1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=
