@@ -35,6 +35,45 @@ type Wadjit struct {
 	closeWG   sync.WaitGroup
 }
 
+// applyDefaultDNSPolicy applies the default DNS policy to the watcher if it is not already set.
+func (w *Wadjit) applyDefaultDNSPolicy(watcher *Watcher) {
+	if !w.hasDefaultDNSPolicy || watcher == nil {
+		return
+	}
+
+	for i := range watcher.Tasks {
+		if endpoint, ok := watcher.Tasks[i].(*HTTPEndpoint); ok && endpoint != nil {
+			if endpoint.dnsPolicySet {
+				continue
+			}
+			endpoint.dnsPolicy = w.defaultDNSPolicy
+			endpoint.dnsPolicySet = true
+		}
+	}
+}
+
+// listenForResponses consumes the channel where Watchers send responses from their monitoring jobs
+// and forwards those responses to the externally facing channel.
+func (w *Wadjit) listenForResponses() {
+	for {
+		select {
+		case resp, ok := <-w.respGatherChan:
+			if !ok {
+				return // Channel closed
+			}
+			if w.ctx.Err() != nil {
+				return // Context canceled
+			}
+
+			// Send the response to the external facing channel
+			// TODO: consider adding Watcher response metrics here
+			w.respExportChan <- resp
+		case <-w.ctx.Done():
+			return
+		}
+	}
+}
+
 // AddWatcher adds a Watcher to the Wadjit, starting it in the process.
 func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	w.applyDefaultDNSPolicy(watcher)
@@ -61,22 +100,6 @@ func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	w.watchers.Store(watcher.ID, watcher)
 
 	return nil
-}
-
-func (w *Wadjit) applyDefaultDNSPolicy(watcher *Watcher) {
-	if !w.hasDefaultDNSPolicy || watcher == nil {
-		return
-	}
-
-	for i := range watcher.Tasks {
-		if endpoint, ok := watcher.Tasks[i].(*HTTPEndpoint); ok && endpoint != nil {
-			if endpoint.dnsPolicySet {
-				continue
-			}
-			endpoint.dnsPolicy = w.defaultDNSPolicy
-			endpoint.dnsPolicySet = true
-		}
-	}
 }
 
 // AddWatchers adds multiple Watchers to the Wadjit, starting them in the process.
@@ -170,6 +193,16 @@ func (w *Wadjit) RemoveWatcher(id string) error {
 	return nil
 }
 
+// PauseWatcher pauses a watcher's job in the underlying task manager.
+func (w *Wadjit) PauseWatcher(id string) error {
+	return w.taskManager.PauseJob(id)
+}
+
+// ResumeWatcher resumes a watcher's job in the underlying task manager.
+func (w *Wadjit) ResumeWatcher(id string) error {
+	return w.taskManager.ResumeJob(id)
+}
+
 // Responses returns a channel that will receive all watchers' responses. The channel will
 // be closed when the Wadjit is closed. Note: Unless sends on the response channel are
 // consumed, a block may occur.
@@ -185,28 +218,6 @@ func (w *Wadjit) WatcherIDs() []string {
 		return true
 	})
 	return ids
-}
-
-// listenForResponses consumes the channel where Watchers send responses from their monitoring jobs
-// and forwards those responses to the externally facing channel.
-func (w *Wadjit) listenForResponses() {
-	for {
-		select {
-		case resp, ok := <-w.respGatherChan:
-			if !ok {
-				return // Channel closed
-			}
-			if w.ctx.Err() != nil {
-				return // Context canceled
-			}
-
-			// Send the response to the external facing channel
-			// TODO: consider adding Watcher response metrics here
-			w.respExportChan <- resp
-		case <-w.ctx.Done():
-			return
-		}
-	}
 }
 
 // New creates and returns a new Wadjit. Optional functional options can be supplied to tune the
@@ -252,7 +263,7 @@ type options struct {
 	logger              zerolog.Logger
 	loggerSet           bool
 
-	taskmanOptions []taskman.TMOption
+	taskmanOptions []taskman.Option
 }
 
 // WithBufferSize configures the buffer size for response channels. A negative value will be
@@ -282,19 +293,19 @@ func WithLogger(logger zerolog.Logger) Option {
 		o.loggerSet = true
 
 		// Clamp taskman log level to at least INFO
-		logLevel := max(logger.GetLevel(), zerolog.InfoLevel)
+		logLevel := max(logger.GetLevel(), zerolog.DebugLevel)
 		log := logger.Level(logLevel)
 		o.taskmanOptions = append(o.taskmanOptions, taskman.WithLogger(log))
 	}
 }
 
 // WithTaskmanOptions forwards the provided task manager options to the internal task manager.
-func WithTaskmanOptions(opts ...taskman.TMOption) Option {
+func WithTaskmanOptions(opts ...taskman.Option) Option {
 	return func(o *options) {
 		if len(opts) == 0 {
 			return
 		}
-		var filtered []taskman.TMOption
+		var filtered []taskman.Option
 		for _, opt := range opts {
 			if opt == nil {
 				continue
@@ -304,7 +315,7 @@ func WithTaskmanOptions(opts ...taskman.TMOption) Option {
 		if len(filtered) == 0 {
 			return
 		}
-		owned := append([]taskman.TMOption(nil), filtered...)
+		owned := append([]taskman.Option(nil), filtered...)
 		o.taskmanOptions = append(o.taskmanOptions, owned...)
 	}
 }
