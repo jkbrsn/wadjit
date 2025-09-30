@@ -784,14 +784,14 @@ func TestWadjit_PauseResumeWatcher(t *testing.T) {
 	}()
 
 	// Set up URLs
-	url, err := url.Parse(server.URL)
+	targetURL, err := url.Parse(server.URL)
 	assert.NoError(t, err, "failed to parse HTTP URL")
 
 	// Create a watcher with a long-running task
 	id := "test-pause-resume"
 	cadence := 2 * time.Millisecond
 	httpTasks := []HTTPEndpoint{{
-		URL:     url,
+		URL:     targetURL,
 		Payload: []byte("test payload"),
 	}}
 	var tasks []WatcherTask
@@ -820,13 +820,24 @@ func TestWadjit_PauseResumeWatcher(t *testing.T) {
 	// Pause the watcher
 	err = w.PauseWatcher(id)
 	assert.NoError(t, err, "error pausing watcher")
-	t.Log("PAUSED")
-	time.Sleep(5 * time.Millisecond) // Ensure on-going tasks are completed before verifying
 
-	// Verify there are no responses when the watcher is paused
+	// Drain any buffered responses from before the pause
+	time.Sleep(5 * time.Millisecond) // Ensure on-going tasks are completed
+	func() {
+		for {
+			select {
+			case <-w.Responses():
+			default:
+				return
+			}
+		}
+	}()
+
+	// Verify there are no NEW responses when the watcher is paused
 	assert.Never(t, func() bool {
 		select {
 		case response := <-w.Responses():
+			t.Logf("Unexpected response received during pause: %+v", response)
 			assert.NoError(t, response.Err)
 			return true
 		default:
@@ -837,7 +848,6 @@ func TestWadjit_PauseResumeWatcher(t *testing.T) {
 	// Resume the watcher
 	err = w.ResumeWatcher(id)
 	assert.NoError(t, err, "error resuming watcher")
-	t.Log("RESUMED")
 
 	// Verify there are responses again
 	assert.Eventually(t, func() bool {
