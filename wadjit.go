@@ -193,12 +193,15 @@ func (w *Wadjit) RemoveWatcher(id string) error {
 	return nil
 }
 
-// PauseWatcher pauses a watcher's job in the underlying task manager.
+// PauseWatcher pauses a watcher's scheduled execution. The watcher remains registered but will
+// not execute tasks until ResumeWatcher is called. Returns an error if the watcher ID does not
+// exist or if the underlying task manager fails to pause the job.
 func (w *Wadjit) PauseWatcher(id string) error {
 	return w.taskManager.PauseJob(id)
 }
 
-// ResumeWatcher resumes a watcher's job in the underlying task manager.
+// ResumeWatcher resumes a previously paused watcher's scheduled execution. Returns an error if
+// the watcher ID does not exist or if the underlying task manager fails to resume the job.
 func (w *Wadjit) ResumeWatcher(id string) error {
 	return w.taskManager.ResumeJob(id)
 }
