@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/jkbrsn/taskman"
 	"github.com/rs/xid"
+	"github.com/rs/zerolog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -768,4 +770,200 @@ func TestWadjit_WatcherIDs(t *testing.T) {
 	assert.Equal(t, 1, len(idsAfterRemove), "expected 1 watcher ID after removal")
 	assert.Equal(t, "watcher-2", idsAfterRemove[0],
 		"expected remaining ID 'watcher-2', got %v", idsAfterRemove[0])
+}
+
+//nolint:revive // test complexity acceptable
+func TestWadjit_PauseResumeWatcher(t *testing.T) {
+	t.Run("Normal Pause and Resume", func(t *testing.T) {
+		w := New(WithLogger(zerolog.New(os.Stdout).Level(zerolog.DebugLevel)))
+		server := httptest.NewServer(http.HandlerFunc(echoHandler))
+
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+
+			server.Close()
+		}()
+
+		// Set up URLs
+		targetURL, err := url.Parse(server.URL)
+		assert.NoError(t, err, "failed to parse HTTP URL")
+
+		// Create a watcher with a long-running task
+		id := "test-pause-resume"
+		cadence := 2 * time.Millisecond
+		httpTasks := []HTTPEndpoint{{
+			URL:     targetURL,
+			Payload: []byte("test payload"),
+		}}
+		var tasks []WatcherTask
+		for _, task := range httpTasks {
+			tasks = append(tasks, &task)
+		}
+		watcher, err := NewWatcher(id, cadence, tasks)
+		assert.NoError(t, err, "error creating watcher")
+
+		err = w.AddWatcher(watcher)
+		assert.NoError(t, err, "error adding watcher")
+		// Give it some time to start running
+		time.Sleep(5 * time.Millisecond)
+
+		// Verify there are responses
+		assert.Eventually(t, func() bool {
+			select {
+			case response := <-w.Responses():
+				assert.NoError(t, response.Err)
+				return true
+			default:
+				return false
+			}
+		}, 25*time.Millisecond, 3*time.Millisecond)
+
+		// Pause the watcher
+		err = w.PauseWatcher(id)
+		assert.NoError(t, err, "error pausing watcher")
+
+		// Drain any buffered responses from before the pause
+		time.Sleep(5 * time.Millisecond) // Ensure on-going tasks are completed
+		func() {
+			for {
+				select {
+				case <-w.Responses():
+				default:
+					return
+				}
+			}
+		}()
+
+		// Verify there are no NEW responses when the watcher is paused
+		assert.Never(t, func() bool {
+			select {
+			case response := <-w.Responses():
+				t.Logf("Unexpected response received during pause: %+v", response)
+				assert.NoError(t, response.Err)
+				return true
+			default:
+				return false
+			}
+		}, 25*time.Millisecond, 3*time.Millisecond)
+
+		// Resume the watcher
+		err = w.ResumeWatcher(id)
+		assert.NoError(t, err, "error resuming watcher")
+
+		// Verify there are responses again
+		assert.Eventually(t, func() bool {
+			select {
+			case response := <-w.Responses():
+				assert.NoError(t, response.Err)
+			default:
+				return false
+			}
+			return true
+		}, 25*time.Millisecond, 3*time.Millisecond)
+	})
+
+	t.Run("Pause Non-Existent Watcher", func(t *testing.T) {
+		w := New()
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+		}()
+
+		err := w.PauseWatcher("non-existent-id")
+		assert.Error(t, err, "expected error pausing non-existent watcher")
+	})
+
+	t.Run("Resume Non-Existent Watcher", func(t *testing.T) {
+		w := New()
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+		}()
+
+		err := w.ResumeWatcher("non-existent-id")
+		assert.Error(t, err, "expected error resuming non-existent watcher")
+	})
+
+	t.Run("Double Pause", func(t *testing.T) {
+		w := New()
+		server := httptest.NewServer(http.HandlerFunc(echoHandler))
+
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+			server.Close()
+		}()
+
+		targetURL, err := url.Parse(server.URL)
+		assert.NoError(t, err, "failed to parse HTTP URL")
+
+		id := "test-double-pause"
+		cadence := 10 * time.Millisecond
+		httpTasks := []HTTPEndpoint{{
+			URL:     targetURL,
+			Payload: []byte("test payload"),
+		}}
+		var tasks []WatcherTask
+		for _, task := range httpTasks {
+			tasks = append(tasks, &task)
+		}
+		watcher, err := NewWatcher(id, cadence, tasks)
+		assert.NoError(t, err, "error creating watcher")
+
+		err = w.AddWatcher(watcher)
+		assert.NoError(t, err, "error adding watcher")
+		time.Sleep(5 * time.Millisecond)
+
+		// First pause should succeed
+		err = w.PauseWatcher(id)
+		assert.NoError(t, err, "error on first pause")
+
+		// Second pause should error (already paused)
+		err = w.PauseWatcher(id)
+		assert.Error(t, err, "expected error on double pause")
+	})
+
+	t.Run("Double Resume", func(t *testing.T) {
+		w := New()
+		server := httptest.NewServer(http.HandlerFunc(echoHandler))
+
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err, "error closing Wadjit")
+			server.Close()
+		}()
+
+		targetURL, err := url.Parse(server.URL)
+		assert.NoError(t, err, "failed to parse HTTP URL")
+
+		id := "test-double-resume"
+		cadence := 10 * time.Millisecond
+		httpTasks := []HTTPEndpoint{{
+			URL:     targetURL,
+			Payload: []byte("test payload"),
+		}}
+		var tasks []WatcherTask
+		for _, task := range httpTasks {
+			tasks = append(tasks, &task)
+		}
+		watcher, err := NewWatcher(id, cadence, tasks)
+		assert.NoError(t, err, "error creating watcher")
+
+		err = w.AddWatcher(watcher)
+		assert.NoError(t, err, "error adding watcher")
+		time.Sleep(5 * time.Millisecond)
+
+		// Pause first
+		err = w.PauseWatcher(id)
+		assert.NoError(t, err, "error pausing watcher")
+
+		// First resume should succeed
+		err = w.ResumeWatcher(id)
+		assert.NoError(t, err, "error on first resume")
+
+		// Second resume should error (not paused)
+		err = w.ResumeWatcher(id)
+		assert.Error(t, err, "expected error on double resume")
+	})
 }
