@@ -35,6 +35,37 @@ type Wadjit struct {
 	closeWG   sync.WaitGroup
 }
 
+// New creates and returns a new Wadjit. Optional functional options can be supplied to tune the
+// internal task manager and other configuration. Note: Unless sends on the response channel are
+// consumed, a block may occur.
+func New(opts ...Option) *Wadjit {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Apply and validate options
+	options := applyOptions(opts)
+
+	// Create task manager and Wadjit
+	tm := taskman.New(options.taskmanOptions...)
+	w := &Wadjit{
+		ctx:    ctx,
+		cancel: cancel,
+		// TODO: set logger
+		taskManager:         tm,
+		respGatherChan:      make(chan WatcherResponse, options.bufferSize),
+		respExportChan:      make(chan WatcherResponse, options.bufferSize),
+		defaultDNSPolicy:    options.defaultDNSPolicy,
+		hasDefaultDNSPolicy: options.hasDefaultDNSPolicy,
+	}
+
+	w.closeWG.Add(1)
+	go func() {
+		w.listenForResponses()
+		w.closeWG.Done()
+	}()
+
+	return w
+}
+
 // applyDefaultDNSPolicy applies the default DNS policy to the watcher if it is not already set.
 func (w *Wadjit) applyDefaultDNSPolicy(watcher *Watcher) {
 	if !w.hasDefaultDNSPolicy || watcher == nil {
@@ -173,6 +204,13 @@ func (w *Wadjit) Metrics() taskman.TaskManagerMetrics {
 	return w.taskManager.Metrics()
 }
 
+// PauseWatcher pauses a watcher's scheduled execution. The watcher remains registered but will
+// not execute tasks until ResumeWatcher is called. Returns an error if the watcher ID does not
+// exist or if the underlying task manager fails to pause the job.
+func (w *Wadjit) PauseWatcher(id string) error {
+	return w.taskManager.PauseJob(id)
+}
+
 // RemoveWatcher closes and removes a Watcher from the Wadjit.
 func (w *Wadjit) RemoveWatcher(id string) error {
 	watcher, ok := w.watchers.LoadAndDelete(id)
@@ -193,24 +231,17 @@ func (w *Wadjit) RemoveWatcher(id string) error {
 	return nil
 }
 
-// PauseWatcher pauses a watcher's scheduled execution. The watcher remains registered but will
-// not execute tasks until ResumeWatcher is called. Returns an error if the watcher ID does not
-// exist or if the underlying task manager fails to pause the job.
-func (w *Wadjit) PauseWatcher(id string) error {
-	return w.taskManager.PauseJob(id)
+// Responses returns a channel that will receive all watchers' responses. The channel will
+// be closed when the Wadjit is closed. Note: Unless sends on the response channel are
+// consumed, a block may occur.
+func (w *Wadjit) Responses() <-chan WatcherResponse {
+	return w.respExportChan
 }
 
 // ResumeWatcher resumes a previously paused watcher's scheduled execution. Returns an error if
 // the watcher ID does not exist or if the underlying task manager fails to resume the job.
 func (w *Wadjit) ResumeWatcher(id string) error {
 	return w.taskManager.ResumeJob(id)
-}
-
-// Responses returns a channel that will receive all watchers' responses. The channel will
-// be closed when the Wadjit is closed. Note: Unless sends on the response channel are
-// consumed, a block may occur.
-func (w *Wadjit) Responses() <-chan WatcherResponse {
-	return w.respExportChan
 }
 
 // WatcherIDs returns a slice of strings containing the IDs of all active watchers.
@@ -221,37 +252,6 @@ func (w *Wadjit) WatcherIDs() []string {
 		return true
 	})
 	return ids
-}
-
-// New creates and returns a new Wadjit. Optional functional options can be supplied to tune the
-// internal task manager and other configuration. Note: Unless sends on the response channel are
-// consumed, a block may occur.
-func New(opts ...Option) *Wadjit {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Apply and validate options
-	options := applyOptions(opts)
-
-	// Create task manager and Wadjit
-	tm := taskman.New(options.taskmanOptions...)
-	w := &Wadjit{
-		ctx:    ctx,
-		cancel: cancel,
-		// TODO: set logger
-		taskManager:         tm,
-		respGatherChan:      make(chan WatcherResponse, options.bufferSize),
-		respExportChan:      make(chan WatcherResponse, options.bufferSize),
-		defaultDNSPolicy:    options.defaultDNSPolicy,
-		hasDefaultDNSPolicy: options.hasDefaultDNSPolicy,
-	}
-
-	w.closeWG.Add(1)
-	go func() {
-		w.listenForResponses()
-		w.closeWG.Done()
-	}()
-
-	return w
 }
 
 // Option configures the behavior of a Wadjit instance created by New.
