@@ -1,10 +1,5 @@
 # todo
 
-## v0.9.0
-
-- Support "pause" and "resume" of watchers
-  - Dependent on future `taskman` features
-
 ## v0.x.x
 
 - Add `Watcher` metrics (per watcher and/or overall)
