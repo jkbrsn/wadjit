@@ -144,6 +144,39 @@ func (w *Wadjit) AddWatchers(watchers ...*Watcher) error {
 	return errs
 }
 
+// PauseWatcher pauses a watcher's scheduled execution. The watcher remains registered but will
+// not execute tasks until ResumeWatcher is called. Returns an error if the watcher ID does not
+// exist or if the underlying task manager fails to pause the job.
+func (w *Wadjit) PauseWatcher(id string) error {
+	return w.taskManager.PauseJob(id)
+}
+
+// ResumeWatcher resumes a previously paused watcher's scheduled execution. Returns an error if
+// the watcher ID does not exist or if the underlying task manager fails to resume the job.
+func (w *Wadjit) ResumeWatcher(id string) error {
+	return w.taskManager.ResumeJob(id)
+}
+
+// RemoveWatcher closes and removes a Watcher from the Wadjit.
+func (w *Wadjit) RemoveWatcher(id string) error {
+	watcher, ok := w.watchers.LoadAndDelete(id)
+	if !ok {
+		return fmt.Errorf("watcher with ID %s not found", id)
+	}
+
+	err := watcher.(*Watcher).close()
+	if err != nil {
+		return err
+	}
+
+	err = w.taskManager.RemoveJob(id)
+	if err != nil {
+		return fmt.Errorf("error removing watcher: %w", err)
+	}
+
+	return nil
+}
+
 // Clear stops and removes all watchers from the Wadjit instance while keeping it running. This
 // function is not atomic with respect to other operations.
 func (w *Wadjit) Clear() error {
@@ -199,49 +232,11 @@ func (w *Wadjit) Close() error {
 	return w.closeErr
 }
 
-// Metrics returns metrics from the Wadjit's internal task manager.
-func (w *Wadjit) Metrics() taskman.TaskManagerMetrics {
-	return w.taskManager.Metrics()
-}
-
-// PauseWatcher pauses a watcher's scheduled execution. The watcher remains registered but will
-// not execute tasks until ResumeWatcher is called. Returns an error if the watcher ID does not
-// exist or if the underlying task manager fails to pause the job.
-func (w *Wadjit) PauseWatcher(id string) error {
-	return w.taskManager.PauseJob(id)
-}
-
-// RemoveWatcher closes and removes a Watcher from the Wadjit.
-func (w *Wadjit) RemoveWatcher(id string) error {
-	watcher, ok := w.watchers.LoadAndDelete(id)
-	if !ok {
-		return fmt.Errorf("watcher with ID %s not found", id)
-	}
-
-	err := watcher.(*Watcher).close()
-	if err != nil {
-		return err
-	}
-
-	err = w.taskManager.RemoveJob(id)
-	if err != nil {
-		return fmt.Errorf("error removing watcher: %w", err)
-	}
-
-	return nil
-}
-
 // Responses returns a channel that will receive all watchers' responses. The channel will
 // be closed when the Wadjit is closed. Note: Unless sends on the response channel are
 // consumed, a block may occur.
 func (w *Wadjit) Responses() <-chan WatcherResponse {
 	return w.respExportChan
-}
-
-// ResumeWatcher resumes a previously paused watcher's scheduled execution. Returns an error if
-// the watcher ID does not exist or if the underlying task manager fails to resume the job.
-func (w *Wadjit) ResumeWatcher(id string) error {
-	return w.taskManager.ResumeJob(id)
 }
 
 // WatcherIDs returns a slice of strings containing the IDs of all active watchers.
@@ -252,6 +247,11 @@ func (w *Wadjit) WatcherIDs() []string {
 		return true
 	})
 	return ids
+}
+
+// Metrics returns metrics from the Wadjit's internal task manager.
+func (w *Wadjit) Metrics() taskman.TaskManagerMetrics {
+	return w.taskManager.Metrics()
 }
 
 // Option configures the behavior of a Wadjit instance created by New.
