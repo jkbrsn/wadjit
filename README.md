@@ -105,6 +105,8 @@ These targets are also used in the GitHub CI pipeline, see [`.github/workflows/c
 - `AddWatcher(watcher *Watcher) error`: Adds a watcher to the manager
 - `AddWatchers(watchers ...*Watcher) error`: Adds multiple watchers at once
 - `RemoveWatcher(id string) error`: Removes a watcher by ID
+- `PauseWatcher(id string) error`: Pauses a watcher's scheduled execution
+- `ResumeWatcher(id string) error`: Resumes a previously paused watcher
 - `Clear() error`: Stops and removes all watchers, keeps manager running
 - `WatcherIDs() []string`: Lists IDs of active watchers
 - `Responses() <-chan WatcherResponse`: Returns a channel for receiving responses
