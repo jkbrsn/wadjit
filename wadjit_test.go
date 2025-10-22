@@ -347,13 +347,11 @@ func TestWadjit_ConcurrentWatchers(t *testing.T) {
 
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	for _, task := range tasks {
-		wg.Add(1)
-		go func(tr taskTrigger) {
-			defer wg.Done()
+	for _, trigger := range tasks {
+		wg.Go(func() {
 			<-start
-			require.NoError(t, tr.task.Execute())
-		}(task)
+			require.NoError(t, trigger.task.Execute())
+		})
 	}
 
 	close(start)

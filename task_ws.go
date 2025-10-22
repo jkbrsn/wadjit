@@ -13,7 +13,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/jkbrsn/go-jsonrpc"
+	"github.com/jkbrsn/jsonrpc"
 	"github.com/jkbrsn/taskman"
 	"github.com/rs/xid"
 )
@@ -127,16 +127,13 @@ func (e *WSEndpoint) Initialize(watcherID string, responseChannel chan<- Watcher
 // Task returns a taskman.Task that sends a message to the WebSocket endpoint.
 func (e *WSEndpoint) Task() taskman.Task {
 	switch e.Mode {
-	case OneHitText:
-		return &wsOneHit{
-			wsEndpoint: e,
-		}
 	case PersistentJSONRPC:
 		return &wsPersistent{
 			protocol:   JSONRPC,
 			wsEndpoint: e,
 		}
 	default:
+		// case OneHitText is handled by default:
 		// Default to one hit mode since it should work for most implementations
 		return &wsOneHit{
 			wsEndpoint: e,
@@ -390,8 +387,17 @@ func (e *WSEndpoint) processInflightMessage(
 	timestamps.start = inflightMsgTyped.timeSent
 
 	// Restore original ID and marshal the JSON-RPC interface back into a byte slice
-	jsonRPCResp.ID = inflightMsgTyped.originalID
-	data, err := jsonRPCResp.MarshalJSON()
+	respClone, err := jsonRPCResp.WithID(inflightMsgTyped.originalID)
+	if err != nil {
+		e.respChan <- errorResponse(
+			fmt.Errorf("failed restoring original ID: %w", err),
+			e.ID,
+			e.watcherID,
+			urlClone,
+		)
+		return
+	}
+	data, err := respClone.MarshalJSON()
 	if err != nil {
 		e.respChan <- errorResponse(
 			fmt.Errorf("failed re-marshaling JSON-RPC response: %w", err),
@@ -444,7 +450,7 @@ func (e *WSEndpoint) handleJSONRPCResponse(
 	responseID := jsonRPCResp.IDString()
 	if responseID == "" {
 		e.respChan <- errorResponse(
-			fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.Result),
+			fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.RawResult()),
 			e.ID,
 			e.watcherID,
 			urlClone,
@@ -705,7 +711,7 @@ func (ll *wsPersistent) handleWriteError(wsErr error, urlClone *url.URL) error {
 	if websocket.IsCloseError(wsErr, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 		err = fmt.Errorf("websocket write failed (connection closed): %w", wsErr)
 	} else if strings.Contains(wsErr.Error(), "websocket: close sent") {
-		err = fmt.Errorf("websocket write failed (connection closed): %w", wsErr)
+		err = fmt.Errorf("websocket write failed (close sent): %w", wsErr)
 	} else {
 		err = fmt.Errorf("unexpected websocket write error: %w", wsErr)
 	}
