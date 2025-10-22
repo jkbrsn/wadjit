@@ -9,8 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/jkbrsn/go-jsonrpc"
+	"github.com/jkbrsn/jsonrpc"
 	"github.com/rs/xid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -151,8 +152,14 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 	responseChan := make(chan WatcherResponse, 2)
 
 	originalID := xid.New().String()
-	payload := []byte(`{"id":"` + originalID +
-		`","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
+	req := &jsonrpc.Request{
+		JSONRPC: "2.0",
+		ID:      originalID,
+		Method:  "echo",
+		Params:  []any{"test"},
+	}
+	payload, err := sonic.Marshal(req)
+	require.NoError(t, err)
 	endpoint := &WSEndpoint{
 		URL:     parsedURL,
 		Header:  header,
@@ -161,11 +168,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		ID:      "an-id",
 	}
 
-	resp := jsonrpc.Response{
-		JSONRPC: "2.0",
-		ID:      originalID,
-		Result:  payload,
-	}
+	resp, err := jsonrpc.NewResponse(originalID, payload)
+	require.NoError(t, err)
 	expectedResp, err := resp.MarshalJSON()
 	require.NoError(t, err)
 
@@ -199,13 +203,16 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 			return false // Stop after the first item
 		})
 		assert.Equal(t, originalID, inflightMsg.originalID)
-		expectedResult := []byte(`{"id":"` + inflightMsg.inflightID +
-			`","method":"echo","params":["test"],"jsonrpc":"2.0"}`)
-		resp := jsonrpc.Response{
+		expectedReq := &jsonrpc.Request{
 			JSONRPC: "2.0",
-			ID:      originalID,
-			Result:  expectedResult,
+			ID:      inflightMsg.inflightID,
+			Method:  "echo",
+			Params:  []any{"test"},
 		}
+		expectedResult, err := sonic.Marshal(expectedReq)
+		require.NoError(t, err)
+		resp, err := jsonrpc.NewResponse(originalID, expectedResult)
+		require.NoError(t, err)
 		expectedResp, err := resp.MarshalJSON()
 		require.NoError(t, err)
 
@@ -253,11 +260,8 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		}()
 		wg.Wait()
 
-		resp := jsonrpc.Response{
-			JSONRPC: "2.0",
-			ID:      originalID,
-			Result:  payload,
-		}
+		resp, err := jsonrpc.NewResponse(originalID, payload)
+		require.NoError(t, err)
 		expectedResp, err := resp.MarshalJSON()
 		require.NoError(t, err)
 

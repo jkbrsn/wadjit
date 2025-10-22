@@ -13,7 +13,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/jkbrsn/go-jsonrpc"
+	"github.com/jkbrsn/jsonrpc"
 	"github.com/jkbrsn/taskman"
 	"github.com/rs/xid"
 )
@@ -390,8 +390,17 @@ func (e *WSEndpoint) processInflightMessage(
 	timestamps.start = inflightMsgTyped.timeSent
 
 	// Restore original ID and marshal the JSON-RPC interface back into a byte slice
-	jsonRPCResp.ID = inflightMsgTyped.originalID
-	data, err := jsonRPCResp.MarshalJSON()
+	respClone, err := jsonRPCResp.WithID(inflightMsgTyped.originalID)
+	if err != nil {
+		e.respChan <- errorResponse(
+			fmt.Errorf("failed restoring original ID: %w", err),
+			e.ID,
+			e.watcherID,
+			urlClone,
+		)
+		return
+	}
+	data, err := respClone.MarshalJSON()
 	if err != nil {
 		e.respChan <- errorResponse(
 			fmt.Errorf("failed re-marshaling JSON-RPC response: %w", err),
@@ -444,7 +453,7 @@ func (e *WSEndpoint) handleJSONRPCResponse(
 	responseID := jsonRPCResp.IDString()
 	if responseID == "" {
 		e.respChan <- errorResponse(
-			fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.Result),
+			fmt.Errorf("found nil response ID, error: %s", jsonRPCResp.RawResult()),
 			e.ID,
 			e.watcherID,
 			urlClone,

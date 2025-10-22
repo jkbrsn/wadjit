@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/jkbrsn/go-jsonrpc"
+	"github.com/jkbrsn/jsonrpc"
 	"github.com/jkbrsn/taskman"
 )
 
@@ -227,32 +227,34 @@ func handleJSONRPCMessage(conn *websocket.Conn, mt int, message []byte) {
 		sendParseError(conn, mt)
 		return
 	}
-	sendSuccessResponse(conn, mt, req.ID, message)
+	err = sendSuccessResponse(conn, mt, req.ID, message)
+	if err != nil {
+		sendParseError(conn, mt)
+		return
+	}
 }
 
 // sendParseError sends a JSON-RPC parse error response.
 func sendParseError(conn *websocket.Conn, mt int) {
-	resp := jsonrpc.Response{
-		JSONRPC: "2.0",
-		Error: &jsonrpc.Error{
-			Code:    -32700,
-			Message: "Parse error",
-		},
-	}
+	resp := jsonrpc.NewErrorResponse(nil, &jsonrpc.Error{
+		Code:    -32700,
+		Message: "Parse error",
+	})
 	respBytes, _ := resp.MarshalJSON()
 	_ = conn.WriteMessage(mt, respBytes)
 }
 
 // sendSuccessResponse sends a successful JSON-RPC response.
-func sendSuccessResponse(conn *websocket.Conn, mt int, id any, result []byte) {
-	resp := jsonrpc.Response{
-		JSONRPC: "2.0",
-		ID:      id,
-		Error:   nil,
-		Result:  result,
+func sendSuccessResponse(conn *websocket.Conn, mt int, id any, result []byte) error {
+	resp, err := jsonrpc.NewResponse(id, result)
+	if err != nil {
+		return fmt.Errorf("failed to create JSON-RPC response: %w", err)
 	}
-	respBytes, _ := resp.MarshalJSON()
-	_ = conn.WriteMessage(mt, respBytes)
+	respBytes, err := resp.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON-RPC response: %w", err)
+	}
+	return conn.WriteMessage(mt, respBytes)
 }
 
 // handleHTTPRequest handles HTTP JSON-RPC requests.
@@ -277,18 +279,19 @@ func handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sendHTTPSuccessResponse(w, req.ID, payload)
+	err = sendHTTPSuccessResponse(w, req.ID, payload)
+	if err != nil {
+		sendHTTPParseError(w)
+		return
+	}
 }
 
 // sendHTTPParseError sends an HTTP JSON-RPC parse error.
 func sendHTTPParseError(w http.ResponseWriter) {
-	resp := jsonrpc.Response{
-		JSONRPC: "2.0",
-		Error: &jsonrpc.Error{
-			Code:    -32700,
-			Message: "Parse error",
-		},
-	}
+	resp := jsonrpc.NewErrorResponse(nil, &jsonrpc.Error{
+		Code:    -32700,
+		Message: "Parse error",
+	})
 	respBytes, _ := resp.MarshalJSON()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -296,17 +299,19 @@ func sendHTTPParseError(w http.ResponseWriter) {
 }
 
 // sendHTTPSuccessResponse sends an HTTP JSON-RPC success response.
-func sendHTTPSuccessResponse(w http.ResponseWriter, id any, payload []byte) {
-	resp := jsonrpc.Response{
-		JSONRPC: "2.0",
-		ID:      id,
-		Error:   nil,
-		Result:  payload,
+func sendHTTPSuccessResponse(w http.ResponseWriter, id any, payload []byte) error {
+	resp, err := jsonrpc.NewResponse(id, payload)
+	if err != nil {
+		return fmt.Errorf("failed to create JSON-RPC response: %w", err)
 	}
-	respBytes, _ := resp.MarshalJSON()
+	respBytes, err := resp.MarshalJSON()
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON-RPC response: %w", err)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(respBytes)
+	return nil
 }
 
 // jsonRPCServer creates a test server that responds to JSON-RPC requests.
@@ -357,13 +362,10 @@ func jsonRPCServerWithServerDisconnect() *httptest.Server {
 			err = req.UnmarshalJSON(message)
 			if err != nil {
 				// Respond with a parse error
-				resp := jsonrpc.Response{
-					JSONRPC: "2.0",
-					Error: &jsonrpc.Error{
-						Code:    -32700,
-						Message: "Parse error",
-					},
-				}
+				resp := jsonrpc.NewErrorResponse(nil, &jsonrpc.Error{
+					Code:    -32700,
+					Message: "Parse error",
+				})
 				respBytes, _ := resp.MarshalJSON()
 				// Try to write error response, then close
 				_ = conn.WriteMessage(mt, respBytes)
@@ -372,12 +374,7 @@ func jsonRPCServerWithServerDisconnect() *httptest.Server {
 			}
 
 			// Echo the request back to the client
-			resp := jsonrpc.Response{
-				JSONRPC: "2.0",
-				ID:      req.ID,
-				Error:   nil,
-				Result:  message, // Echo the original message as result
-			}
+			resp, _ := jsonrpc.NewResponse(req.ID, message)
 			respBytes, _ := resp.MarshalJSON()
 			err = conn.WriteMessage(mt, respBytes)
 			if err != nil {
