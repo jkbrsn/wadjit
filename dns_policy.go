@@ -107,14 +107,12 @@ type DNSDecision struct {
 // Validate ensures the DNS policy fields are coherent.
 func (p DNSPolicy) Validate() error {
 	switch p.Mode {
-	case DNSRefreshDefault:
-		// No additional requirements.
+	case DNSRefreshDefault, DNSRefreshSingleLookup:
+		// No additional requirements, use default resolver.
 	case DNSRefreshStatic:
 		if (p.StaticAddr == netip.AddrPort{}) {
 			return errors.Join(ErrInvalidDNSPolicy, errors.New("static mode requires StaticAddr"))
 		}
-	case DNSRefreshSingleLookup:
-		// Allow using the default resolver when no static address override is provided.
 	case DNSRefreshTTL:
 		if p.TTLMax > 0 && p.TTLMin > p.TTLMax {
 			return errors.Join(ErrInvalidDNSPolicy, errors.New("TTLMin must be <= TTLMax"))

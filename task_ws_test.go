@@ -181,12 +181,10 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 
 	t.Run("Inflight message", func(t *testing.T) {
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			err := task.Execute()
 			assert.NoError(t, err)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		length := 0
@@ -252,12 +250,10 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		assert.NoError(t, err)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			err := task.Execute()
 			assert.NoError(t, err)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		resp, err := jsonrpc.NewResponse(originalID, payload)
@@ -310,12 +306,10 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		assert.NotNil(t, task)
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			err := task.Execute()
 			assert.NoError(t, err)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		select {
@@ -341,12 +335,10 @@ func TestWSEndpointExecutewsPersistent(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 		// Connection should now have closed, try again
 
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			err := task.Execute()
 			assert.NoError(t, err)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 
 		select {

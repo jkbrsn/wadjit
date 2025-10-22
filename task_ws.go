@@ -127,16 +127,13 @@ func (e *WSEndpoint) Initialize(watcherID string, responseChannel chan<- Watcher
 // Task returns a taskman.Task that sends a message to the WebSocket endpoint.
 func (e *WSEndpoint) Task() taskman.Task {
 	switch e.Mode {
-	case OneHitText:
-		return &wsOneHit{
-			wsEndpoint: e,
-		}
 	case PersistentJSONRPC:
 		return &wsPersistent{
 			protocol:   JSONRPC,
 			wsEndpoint: e,
 		}
 	default:
+		// case OneHitText is handled by default:
 		// Default to one hit mode since it should work for most implementations
 		return &wsOneHit{
 			wsEndpoint: e,
@@ -714,7 +711,7 @@ func (ll *wsPersistent) handleWriteError(wsErr error, urlClone *url.URL) error {
 	if websocket.IsCloseError(wsErr, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 		err = fmt.Errorf("websocket write failed (connection closed): %w", wsErr)
 	} else if strings.Contains(wsErr.Error(), "websocket: close sent") {
-		err = fmt.Errorf("websocket write failed (connection closed): %w", wsErr)
+		err = fmt.Errorf("websocket write failed (close sent): %w", wsErr)
 	} else {
 		err = fmt.Errorf("unexpected websocket write error: %w", wsErr)
 	}
