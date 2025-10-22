@@ -6,7 +6,7 @@ require (
 	github.com/bytedance/sonic v1.14.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/jkbrsn/jsonrpc v0.8.1
-	github.com/jkbrsn/taskman v0.6.1
+	github.com/jkbrsn/taskman v0.6.2
 	github.com/miekg/dns v1.1.68
 	github.com/rs/xid v1.6.0
 	github.com/rs/zerolog v1.34.0
@@ -19,7 +19,7 @@ require (
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/jkbrsn/threadsafe v0.5.0 // indirect
+	github.com/jkbrsn/threadsafe v0.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
