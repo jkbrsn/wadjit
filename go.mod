@@ -3,7 +3,7 @@ module github.com/jkbrsn/wadjit
 go 1.25.3
 
 require (
-	github.com/bytedance/sonic v1.14.1
+	github.com/bytedance/sonic v1.14.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/jkbrsn/jsonrpc v0.8.1
 	github.com/jkbrsn/taskman v0.6.3
@@ -16,7 +16,7 @@ require (
 
 require (
 	github.com/bytedance/gopkg v0.1.3 // indirect
-	github.com/bytedance/sonic/loader v0.3.0 // indirect
+	github.com/bytedance/sonic/loader v0.4.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/jkbrsn/threadsafe v0.6.0 // indirect
