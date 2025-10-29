@@ -1,6 +1,6 @@
 # todo
 
-## v0.x.x
+## v0.10.x
 
 - Add `Watcher` metrics (per watcher and/or overall)
   - Timing accuracy/skew
@@ -16,6 +16,10 @@
   - Deadline times
   - Read upon response received, to avoid adding lag to the timing of DataTransferTime or RequestTimeTotal
   - `taskman` specific log level
+- Add more metadata to `WatcherResponse`:
+  - Specify protocol (HTTP/WS)
+  - Specify error type (e.g. connection error, response error)
+- Implement DNS policy usage for WS endpoints
 
 ## Various
 
