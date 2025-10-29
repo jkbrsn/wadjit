@@ -6,7 +6,7 @@ require (
 	github.com/bytedance/sonic v1.14.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/jkbrsn/jsonrpc v0.8.1
-	github.com/jkbrsn/taskman v0.6.2
+	github.com/jkbrsn/taskman v0.6.3
 	github.com/miekg/dns v1.1.68
 	github.com/rs/xid v1.6.0
 	github.com/rs/zerolog v1.34.0
