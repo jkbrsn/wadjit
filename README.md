@@ -1,4 +1,7 @@
-# wadjit [![Go Reference](https://pkg.go.dev/badge/github.com/jkbrsn/wadjit.svg)](https://pkg.go.dev/github.com/jkbrsn/wadjit)
+# wadjit
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/jkbrsn/wadjit.svg)](https://pkg.go.dev/github.com/jkbrsn/wadjit)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jkbrsn/wadjit)](https://goreportcard.com/report/github.com/jkbrsn/wadjit)
 
 Wadjit (pronounced /ˈwɒdʒɪt/, or "watch it") is a program for endpoint monitoring and analysis.
 
