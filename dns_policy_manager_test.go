@@ -36,7 +36,10 @@ func TestDNSPolicyManagerTTLRefresh(t *testing.T) {
 	u := &url.URL{Scheme: "https", Host: host}
 
 	policy := DNSPolicy{Mode: DNSRefreshTTL, TTLMin: time.Second, TTLMax: 10 * time.Second}
-	mgr := newDNSPolicyManager(policy, nil)
+	decisionCh := make(chan DNSDecision, 4)
+	mgr := newDNSPolicyManager(policy, func(_ context.Context, d DNSDecision) {
+		decisionCh <- d
+	})
 	mgr.resolver = newTestResolver([]netip.Addr{netip.MustParseAddr("192.0.2.10")}, 5*time.Second)
 
 	transport := &http.Transport{}
@@ -153,7 +156,10 @@ func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
 			Action:                    DNSGuardRailActionForceLookup,
 		},
 	}
-	mgr := newDNSPolicyManager(policy, nil)
+	decisionCh := make(chan DNSDecision, 4)
+	mgr := newDNSPolicyManager(policy, func(_ context.Context, d DNSDecision) {
+		decisionCh <- d
+	})
 	initialAddr := netip.MustParseAddr("192.0.2.80")
 	resolver := newTestResolver([]netip.Addr{initialAddr}, 20*time.Millisecond)
 	mgr.resolver = resolver
@@ -168,16 +174,26 @@ func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
 	firstExpiry := decision.ExpiresAt
 	require.False(t, firstExpiry.IsZero())
 	assert.Equal(t, initialAddr, decision.ResolvedAddrs[0])
+	select {
+	case <-decisionCh:
+	default:
+	}
 
 	time.Sleep(2 * policy.TTLMin)
 
 	resolver.SetError(errors.New("lookup failed"))
 
-	ctx, force, err = mgr.prepareRequest(context.Background(), u, transport)
-	require.NoError(t, err)
-	assert.False(t, force, "fallback should reuse cached address when lookup fails")
-	decision, ok = ctx.Value(dnsDecisionKey{}).(DNSDecision)
-	require.True(t, ok)
+	_, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "lookup failed")
+	assert.False(t, force,
+		"fallback should reuse cached address when lookup fails but surface error")
+	select {
+	case decision = <-decisionCh:
+	case <-time.After(time.Second):
+		require.Fail(t, "expected decision hook to fire")
+	}
+	assert.True(t, decision.FallbackUsed)
 	require.NotNil(t, decision.Err)
 	assert.Equal(t, initialAddr, decision.ResolvedAddrs[0])
 	assert.Equal(t, firstExpiry, decision.ExpiresAt)

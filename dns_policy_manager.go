@@ -66,6 +66,7 @@ type dnsResolveOutcome struct {
 	address      string
 	forceNewConn bool
 	decision     *DNSDecision
+	fallbackErr  error
 }
 
 const serverErrorThreshold = 500
@@ -100,6 +101,14 @@ func (m *dnsPolicyManager) prepareRequest(
 			m.hook(ctx, *outcome.decision)
 		}
 		return ctx, false, err
+	}
+
+	if outcome.fallbackErr != nil && outcome.decision != nil {
+		outcome.decision.FallbackUsed = true
+		if m.hook != nil {
+			m.hook(ctx, *outcome.decision)
+		}
+		return ctx, outcome.forceNewConn, outcome.fallbackErr
 	}
 	guardTriggered := m.consumeGuardTrigger()
 	decision := outcome.decision
@@ -244,7 +253,7 @@ func (m *dnsPolicyManager) resolveTTL(
 				ExpiresAt:     cached.expiresAt,
 				Err:           err,
 			}
-			return dnsResolveOutcome{address: addr, decision: &decision}, nil
+			return dnsResolveOutcome{address: addr, decision: &decision, fallbackErr: err}, nil
 		}
 		return dnsResolveOutcome{}, err
 	}
@@ -311,7 +320,7 @@ func (m *dnsPolicyManager) resolveCadence(
 				ExpiresAt:     cadenceNext,
 				Err:           err,
 			}
-			return dnsResolveOutcome{address: addr, decision: &decision}, nil
+			return dnsResolveOutcome{address: addr, decision: &decision, fallbackErr: err}, nil
 		}
 		return dnsResolveOutcome{}, err
 	}
