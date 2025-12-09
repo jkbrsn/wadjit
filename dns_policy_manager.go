@@ -32,11 +32,12 @@ type dnsPolicyManager struct {
 	resolver TTLResolver
 	hook     DNSDecisionCallback
 
-	mu          sync.Mutex
-	cache       dnsCacheEntry
-	cadenceNext time.Time
-	forceLookup bool
-	guard       guardRailState
+	mu           sync.Mutex
+	cache        dnsCacheEntry
+	cadenceNext  time.Time
+	forceLookup  bool
+	guard        guardRailState
+	lastDecision *DNSDecision // Last DNS decision for error reporting
 
 	lookupGroup singleflight.Group
 }
@@ -96,19 +97,35 @@ func (m *dnsPolicyManager) prepareRequest(
 
 	outcome, err := m.resolve(ctx, host, port)
 	if err != nil {
-		if outcome.decision != nil && m.hook != nil {
+		if outcome.decision != nil {
 			outcome.decision.Err = err
-			m.hook(ctx, *outcome.decision)
+			// Store decision for retrieval after error
+			m.mu.Lock()
+			m.lastDecision = outcome.decision
+			m.mu.Unlock()
+			if m.hook != nil {
+				m.hook(ctx, *outcome.decision)
+			}
 		}
 		return ctx, false, err
 	}
 
 	if outcome.fallbackErr != nil && outcome.decision != nil {
 		outcome.decision.FallbackUsed = true
-		if m.hook != nil {
-			m.hook(ctx, *outcome.decision)
+		// Store decision for retrieval after error
+		m.mu.Lock()
+		m.lastDecision = outcome.decision
+		m.mu.Unlock()
+		// Add decision to context even when returning error
+		resultCtx := context.WithValue(ctx, dnsDecisionKey{}, *outcome.decision)
+		if outcome.address != "" {
+			plan := dnsDialPlan{target: outcome.address}
+			resultCtx = context.WithValue(resultCtx, dnsPlanKey{}, plan)
 		}
-		return ctx, outcome.forceNewConn, outcome.fallbackErr
+		if m.hook != nil {
+			m.hook(resultCtx, *outcome.decision)
+		}
+		return resultCtx, outcome.forceNewConn, outcome.fallbackErr
 	}
 	guardTriggered := m.consumeGuardTrigger()
 	decision := outcome.decision
@@ -193,7 +210,14 @@ func (m *dnsPolicyManager) resolveSingle(
 
 	addrs, ttl, lookupDur, err := m.lookup(ctx, host)
 	if err != nil {
-		return dnsResolveOutcome{}, err
+		// No cache available - return error with decision for observability
+		decision := DNSDecision{
+			Host:           host,
+			Mode:           m.policy.Mode,
+			LookupDuration: lookupDur,
+			Err:            err,
+		}
+		return dnsResolveOutcome{decision: &decision}, err
 	}
 	entry := dnsCacheEntry{addrs: addrs, lastLookup: time.Now()}
 
@@ -255,7 +279,14 @@ func (m *dnsPolicyManager) resolveTTL(
 			}
 			return dnsResolveOutcome{address: addr, decision: &decision, fallbackErr: err}, nil
 		}
-		return dnsResolveOutcome{}, err
+		// No cache available - return error with decision for observability
+		decision := DNSDecision{
+			Host:           host,
+			Mode:           m.policy.Mode,
+			LookupDuration: lookupDur,
+			Err:            err,
+		}
+		return dnsResolveOutcome{decision: &decision}, err
 	}
 
 	ttl = m.policy.normalizeTTL(ttl)
@@ -322,7 +353,14 @@ func (m *dnsPolicyManager) resolveCadence(
 			}
 			return dnsResolveOutcome{address: addr, decision: &decision, fallbackErr: err}, nil
 		}
-		return dnsResolveOutcome{}, err
+		// No cache available - return error with decision for observability
+		decision := DNSDecision{
+			Host:           host,
+			Mode:           m.policy.Mode,
+			LookupDuration: lookupDur,
+			Err:            err,
+		}
+		return dnsResolveOutcome{decision: &decision}, err
 	}
 
 	entry := dnsCacheEntry{addrs: addrs, lastLookup: now}
@@ -415,6 +453,13 @@ func (*dnsPolicyManager) dialContext(
 		}
 		return dialer.DialContext(ctx, network, address)
 	}
+}
+
+// getLastDecision retrieves the last DNS decision, if any. This is useful for error reporting.
+func (m *dnsPolicyManager) getLastDecision() *DNSDecision {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastDecision
 }
 
 // observeResult records request outcomes to drive guard-rail thresholds.

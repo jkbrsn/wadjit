@@ -111,6 +111,10 @@ type DNSMetadata struct {
 	// LookupDuration is the duration taken by the policy-managed DNS lookup, when applicable.
 	LookupDuration     time.Duration
 	GuardRailTriggered bool
+	// FallbackUsed indicates whether a cached address was used due to DNS lookup failure.
+	FallbackUsed bool
+	// Err contains the DNS resolution error, if any occurred.
+	Err error
 }
 
 // String returns a string representation of the metadata.
@@ -282,6 +286,8 @@ func (h *httpTaskResponse) Metadata() TaskResponseMetadata {
 			ResolvedAddrs:      append([]netip.Addr(nil), decision.ResolvedAddrs...),
 			LookupDuration:     decision.LookupDuration,
 			GuardRailTriggered: decision.GuardRailTriggered,
+			FallbackUsed:       decision.FallbackUsed,
+			Err:                decision.Err,
 		}
 		// If httptrace didn't capture DNS timings but the policy did, surface it in TimeData.
 		if md.TimeData.DNSLookup == nil && decision.LookupDuration > 0 {
@@ -341,4 +347,47 @@ func (w *wsTaskResponse) Metadata() TaskResponseMetadata {
 		Size:       int64(len(w.data)),
 		TimeData:   TimeDataFromTimestamps(w.timestamps),
 	}
+}
+
+//
+// httpTaskResponseError
+//
+
+// httpTaskResponseError is a minimal TaskResponse for error cases that still need DNS metadata.
+type httpTaskResponseError struct {
+	dnsDecision *DNSDecision
+}
+
+// Close is a no-op for error responses.
+func (*httpTaskResponseError) Close() error {
+	return nil
+}
+
+// Data returns nil for error responses.
+func (*httpTaskResponseError) Data() ([]byte, error) {
+	return nil, nil
+}
+
+// Reader returns nil for error responses.
+func (*httpTaskResponseError) Reader() (io.ReadCloser, error) {
+	return nil, nil
+}
+
+// Metadata returns DNS metadata if available.
+func (h *httpTaskResponseError) Metadata() TaskResponseMetadata {
+	md := TaskResponseMetadata{}
+	if h.dnsDecision != nil {
+		decision := *h.dnsDecision
+		md.DNS = &DNSMetadata{
+			Mode:               decision.Mode,
+			TTL:                decision.TTL,
+			ExpiresAt:          decision.ExpiresAt,
+			ResolvedAddrs:      append([]netip.Addr(nil), decision.ResolvedAddrs...),
+			LookupDuration:     decision.LookupDuration,
+			GuardRailTriggered: decision.GuardRailTriggered,
+			FallbackUsed:       decision.FallbackUsed,
+			Err:                decision.Err,
+		}
+	}
+	return md
 }

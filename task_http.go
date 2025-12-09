@@ -193,6 +193,15 @@ func (r httpRequest) Execute() error {
 	if err != nil {
 		if r.endpoint.dnsMgr != nil {
 			r.endpoint.dnsMgr.observeResult(0, err)
+			// Get DNS decision from manager for error reporting
+			if decision := r.endpoint.dnsMgr.getLastDecision(); decision != nil {
+				wr := errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, &urlClone)
+				wr.Payload = &httpTaskResponseError{
+					dnsDecision: decision,
+				}
+				r.respChan <- wr
+				return err
+			}
 		}
 		r.respChan <- errorResponse(err, r.endpoint.ID, r.endpoint.watcherID, &urlClone)
 		return err

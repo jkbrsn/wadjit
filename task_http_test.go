@@ -1,6 +1,7 @@
 package wadjit
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -204,6 +205,125 @@ func TestHTTPEndpointExecute(t *testing.T) {
 					assert.Equal(t, DNSRefreshStatic, md.DNS.Mode)
 					require.Len(t, md.DNS.ResolvedAddrs, 1)
 					assert.Equal(t, realAddr.IP.String(), md.DNS.ResolvedAddrs[0].String())
+				case <-time.After(time.Second):
+					t.Fatal("timeout waiting for response")
+				}
+			},
+		},
+		{
+			name: "dns failure with fallback - error propagates",
+			run: func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(echoHandler))
+				defer server.Close()
+
+				u, err := url.Parse(server.URL)
+				require.NoError(t, err)
+
+				realAddr, ok := server.Listener.Addr().(*net.TCPAddr)
+				require.True(t, ok)
+
+				// Create resolver that will succeed first, then fail
+				resolver := newTestResolver(
+					[]netip.Addr{realAddr.AddrPort().Addr()}, 20*time.Millisecond)
+				policy := DNSPolicy{
+					Mode:     DNSRefreshTTL,
+					TTLMin:   15 * time.Millisecond,
+					TTLMax:   50 * time.Millisecond,
+					Resolver: resolver,
+				}
+
+				respCh := make(chan WatcherResponse, 2)
+				ep := NewHTTPEndpoint(
+					u,
+					http.MethodGet,
+					WithID("fallback-test"),
+					WithReadFast(),
+					WithDNSPolicy(policy),
+				)
+
+				require.NoError(t, ep.Initialize("fallback-watcher", respCh))
+
+				// First execution - should succeed and establish cache
+				require.NoError(t, ep.Task().Execute())
+				resp1 := <-respCh
+				require.NoError(t, resp1.Err)
+
+				// Wait for TTL to expire
+				time.Sleep(25 * time.Millisecond)
+
+				// Make DNS fail
+				resolver.SetError(errors.New("dns lookup failed"))
+
+				// Second execution - should return error
+				err = ep.Task().Execute()
+				require.Error(t, err, "Execute should return DNS error")
+				assert.ErrorContains(t, err, "dns lookup failed")
+
+				select {
+				case resp2 := <-respCh:
+					// Error should be reported in response
+					require.Error(t, resp2.Err)
+					assert.ErrorContains(t, resp2.Err, "dns lookup failed")
+
+					// But metadata should show fallback was used
+					md := resp2.Metadata()
+					require.NotNil(t, md.DNS)
+					assert.True(t, md.DNS.FallbackUsed)
+					require.NotNil(t, md.DNS.Err)
+					assert.ErrorContains(t, md.DNS.Err, "dns lookup failed")
+					assert.Equal(t, realAddr.AddrPort().Addr(), md.DNS.ResolvedAddrs[0])
+				case <-time.After(time.Second):
+					t.Fatal("timeout waiting for response")
+				}
+			},
+		},
+		{
+			name: "dns failure without cache - hard failure",
+			run: func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(echoHandler))
+				defer server.Close()
+
+				u, err := url.Parse(server.URL)
+				require.NoError(t, err)
+
+				// Create resolver that fails immediately
+				resolver := newTestResolver(nil, 0)
+				resolver.SetError(errors.New("dns resolution failed"))
+
+				policy := DNSPolicy{
+					Mode:     DNSRefreshSingleLookup,
+					Resolver: resolver,
+				}
+
+				respCh := make(chan WatcherResponse, 1)
+				ep := NewHTTPEndpoint(
+					u,
+					http.MethodGet,
+					WithID("no-cache-test"),
+					WithReadFast(),
+					WithDNSPolicy(policy),
+				)
+
+				require.NoError(t, ep.Initialize("no-cache-watcher", respCh))
+
+				// First execution with no cache should fail
+				err = ep.Task().Execute()
+				require.Error(t, err, "Execute should return DNS error")
+				assert.ErrorContains(t, err, "dns resolution failed")
+
+				select {
+				case resp := <-respCh:
+					// Error should be reported
+					require.Error(t, resp.Err)
+					assert.ErrorContains(t, resp.Err, "dns resolution failed")
+
+					// Metadata should show DNS error with no fallback
+					md := resp.Metadata()
+					require.NotNil(t, md.DNS)
+					assert.False(t, md.DNS.FallbackUsed)
+					require.NotNil(t, md.DNS.Err)
+					assert.ErrorContains(t, md.DNS.Err, "dns resolution failed")
+					assert.Empty(t, md.DNS.ResolvedAddrs)
 				case <-time.After(time.Second):
 					t.Fatal("timeout waiting for response")
 				}
