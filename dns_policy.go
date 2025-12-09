@@ -102,6 +102,7 @@ type DNSDecision struct {
 	LookupDuration     time.Duration
 	GuardRailTriggered bool
 	Err                error
+	FallbackUsed       bool
 }
 
 // Validate ensures the DNS policy fields are coherent.

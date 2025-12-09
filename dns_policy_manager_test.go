@@ -29,6 +29,25 @@ func TestDNSPolicyManagerDefaultMode(t *testing.T) {
 	assert.Nil(t, ctx.Value(dnsPlanKey{}))
 }
 
+func TestDNSPolicyManagerDefaultModeError(t *testing.T) {
+	t.Parallel()
+
+	// Use an invalid hostname that should fail DNS resolution
+	u := &url.URL{Scheme: "https", Host: "invalid.hostname.that.does.not.exist.test"}
+
+	mgr := newDNSPolicyManager(DNSPolicy{Mode: DNSRefreshDefault}, nil)
+	transport := &http.Transport{}
+
+	// Default mode uses Go's native resolver, which should eventually fail
+	// We're just verifying no panic and graceful error handling
+	ctx, force, err := mgr.prepareRequest(context.Background(), u, transport)
+	// Default mode doesn't do custom DNS resolution, so this typically succeeds
+	// at the prepareRequest level (error comes later during actual dial)
+	require.NoError(t, err)
+	assert.False(t, force)
+	assert.Nil(t, ctx.Value(dnsPlanKey{}))
+}
+
 func TestDNSPolicyManagerTTLRefresh(t *testing.T) {
 	t.Parallel()
 
@@ -36,7 +55,10 @@ func TestDNSPolicyManagerTTLRefresh(t *testing.T) {
 	u := &url.URL{Scheme: "https", Host: host}
 
 	policy := DNSPolicy{Mode: DNSRefreshTTL, TTLMin: time.Second, TTLMax: 10 * time.Second}
-	mgr := newDNSPolicyManager(policy, nil)
+	decisionCh := make(chan DNSDecision, 4)
+	mgr := newDNSPolicyManager(policy, func(_ context.Context, d DNSDecision) {
+		decisionCh <- d
+	})
 	mgr.resolver = newTestResolver([]netip.Addr{netip.MustParseAddr("192.0.2.10")}, 5*time.Second)
 
 	transport := &http.Transport{}
@@ -153,7 +175,10 @@ func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
 			Action:                    DNSGuardRailActionForceLookup,
 		},
 	}
-	mgr := newDNSPolicyManager(policy, nil)
+	decisionCh := make(chan DNSDecision, 4)
+	mgr := newDNSPolicyManager(policy, func(_ context.Context, d DNSDecision) {
+		decisionCh <- d
+	})
 	initialAddr := netip.MustParseAddr("192.0.2.80")
 	resolver := newTestResolver([]netip.Addr{initialAddr}, 20*time.Millisecond)
 	mgr.resolver = resolver
@@ -168,16 +193,26 @@ func TestDNSPolicyManagerTTLFallbackGuardRail(t *testing.T) {
 	firstExpiry := decision.ExpiresAt
 	require.False(t, firstExpiry.IsZero())
 	assert.Equal(t, initialAddr, decision.ResolvedAddrs[0])
+	select {
+	case <-decisionCh:
+	default:
+	}
 
 	time.Sleep(2 * policy.TTLMin)
 
 	resolver.SetError(errors.New("lookup failed"))
 
-	ctx, force, err = mgr.prepareRequest(context.Background(), u, transport)
-	require.NoError(t, err)
-	assert.False(t, force, "fallback should reuse cached address when lookup fails")
-	decision, ok = ctx.Value(dnsDecisionKey{}).(DNSDecision)
-	require.True(t, ok)
+	_, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "lookup failed")
+	assert.False(t, force,
+		"fallback should reuse cached address when lookup fails but surface error")
+	select {
+	case decision = <-decisionCh:
+	case <-time.After(time.Second):
+		require.Fail(t, "expected decision hook to fire")
+	}
+	assert.True(t, decision.FallbackUsed)
 	require.NotNil(t, decision.Err)
 	assert.Equal(t, initialAddr, decision.ResolvedAddrs[0])
 	assert.Equal(t, firstExpiry, decision.ExpiresAt)
@@ -225,6 +260,144 @@ func TestDNSPolicyManagerTTLFallbackDisabled(t *testing.T) {
 	time.Sleep(2 * policy.TTLMin)
 	resolver.SetError(errors.New("lookup failed"))
 
+	_, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "lookup failed")
+	assert.False(t, force, "no dial plan provided on error")
+}
+
+func TestDNSPolicyManagerCadenceFallbackError(t *testing.T) {
+	t.Parallel()
+
+	host := "cadence-fallback.example"
+	u := &url.URL{Scheme: "https", Host: host}
+
+	policy := DNSPolicy{
+		Mode:    DNSRefreshCadence,
+		Cadence: 20 * time.Millisecond,
+	}
+	decisionCh := make(chan DNSDecision, 4)
+	mgr := newDNSPolicyManager(policy, func(_ context.Context, d DNSDecision) {
+		decisionCh <- d
+	})
+	initialAddr := netip.MustParseAddr("192.0.2.100")
+	resolver := newTestResolver([]netip.Addr{initialAddr}, 0)
+	mgr.resolver = resolver
+
+	transport := &http.Transport{}
+
+	// Initial successful lookup
+	ctx, force, err := mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.True(t, force, "first lookup should force new connection")
+	decision, ok := ctx.Value(dnsDecisionKey{}).(DNSDecision)
+	require.True(t, ok)
+	assert.Equal(t, initialAddr, decision.ResolvedAddrs[0])
+	firstExpiry := decision.ExpiresAt
+	require.False(t, firstExpiry.IsZero())
+
+	// Clear any decision from the channel
+	select {
+	case <-decisionCh:
+	default:
+	}
+
+	// Wait for cadence to expire
+	time.Sleep(policy.Cadence + 10*time.Millisecond)
+
+	// Make resolver fail
+	resolver.SetError(errors.New("cadence lookup failed"))
+
+	// Next request should return error but use cached address
+	_, force, err = mgr.prepareRequest(context.Background(), u, transport)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "cadence lookup failed")
+	assert.False(t, force, "fallback should reuse cached address when lookup fails")
+
+	// Verify decision hook received fallback information
+	select {
+	case decision = <-decisionCh:
+	case <-time.After(time.Second):
+		require.Fail(t, "expected decision hook to fire")
+	}
+	assert.True(t, decision.FallbackUsed)
+	require.NotNil(t, decision.Err)
+	assert.ErrorContains(t, decision.Err, "cadence lookup failed")
+	assert.Equal(t, initialAddr, decision.ResolvedAddrs[0])
+	assert.Equal(t, firstExpiry, decision.ExpiresAt)
+}
+
+func TestDNSPolicyManagerDNSFailureWithoutCache(t *testing.T) {
+	t.Parallel()
+
+	host := "no-cache.example"
+	u := &url.URL{Scheme: "https", Host: host}
+
+	policy := DNSPolicy{
+		Mode:   DNSRefreshTTL,
+		TTLMin: 10 * time.Millisecond,
+		TTLMax: 30 * time.Millisecond,
+	}
+	decisionCh := make(chan DNSDecision, 4)
+	mgr := newDNSPolicyManager(policy, func(_ context.Context, d DNSDecision) {
+		decisionCh <- d
+	})
+
+	// Resolver fails immediately (no successful lookup to establish cache)
+	resolver := newTestResolver(nil, 0)
+	resolver.SetError(errors.New("initial lookup failed"))
+	mgr.resolver = resolver
+
+	transport := &http.Transport{}
+
+	// First request with no cache should fail immediately
+	_, force, err := mgr.prepareRequest(context.Background(), u, transport)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "initial lookup failed")
+	assert.False(t, force, "no dial plan provided on error")
+
+	// Verify decision hook received error with no fallback
+	select {
+	case decision := <-decisionCh:
+		assert.False(t, decision.FallbackUsed, "no fallback should occur without cached address")
+		require.NotNil(t, decision.Err)
+		assert.ErrorContains(t, decision.Err, "initial lookup failed")
+		assert.Empty(t, decision.ResolvedAddrs, "no addresses should be resolved")
+	case <-time.After(time.Second):
+		require.Fail(t, "expected decision hook to fire")
+	}
+}
+
+func TestDNSPolicyManagerCadenceFallbackDisabled(t *testing.T) {
+	t.Parallel()
+
+	host := "cadence-disable.example"
+	u := &url.URL{Scheme: "https", Host: host}
+
+	policy := DNSPolicy{
+		Mode:            DNSRefreshCadence,
+		Cadence:         20 * time.Millisecond,
+		DisableFallback: true,
+	}
+	mgr := newDNSPolicyManager(policy, nil)
+	initialAddr := netip.MustParseAddr("192.0.2.110")
+	resolver := newTestResolver([]netip.Addr{initialAddr}, 0)
+	mgr.resolver = resolver
+
+	transport := &http.Transport{}
+
+	// Initial successful lookup
+	_, force, err := mgr.prepareRequest(context.Background(), u, transport)
+	require.NoError(t, err)
+	assert.True(t, force, "first lookup should force new connection")
+
+	// Wait for cadence to expire
+	time.Sleep(policy.Cadence + 10*time.Millisecond)
+
+	// Make resolver fail
+	resolver.SetError(errors.New("lookup failed"))
+
+	// With fallback disabled, should return error and not use cached address
 	_, force, err = mgr.prepareRequest(context.Background(), u, transport)
 	require.Error(t, err)
 	assert.ErrorContains(t, err, "lookup failed")

@@ -5,6 +5,8 @@
 
 Wadjit (pronounced /ˈwɒdʒɪt/, or "watch it") is a program for endpoint monitoring and analysis.
 
+> **Note**: Version 0.10.x introduces breaking changes to DNS error handling. See [CHANGELOG.md](CHANGELOG.md#010x) for migration details.
+
 > Wadjet is the ancient Egyptian goddess of protection and royal authority. She is sometimes shown as the Eye of Ra, acting as a protector of the country and the king, and her vigilant eye would watch over the land. - [Wikipedia](https://en.wikipedia.org/wiki/Wadjet)
 
 `wadjit.New()` creates a manager for an arbitrary number of watchers. The watchers monitor pre-defined endpoints according to their configuration, and feed the results back to the manager. A single Wadjit manager can hold watchers for many different tasks, as responses on the response channel are separated by watcher ID, or you may choose to create several managers as a more strict separation of concerns.
@@ -22,6 +24,10 @@ go get github.com/jkbrsn/wadjit@latest
 - Batched watchers: Schedule many tasks per watcher at a fixed cadence.
 - Buffered responses: Non-blocking channel with watcher IDs and metadata.
 - Metrics: Access scheduler metrics via `Metrics()`.
+
+## Changelog
+
+The [CHANGELOG.md](CHANGELOG.md) shows recent changes and explains mitigations that might be needed when migrating from one version to the next.
 
 ## Quick Start
 
@@ -141,6 +147,26 @@ Guard rails add safety nets on top of any mode. Configure `DNSGuardRailPolicy` w
 - `DNSGuardRailActionForceLookup` also sets a `forceLookup` flag so the next request performs a fresh DNS resolution before dialing.
 
 Set a global default for every watcher by supplying `wadjit.WithDefaultDNSPolicy(...)` when creating the Wadjit. Endpoints that do not call `WithDNSPolicy` inherit this default automatically, while explicit endpoint policies still win.
+
+##### Error Handling
+
+DNS errors are always reported in `WatcherResponse.Err`, even when fallback to cached addresses succeeds. This provides visibility into DNS degradation while maintaining resilience:
+
+```go
+resp := <-manager.Responses()
+if resp.Err != nil {
+    md := resp.Metadata()
+    if md.DNS != nil && md.DNS.FallbackUsed {
+        // DNS failed but request completed with cached address
+        log.Warn("DNS fallback used", "error", md.DNS.Err)
+    } else {
+        // Hard failure - request did not complete
+        log.Error("Request failed", resp.Err)
+    }
+}
+```
+
+**New in 0.10.x**: `DNSMetadata` includes `FallbackUsed bool` and `Err error` fields to distinguish between degraded (fallback) and failed states. See [CHANGELOG.md](CHANGELOG.md#010x) for migration guidance.
 
 ##### Examples
 
