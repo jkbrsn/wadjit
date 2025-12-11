@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"sync"
 
 	"github.com/jkbrsn/taskman"
@@ -23,9 +24,11 @@ type Wadjit struct {
 
 	respGatherChan chan WatcherResponse
 	respExportChan chan WatcherResponse
+	metricsSink    MetricsSink
 
 	defaultDNSPolicy    DNSPolicy
 	hasDefaultDNSPolicy bool
+	metricsSampleRate   float64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -53,6 +56,8 @@ func New(opts ...Option) *Wadjit {
 		taskManager:         tm,
 		respGatherChan:      make(chan WatcherResponse, options.bufferSize),
 		respExportChan:      make(chan WatcherResponse, options.bufferSize),
+		metricsSink:         options.metricsSink,
+		metricsSampleRate:   options.metricsSampleRate,
 		defaultDNSPolicy:    options.defaultDNSPolicy,
 		hasDefaultDNSPolicy: options.hasDefaultDNSPolicy,
 	}
@@ -96,6 +101,8 @@ func (w *Wadjit) listenForResponses() {
 				return // Context canceled
 			}
 
+			w.observeResponse(resp)
+
 			// Send the response to the external facing channel
 			// TODO: consider adding Watcher response metrics here
 			w.respExportChan <- resp
@@ -130,6 +137,12 @@ func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	}
 	w.watchers.Store(watcher.ID, watcher)
 
+	w.observeEvent("watcher_added", map[string]any{
+		"watcher_id": watcher.ID,
+		"tasks":      len(watcher.Tasks),
+		"cadence":    watcher.Cadence,
+	})
+
 	return nil
 }
 
@@ -148,13 +161,21 @@ func (w *Wadjit) AddWatchers(watchers ...*Watcher) error {
 // not execute tasks until ResumeWatcher is called. Returns an error if the watcher ID does not
 // exist or if the underlying task manager fails to pause the job.
 func (w *Wadjit) PauseWatcher(id string) error {
-	return w.taskManager.PauseJob(id)
+	if err := w.taskManager.PauseJob(id); err != nil {
+		return err
+	}
+	w.observeEvent("watcher_paused", map[string]any{"watcher_id": id})
+	return nil
 }
 
 // ResumeWatcher resumes a previously paused watcher's scheduled execution. Returns an error if
 // the watcher ID does not exist or if the underlying task manager fails to resume the job.
 func (w *Wadjit) ResumeWatcher(id string) error {
-	return w.taskManager.ResumeJob(id)
+	if err := w.taskManager.ResumeJob(id); err != nil {
+		return err
+	}
+	w.observeEvent("watcher_resumed", map[string]any{"watcher_id": id})
+	return nil
 }
 
 // RemoveWatcher closes and removes a Watcher from the Wadjit.
@@ -173,6 +194,8 @@ func (w *Wadjit) RemoveWatcher(id string) error {
 	if err != nil {
 		return fmt.Errorf("error removing watcher: %w", err)
 	}
+
+	w.observeEvent("watcher_removed", map[string]any{"watcher_id": id})
 
 	return nil
 }
@@ -254,6 +277,51 @@ func (w *Wadjit) Metrics() taskman.TaskManagerMetrics {
 	return w.taskManager.Metrics()
 }
 
+// observeResponse reports a response to the metrics sink, if configured.
+// The sink is invoked asynchronously to avoid blocking response propagation.
+func (w *Wadjit) observeResponse(resp WatcherResponse) {
+	if w.metricsSink == nil {
+		return
+	}
+	if !w.shouldSample(resp) {
+		return
+	}
+	go func(r WatcherResponse) {
+		defer func() { _ = recover() }()
+		w.metricsSink.ObserveResponse(r.MetricsView())
+	}(resp)
+}
+
+// observeEvent reports an internal event to the metrics sink, if configured.
+func (w *Wadjit) observeEvent(name string, fields map[string]any) {
+	if w.metricsSink == nil {
+		return
+	}
+	go func() {
+		defer func() { _ = recover() }()
+		w.metricsSink.ObserveEvent(name, fields)
+	}()
+}
+
+// shouldSample determines whether a response should be forwarded to the metrics sink.
+// Sampling is deterministic per (WatcherID, TaskID) pair to keep time series stable.
+func (w *Wadjit) shouldSample(resp WatcherResponse) bool {
+	if w.metricsSampleRate >= 1 {
+		return true
+	}
+	if w.metricsSampleRate <= 0 {
+		return false
+	}
+
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(resp.WatcherID))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(resp.TaskID))
+	v := h.Sum64()
+	const denom = float64(^uint64(0))
+	return float64(v) <= w.metricsSampleRate*denom
+}
+
 // Option configures the behavior of a Wadjit instance created by New.
 type Option func(*options)
 
@@ -265,6 +333,8 @@ type options struct {
 	hasDefaultDNSPolicy bool
 	logger              zerolog.Logger
 	loggerSet           bool
+	metricsSink         MetricsSink
+	metricsSampleRate   float64
 
 	taskmanOptions []taskman.Option
 }
@@ -323,6 +393,29 @@ func WithTaskmanOptions(opts ...taskman.Option) Option {
 	}
 }
 
+// WithMetricsSink configures a sink to observe responses and internal events. The sink is invoked
+// best-effort and must be non-blocking.
+func WithMetricsSink(ms MetricsSink) Option {
+	return func(o *options) {
+		o.metricsSink = ms
+	}
+}
+
+// WithMetricsSampleRate configures the fraction of responses forwarded to the metrics sink.
+// Values are clamped to [0,1]. Defaults to 1.0 (no sampling).
+func WithMetricsSampleRate(rate float64) Option {
+	return func(o *options) {
+		switch {
+		case rate < 0:
+			o.metricsSampleRate = 0
+		case rate > 1:
+			o.metricsSampleRate = 1
+		default:
+			o.metricsSampleRate = rate
+		}
+	}
+}
+
 // WithTaskmanMode configures the internal task manager execution mode.
 func WithTaskmanMode(mode taskman.ExecMode) Option {
 	return WithTaskmanOptions(taskman.WithMode(mode))
@@ -332,7 +425,8 @@ func WithTaskmanMode(mode taskman.ExecMode) Option {
 // applied here, and if an option is nil, it is ignored.
 func applyOptions(opts []Option) options {
 	cfg := options{
-		bufferSize: defaultResponseChanBufferSize,
+		bufferSize:        defaultResponseChanBufferSize,
+		metricsSampleRate: 1.0,
 	}
 
 	for _, opt := range opts {

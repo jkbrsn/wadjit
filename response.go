@@ -29,6 +29,27 @@ type WatcherResponse struct {
 	Payload   TaskResponse // Payload stores the response data from the endpoint
 }
 
+// MetricsView returns a payload-free snapshot suitable for metrics export.
+// It extracts metadata only; the payload is never read.
+func (wr WatcherResponse) MetricsView() ResponseMetrics {
+	md := wr.Metadata()
+
+	var errStr string
+	if wr.Err != nil {
+		errStr = wr.Err.Error()
+	}
+
+	return ResponseMetrics{
+		WatcherID:  wr.WatcherID,
+		TaskID:     wr.TaskID,
+		Target:     targetString(wr.URL),
+		StatusCode: md.StatusCode,
+		SizeBytes:  md.Size,
+		Err:        errStr,
+		Times:      md.TimeData,
+	}
+}
+
 // Data reads and returns the data from the response.
 func (wr WatcherResponse) Data() ([]byte, error) {
 	// Check for errors
@@ -347,6 +368,14 @@ func (w *wsTaskResponse) Metadata() TaskResponseMetadata {
 		Size:       int64(len(w.data)),
 		TimeData:   TimeDataFromTimestamps(w.timestamps),
 	}
+}
+
+// targetString renders a URL for metrics. It returns an empty string when nil.
+func targetString(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	return u.String()
 }
 
 //
