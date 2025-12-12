@@ -1,6 +1,7 @@
 package wadjit
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -621,6 +622,208 @@ func TestWSEndpointSuite(t *testing.T) {
 			return &WSEndpoint{Mode: OneHitText}
 		}
 		runWSEndpointTestSuite(t, &wsEndpointTestSuite{newWS: newWS})
+	})
+}
+
+func TestWSEndpointMaxMessageBytes(t *testing.T) {
+	t.Run("endpoint with max message bytes configures correctly", func(t *testing.T) {
+		testURL, _ := url.Parse("ws://example.com")
+		maxBytes := int64(1024)
+
+		endpoint := NewWSEndpoint(
+			testURL,
+			make(http.Header),
+			PersistentJSONRPC,
+			[]byte("test"),
+			"test-id",
+			WithWSMaxMessageBytes(maxBytes),
+		)
+
+		assert.True(t, endpoint.maxMessageBytesSet)
+		assert.Equal(t, maxBytes, endpoint.maxMessageBytes)
+	})
+
+	t.Run("endpoint inherits default max message bytes from Wadjit", func(t *testing.T) {
+		defaultMaxBytes := int64(2048)
+		w := New(WithDefaultWSMaxMessageBytes(defaultMaxBytes))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("ws://example.com")
+		endpoint := NewWSEndpoint(
+			testURL,
+			make(http.Header),
+			PersistentJSONRPC,
+			[]byte("test"),
+			"test-id",
+		)
+
+		watcher := &Watcher{
+			ID:      xid.New().String(),
+			Cadence: time.Second,
+			Tasks:   []WatcherTask{endpoint},
+		}
+
+		// Apply defaults
+		w.applyDefaultWSMaxMessageBytes(watcher)
+
+		assert.True(t, endpoint.maxMessageBytesSet)
+		assert.Equal(t, defaultMaxBytes, endpoint.maxMessageBytes)
+	})
+
+	t.Run("explicit max message bytes override Wadjit defaults", func(t *testing.T) {
+		defaultMaxBytes := int64(4096)
+		endpointMaxBytes := int64(1024)
+
+		w := New(WithDefaultWSMaxMessageBytes(defaultMaxBytes))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("ws://example.com")
+		endpoint := NewWSEndpoint(
+			testURL,
+			make(http.Header),
+			PersistentJSONRPC,
+			[]byte("test"),
+			"test-id",
+			WithWSMaxMessageBytes(endpointMaxBytes),
+		)
+
+		watcher := &Watcher{
+			ID:      xid.New().String(),
+			Cadence: time.Second,
+			Tasks:   []WatcherTask{endpoint},
+		}
+
+		// Apply defaults (should not override explicit max bytes)
+		w.applyDefaultWSMaxMessageBytes(watcher)
+
+		assert.True(t, endpoint.maxMessageBytesSet)
+		assert.Equal(t, endpointMaxBytes, endpoint.maxMessageBytes)
+		assert.NotEqual(t, defaultMaxBytes, endpoint.maxMessageBytes)
+	})
+
+	t.Run("message exceeding limit returns error in PersistentJSONRPC", func(t *testing.T) {
+		// Server that echoes large messages
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+
+			for {
+				mt, msg, err := conn.ReadMessage()
+				if err != nil {
+					return
+				}
+				// Echo back a larger message
+				largeResponse := append(msg, bytes.Repeat([]byte("x"), 200)...)
+				if err := conn.WriteMessage(mt, largeResponse); err != nil {
+					return
+				}
+			}
+		}))
+		defer server.Close()
+
+		wsURL := "ws" + server.URL[4:] + "/ws"
+		parsedURL, err := url.Parse(wsURL)
+		require.NoError(t, err)
+
+		responseChan := make(chan WatcherResponse, 2)
+
+		req := &jsonrpc.Request{
+			JSONRPC: "2.0",
+			ID:      "test-id",
+			Method:  "echo",
+			Params:  []any{"test"},
+		}
+		payload, err := sonic.Marshal(req)
+		require.NoError(t, err)
+
+		endpoint := NewWSEndpoint(
+			parsedURL,
+			make(http.Header),
+			PersistentJSONRPC,
+			payload,
+			"ws-test-id",
+			WithWSMaxMessageBytes(50), // Very small limit
+		)
+
+		err = endpoint.Initialize("watcher-id", responseChan)
+		require.NoError(t, err)
+
+		task := endpoint.Task()
+		require.NotNil(t, task)
+
+		err = task.Execute()
+		require.NoError(t, err)
+
+		// Wait for response - should be an error due to size limit
+		select {
+		case resp := <-responseChan:
+			require.Error(t, resp.Err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for response")
+		}
+	})
+
+	t.Run("message exceeding limit returns error in OneHitText", func(t *testing.T) {
+		// Server that sends a large response
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				return
+			}
+			defer func() { _ = conn.Close() }()
+
+			_, _, err = conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			// Send a large response
+			largeResponse := bytes.Repeat([]byte("x"), 200)
+			_ = conn.WriteMessage(websocket.TextMessage, largeResponse)
+		}))
+		defer server.Close()
+
+		wsURL := "ws" + server.URL[4:] + "/ws"
+		parsedURL, err := url.Parse(wsURL)
+		require.NoError(t, err)
+
+		responseChan := make(chan WatcherResponse, 1)
+
+		endpoint := NewWSEndpoint(
+			parsedURL,
+			make(http.Header),
+			OneHitText,
+			[]byte("hello"),
+			"ws-test-id",
+			WithWSMaxMessageBytes(50), // Very small limit
+		)
+
+		err = endpoint.Initialize("watcher-id", responseChan)
+		require.NoError(t, err)
+
+		task := endpoint.Task()
+		require.NotNil(t, task)
+
+		err = task.Execute()
+		require.Error(t, err) // Execute returns error for OneHitText
+
+		// Response should also contain the error
+		select {
+		case resp := <-responseChan:
+			require.Error(t, resp.Err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for response")
+		}
 	})
 }
 

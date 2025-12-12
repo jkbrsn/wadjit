@@ -136,3 +136,72 @@ func (t *timedReadCloser) Close() error {
 	t.once.Do(t.doneFn)
 	return t.rc.Close()
 }
+
+// limitedTimedReadCloser wraps an io.ReadCloser with size limiting and timing.
+// It uses io.LimitReader to cap reads at maxBytes+1, allowing detection of truncation.
+type limitedTimedReadCloser struct {
+	resp      *httpTaskResponse // parent response for setting truncated flag
+	reader    io.Reader         // io.LimitReader(body, maxBytes+1)
+	totalRead int64             // tracks total bytes read
+	eof       bool              // set when we've hit EOF or truncation limit
+	doneFn    func()            // called exactly once when stream is finished
+	once      sync.Once
+	mu        sync.Mutex
+}
+
+// Read reads from the underlying limited reader and detects truncation.
+func (l *limitedTimedReadCloser) Read(p []byte) (int, error) {
+	l.mu.Lock()
+	if l.eof {
+		l.mu.Unlock()
+		return 0, io.EOF
+	}
+	l.mu.Unlock()
+
+	n, err := l.reader.Read(p)
+
+	l.mu.Lock()
+	l.totalRead += int64(n)
+
+	// Check if we exceeded the limit (read more than maxBytes)
+	if l.resp.maxResponseBytes > 0 && l.totalRead > l.resp.maxResponseBytes {
+		// Calculate how many valid bytes to return (trim excess)
+		excess := l.totalRead - l.resp.maxResponseBytes
+		actualN := n - int(excess)
+		if actualN < 0 {
+			actualN = 0
+		}
+
+		// Mark as truncated and update reader bytes read (final value at truncation)
+		l.resp.truncatedMu.Lock()
+		l.resp.truncated = true
+		l.resp.readerBytesRead = l.resp.maxResponseBytes
+		l.resp.truncatedMu.Unlock()
+
+		l.eof = true
+		l.mu.Unlock()
+		l.once.Do(l.doneFn)
+		return actualN, io.EOF
+	}
+	l.mu.Unlock()
+
+	if errors.Is(err, io.EOF) {
+		// Update reader bytes read (final value at natural EOF)
+		l.resp.truncatedMu.Lock()
+		l.resp.readerBytesRead = l.totalRead
+		l.resp.truncatedMu.Unlock()
+
+		l.mu.Lock()
+		l.eof = true
+		l.mu.Unlock()
+		l.once.Do(l.doneFn)
+	}
+
+	return n, err
+}
+
+// Close closes the underlying body and records the time when the stream is finished.
+func (l *limitedTimedReadCloser) Close() error {
+	l.once.Do(l.doneFn)
+	return l.resp.resp.Body.Close()
+}

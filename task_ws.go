@@ -36,6 +36,8 @@ type WSEndpoint struct {
 	wg           sync.WaitGroup
 	timeouts     WSTimeouts
 	timeoutsSet  bool
+	maxMessageBytes int64
+	maxMessageBytesSet bool
 
 	// Set by Initialize
 	watcherID string
@@ -209,6 +211,11 @@ func (e *WSEndpoint) connect() error {
 	e.conn = conn
 	e.remoteAddr = conn.RemoteAddr()
 
+	// Set read limit if configured
+	if e.maxMessageBytes > 0 {
+		e.conn.SetReadLimit(e.maxMessageBytes)
+	}
+
 	// Start the read pump for incoming messages
 	e.wg.Add(1)
 	go e.readPump(&e.wg)
@@ -254,6 +261,11 @@ func (e *WSEndpoint) reconnect() error {
 		return fmt.Errorf("failed to dial when reconnecting: %w", err)
 	}
 	e.conn = conn
+
+	// Set read limit if configured
+	if e.maxMessageBytes > 0 {
+		e.conn.SetReadLimit(e.maxMessageBytes)
+	}
 
 	// Restart the read pump for incoming messages
 	e.wg.Add(1)
@@ -583,6 +595,11 @@ func (oh *wsOneHit) establishConnection(
 		return nil, timestamps, fmt.Errorf("failed to dial: %w", err)
 	}
 
+	// Set read limit if configured
+	if oh.wsEndpoint.maxMessageBytes > 0 {
+		conn.SetReadLimit(oh.wsEndpoint.maxMessageBytes)
+	}
+
 	timestamps.dnsDone = time.Now()
 	timestamps.connDone = time.Now()
 	timestamps.tlsDone = time.Now()
@@ -832,6 +849,16 @@ func WithWSTimeouts(timeouts WSTimeouts) WSEndpointOption {
 	return func(ep *WSEndpoint) {
 		ep.timeouts = timeouts
 		ep.timeoutsSet = true
+	}
+}
+
+// WithWSMaxMessageBytes sets the maximum WebSocket message size in bytes. If a message exceeds
+// this limit, the connection will error. A value of 0 or negative means no limit (uses gorilla's
+// default). This overrides any default set at the Wadjit level.
+func WithWSMaxMessageBytes(maxBytes int64) WSEndpointOption {
+	return func(ep *WSEndpoint) {
+		ep.maxMessageBytes = maxBytes
+		ep.maxMessageBytesSet = true
 	}
 }
 

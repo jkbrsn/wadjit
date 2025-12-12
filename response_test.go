@@ -19,7 +19,7 @@ func TestHTTPTaskResponse_Close(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	taskResp := newHTTPTaskResponse(nil, resp)
+	taskResp := newHTTPTaskResponse(nil, resp, 0)
 	require.NoError(t, taskResp.Close())
 }
 
@@ -39,7 +39,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 
-				taskResp := newHTTPTaskResponse(server.Listener.Addr(), resp)
+				taskResp := newHTTPTaskResponse(server.Listener.Addr(), resp, 0)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -77,7 +77,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 
-				taskResp := newHTTPTaskResponse(nil, resp)
+				taskResp := newHTTPTaskResponse(nil, resp, 0)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -104,7 +104,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 					Body:       nil,
 				}
 
-				taskResp := newHTTPTaskResponse(nil, resp)
+				taskResp := newHTTPTaskResponse(nil, resp, 0)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -133,7 +133,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 
-				taskResp := newHTTPTaskResponse(nil, resp)
+				taskResp := newHTTPTaskResponse(nil, resp, 0)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -147,6 +147,160 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, tc.run)
+	}
+}
+
+func TestHTTPTaskResponse_Truncation(t *testing.T) {
+	testCases := []struct {
+		name              string
+		bodySize          int
+		maxResponseBytes  int64
+		expectTruncated   bool
+		expectedDataSize  int
+	}{
+		{
+			name:              "no limit",
+			bodySize:          1000,
+			maxResponseBytes:  0,
+			expectTruncated:   false,
+			expectedDataSize:  1000,
+		},
+		{
+			name:              "under limit",
+			bodySize:          500,
+			maxResponseBytes:  1000,
+			expectTruncated:   false,
+			expectedDataSize:  500,
+		},
+		{
+			name:              "at limit",
+			bodySize:          1000,
+			maxResponseBytes:  1000,
+			expectTruncated:   false,
+			expectedDataSize:  1000,
+		},
+		{
+			name:              "over limit",
+			bodySize:          1500,
+			maxResponseBytes:  1000,
+			expectTruncated:   true,
+			expectedDataSize:  1000,
+		},
+		{
+			name:              "way over limit",
+			bodySize:          10000,
+			maxResponseBytes:  100,
+			expectTruncated:   true,
+			expectedDataSize:  100,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a server that returns a body of the specified size
+			body := bytes.Repeat([]byte("x"), tc.bodySize)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+
+			resp, err := http.Get(server.URL)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			taskResp := newHTTPTaskResponse(nil, resp, tc.maxResponseBytes)
+
+			// Read the data
+			data, err := taskResp.Data()
+			require.NoError(t, err)
+			require.Len(t, data, tc.expectedDataSize)
+
+			// Check truncation flag
+			md := taskResp.Metadata()
+			require.Equal(t, tc.expectTruncated, md.Truncated)
+			require.Equal(t, int64(tc.expectedDataSize), md.Size)
+		})
+	}
+}
+
+func TestHTTPTaskResponse_ReaderWithTruncation(t *testing.T) {
+	testCases := []struct {
+		name              string
+		bodySize          int
+		maxResponseBytes  int64
+		expectTruncated   bool
+		expectedReadSize  int
+	}{
+		{
+			name:              "no limit via reader",
+			bodySize:          1000,
+			maxResponseBytes:  0,
+			expectTruncated:   false,
+			expectedReadSize:  1000,
+		},
+		{
+			name:              "under limit via reader",
+			bodySize:          500,
+			maxResponseBytes:  1000,
+			expectTruncated:   false,
+			expectedReadSize:  500,
+		},
+		{
+			name:              "at limit via reader",
+			bodySize:          1000,
+			maxResponseBytes:  1000,
+			expectTruncated:   false,
+			expectedReadSize:  1000,
+		},
+		{
+			name:              "over limit via reader",
+			bodySize:          1500,
+			maxResponseBytes:  1000,
+			expectTruncated:   true,
+			expectedReadSize:  1000,
+		},
+		{
+			name:              "way over limit via reader",
+			bodySize:          10000,
+			maxResponseBytes:  100,
+			expectTruncated:   true,
+			expectedReadSize:  100,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create a server that returns a body of the specified size
+			body := bytes.Repeat([]byte("x"), tc.bodySize)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(body)
+			}))
+			defer server.Close()
+
+			resp, err := http.Get(server.URL)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			taskResp := newHTTPTaskResponse(nil, resp, tc.maxResponseBytes)
+
+			// Get the reader
+			reader, err := taskResp.Reader()
+			require.NoError(t, err)
+			require.NotNil(t, reader)
+			defer func() { _ = reader.Close() }()
+
+			// Read all data from the reader
+			data, err := io.ReadAll(reader)
+			require.NoError(t, err)
+			require.Len(t, data, tc.expectedReadSize)
+
+			// Check truncation flag in metadata
+			md := taskResp.Metadata()
+			require.Equal(t, tc.expectTruncated, md.Truncated)
+			require.Equal(t, int64(tc.expectedReadSize), md.Size)
+		})
 	}
 }
 

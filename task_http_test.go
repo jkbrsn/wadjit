@@ -793,3 +793,74 @@ func TestHTTPEndpointTimeouts(t *testing.T) {
 		}
 	})
 }
+
+func TestHTTPEndpointMaxResponseBytes(t *testing.T) {
+	t.Run("endpoint with max response bytes configures correctly", func(t *testing.T) {
+		testURL, _ := url.Parse("http://example.com")
+		maxBytes := int64(1024)
+
+		endpoint := NewHTTPEndpoint(
+			testURL,
+			http.MethodGet,
+			WithMaxResponseBytes(maxBytes),
+		)
+
+		assert.True(t, endpoint.maxResponseBytesSet)
+		assert.Equal(t, maxBytes, endpoint.maxResponseBytes)
+	})
+
+	t.Run("endpoint inherits default max response bytes from Wadjit", func(t *testing.T) {
+		defaultMaxBytes := int64(2048)
+		w := New(WithDefaultMaxResponseBytes(defaultMaxBytes))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("http://example.com")
+		endpoint := NewHTTPEndpoint(testURL, http.MethodGet)
+
+		watcher := &Watcher{
+			ID:      xid.New().String(),
+			Cadence: time.Second,
+			Tasks:   []WatcherTask{endpoint},
+		}
+
+		// Apply defaults
+		w.applyDefaultMaxResponseBytes(watcher)
+
+		assert.True(t, endpoint.maxResponseBytesSet)
+		assert.Equal(t, defaultMaxBytes, endpoint.maxResponseBytes)
+	})
+
+	t.Run("explicit max response bytes override Wadjit defaults", func(t *testing.T) {
+		defaultMaxBytes := int64(4096)
+		endpointMaxBytes := int64(1024)
+
+		w := New(WithDefaultMaxResponseBytes(defaultMaxBytes))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("http://example.com")
+		endpoint := NewHTTPEndpoint(
+			testURL,
+			http.MethodGet,
+			WithMaxResponseBytes(endpointMaxBytes),
+		)
+
+		watcher := &Watcher{
+			ID:      xid.New().String(),
+			Cadence: time.Second,
+			Tasks:   []WatcherTask{endpoint},
+		}
+
+		// Apply defaults (should not override explicit max bytes)
+		w.applyDefaultMaxResponseBytes(watcher)
+
+		assert.True(t, endpoint.maxResponseBytesSet)
+		assert.Equal(t, endpointMaxBytes, endpoint.maxResponseBytes)
+		assert.NotEqual(t, defaultMaxBytes, endpoint.maxResponseBytes)
+	})
+}

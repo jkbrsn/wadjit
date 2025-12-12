@@ -27,14 +27,18 @@ type Wadjit struct {
 	respExportChan chan WatcherResponse
 	metricsSink    MetricsSink
 
-	defaultDNSPolicy       DNSPolicy
-	hasDefaultDNSPolicy    bool
-	defaultHTTPTimeouts    HTTPTimeouts
-	hasDefaultHTTPTimeouts bool
-	defaultWSTimeouts      WSTimeouts
-	hasDefaultWSTimeouts   bool
-	watcherJitter          time.Duration
-	metricsSampleRate      float64
+	defaultDNSPolicy            DNSPolicy
+	hasDefaultDNSPolicy         bool
+	defaultHTTPTimeouts         HTTPTimeouts
+	hasDefaultHTTPTimeouts      bool
+	defaultWSTimeouts           WSTimeouts
+	hasDefaultWSTimeouts        bool
+	defaultMaxResponseBytes     int64
+	hasDefaultMaxResponseBytes  bool
+	defaultWSMaxMessageBytes    int64
+	hasDefaultWSMaxMessageBytes bool
+	watcherJitter               time.Duration
+	metricsSampleRate           float64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -59,18 +63,22 @@ func New(opts ...Option) *Wadjit {
 		ctx:    ctx,
 		cancel: cancel,
 		// TODO: set logger
-		taskManager:            tm,
-		respGatherChan:         make(chan WatcherResponse, options.bufferSize),
-		respExportChan:         make(chan WatcherResponse, options.bufferSize),
-		metricsSink:            options.metricsSink,
-		metricsSampleRate:      options.metricsSampleRate,
-		defaultDNSPolicy:       options.defaultDNSPolicy,
-		hasDefaultDNSPolicy:    options.hasDefaultDNSPolicy,
-		defaultHTTPTimeouts:    options.defaultHTTPTimeouts,
-		hasDefaultHTTPTimeouts: options.hasDefaultHTTPTimeouts,
-		defaultWSTimeouts:      options.defaultWSTimeouts,
-		hasDefaultWSTimeouts:   options.hasDefaultWSTimeouts,
-		watcherJitter:          options.watcherJitter,
+		taskManager:                 tm,
+		respGatherChan:              make(chan WatcherResponse, options.bufferSize),
+		respExportChan:              make(chan WatcherResponse, options.bufferSize),
+		metricsSink:                 options.metricsSink,
+		metricsSampleRate:           options.metricsSampleRate,
+		defaultDNSPolicy:            options.defaultDNSPolicy,
+		hasDefaultDNSPolicy:         options.hasDefaultDNSPolicy,
+		defaultHTTPTimeouts:         options.defaultHTTPTimeouts,
+		hasDefaultHTTPTimeouts:      options.hasDefaultHTTPTimeouts,
+		defaultWSTimeouts:           options.defaultWSTimeouts,
+		hasDefaultWSTimeouts:        options.hasDefaultWSTimeouts,
+		defaultMaxResponseBytes:     options.defaultMaxResponseBytes,
+		hasDefaultMaxResponseBytes:  options.hasDefaultMaxResponseBytes,
+		defaultWSMaxMessageBytes:    options.defaultWSMaxMessageBytes,
+		hasDefaultWSMaxMessageBytes: options.hasDefaultWSMaxMessageBytes,
+		watcherJitter:               options.watcherJitter,
 	}
 
 	w.closeWG.Add(1)
@@ -133,6 +141,40 @@ func (w *Wadjit) applyDefaultWSTimeouts(watcher *Watcher) {
 	}
 }
 
+// applyDefaultMaxResponseBytes applies the default max response bytes to HTTP endpoints if not set.
+func (w *Wadjit) applyDefaultMaxResponseBytes(watcher *Watcher) {
+	if !w.hasDefaultMaxResponseBytes || watcher == nil {
+		return
+	}
+
+	for i := range watcher.Tasks {
+		if endpoint, ok := watcher.Tasks[i].(*HTTPEndpoint); ok && endpoint != nil {
+			if endpoint.maxResponseBytesSet {
+				continue
+			}
+			endpoint.maxResponseBytes = w.defaultMaxResponseBytes
+			endpoint.maxResponseBytesSet = true
+		}
+	}
+}
+
+// applyDefaultWSMaxMessageBytes applies the default max message bytes to WS endpoints if not set.
+func (w *Wadjit) applyDefaultWSMaxMessageBytes(watcher *Watcher) {
+	if !w.hasDefaultWSMaxMessageBytes || watcher == nil {
+		return
+	}
+
+	for i := range watcher.Tasks {
+		if endpoint, ok := watcher.Tasks[i].(*WSEndpoint); ok && endpoint != nil {
+			if endpoint.maxMessageBytesSet {
+				continue
+			}
+			endpoint.maxMessageBytes = w.defaultWSMaxMessageBytes
+			endpoint.maxMessageBytesSet = true
+		}
+	}
+}
+
 // applyJitter applies the configured jitter to the watcher.
 func (w *Wadjit) applyJitter(watcher *Watcher) {
 	if watcher == nil || w.watcherJitter <= 0 {
@@ -170,6 +212,8 @@ func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	w.applyDefaultDNSPolicy(watcher)
 	w.applyDefaultHTTPTimeouts(watcher)
 	w.applyDefaultWSTimeouts(watcher)
+	w.applyDefaultMaxResponseBytes(watcher)
+	w.applyDefaultWSMaxMessageBytes(watcher)
 	w.applyJitter(watcher)
 
 	if err := watcher.Validate(); err != nil {
@@ -384,19 +428,23 @@ type Option func(*options)
 // options holds configuration for creating a Wadjit instance, including options for the internal
 // task manager.
 type options struct {
-	bufferSize          int
-	defaultDNSPolicy    DNSPolicy
-	hasDefaultDNSPolicy bool
-	defaultHTTPTimeouts HTTPTimeouts
-	hasDefaultHTTPTimeouts bool
-	defaultWSTimeouts   WSTimeouts
-	hasDefaultWSTimeouts bool
-	watcherJitter       time.Duration
-	logger              zerolog.Logger
-	loggerSet           bool
-	taskmanLogLevel     *zerolog.Level
-	metricsSink         MetricsSink
-	metricsSampleRate   float64
+	bufferSize                  int
+	defaultDNSPolicy            DNSPolicy
+	hasDefaultDNSPolicy         bool
+	defaultHTTPTimeouts         HTTPTimeouts
+	hasDefaultHTTPTimeouts      bool
+	defaultWSTimeouts           WSTimeouts
+	hasDefaultWSTimeouts        bool
+	defaultMaxResponseBytes     int64
+	hasDefaultMaxResponseBytes  bool
+	defaultWSMaxMessageBytes    int64
+	hasDefaultWSMaxMessageBytes bool
+	watcherJitter               time.Duration
+	logger                      zerolog.Logger
+	loggerSet                   bool
+	taskmanLogLevel             *zerolog.Level
+	metricsSink                 MetricsSink
+	metricsSampleRate           float64
 
 	taskmanOptions []taskman.Option
 }
@@ -437,6 +485,26 @@ func WithDefaultWSTimeouts(timeouts WSTimeouts) Option {
 	return func(o *options) {
 		o.defaultWSTimeouts = timeouts
 		o.hasDefaultWSTimeouts = true
+	}
+}
+
+// WithDefaultMaxResponseBytes sets the default maximum HTTP response body size for all HTTP
+// endpoints. Endpoints configured via WithMaxResponseBytes override this default. A value of 0
+// or negative means no limit.
+func WithDefaultMaxResponseBytes(n int64) Option {
+	return func(o *options) {
+		o.defaultMaxResponseBytes = n
+		o.hasDefaultMaxResponseBytes = true
+	}
+}
+
+// WithDefaultWSMaxMessageBytes sets the default maximum WebSocket message size for all WebSocket
+// endpoints. Endpoints configured via WithWSMaxMessageBytes override this default. A value of 0
+// or negative means no limit (uses gorilla's default).
+func WithDefaultWSMaxMessageBytes(n int64) Option {
+	return func(o *options) {
+		o.defaultWSMaxMessageBytes = n
+		o.hasDefaultWSMaxMessageBytes = true
 	}
 }
 
