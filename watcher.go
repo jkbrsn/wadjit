@@ -3,6 +3,7 @@ package wadjit
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/jkbrsn/taskman"
@@ -16,6 +17,11 @@ type Watcher struct {
 	Cadence time.Duration
 	Tasks   []WatcherTask
 
+	// jitter is the maximum random offset applied to the initial execution time only.
+	// The offset is in the range [-jitter, +jitter] and does not cause drift - subsequent
+	// executions maintain the exact cadence interval. This helps avoid thundering herds when
+	// multiple watchers start simultaneously.
+	jitter   time.Duration
 	doneChan chan struct{}
 }
 
@@ -73,17 +79,35 @@ func (w *Watcher) close() error {
 }
 
 // job returns a taskman.Job that executes the Watcher's tasks. The job is configured to run at the
-// watcher's cadence, using the watcher's ID as the job ID.
+// watcher's cadence, using the watcher's ID as the job ID. If jitter is configured, a random offset
+// in the range [-jitter, +jitter] is added to the initial execution time only. This does not cause
+// drift - the Cadence field is never modified, so taskman schedules subsequent executions at exact
+// intervals after the jittered first execution.
 func (w *Watcher) job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.Tasks))
 	for i := range w.Tasks {
 		tasks = append(tasks, w.Tasks[i].Task())
 	}
+
+	// Calculate next execution time with optional jitter
+	nextExec := time.Now().Add(w.Cadence)
+	if w.jitter > 0 {
+		// Generate random offset in range [-jitter, +jitter]
+		jitterRange := int64(w.jitter) * 2
+		offset := time.Duration(rand.Int63n(jitterRange+1)) - w.jitter
+
+		// Apply jitter, ensuring the result is not in the past
+		jitteredTime := nextExec.Add(offset)
+		if jitteredTime.After(time.Now()) {
+			nextExec = jitteredTime
+		}
+	}
+
 	// Create the job
 	job := taskman.Job{
 		ID:       w.ID,
 		Cadence:  w.Cadence,
-		NextExec: time.Now().Add(w.Cadence),
+		NextExec: nextExec,
 		Tasks:    tasks,
 	}
 	return job

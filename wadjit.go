@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"sync"
+	"time"
 
 	"github.com/jkbrsn/taskman"
 	"github.com/rs/zerolog"
@@ -32,6 +33,7 @@ type Wadjit struct {
 	hasDefaultHTTPTimeouts bool
 	defaultWSTimeouts      WSTimeouts
 	hasDefaultWSTimeouts   bool
+	watcherJitter          time.Duration
 	metricsSampleRate      float64
 
 	ctx    context.Context
@@ -68,6 +70,7 @@ func New(opts ...Option) *Wadjit {
 		hasDefaultHTTPTimeouts: options.hasDefaultHTTPTimeouts,
 		defaultWSTimeouts:      options.defaultWSTimeouts,
 		hasDefaultWSTimeouts:   options.hasDefaultWSTimeouts,
+		watcherJitter:          options.watcherJitter,
 	}
 
 	w.closeWG.Add(1)
@@ -130,6 +133,14 @@ func (w *Wadjit) applyDefaultWSTimeouts(watcher *Watcher) {
 	}
 }
 
+// applyJitter applies the configured jitter to the watcher.
+func (w *Wadjit) applyJitter(watcher *Watcher) {
+	if watcher == nil || w.watcherJitter <= 0 {
+		return
+	}
+	watcher.jitter = w.watcherJitter
+}
+
 // listenForResponses consumes the channel where Watchers send responses from their monitoring jobs
 // and forwards those responses to the externally facing channel.
 func (w *Wadjit) listenForResponses() {
@@ -159,6 +170,7 @@ func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	w.applyDefaultDNSPolicy(watcher)
 	w.applyDefaultHTTPTimeouts(watcher)
 	w.applyDefaultWSTimeouts(watcher)
+	w.applyJitter(watcher)
 
 	if err := watcher.Validate(); err != nil {
 		return fmt.Errorf("error validating watcher: %v", err)
@@ -379,6 +391,7 @@ type options struct {
 	hasDefaultHTTPTimeouts bool
 	defaultWSTimeouts   WSTimeouts
 	hasDefaultWSTimeouts bool
+	watcherJitter       time.Duration
 	logger              zerolog.Logger
 	loggerSet           bool
 	taskmanLogLevel     *zerolog.Level
@@ -424,6 +437,20 @@ func WithDefaultWSTimeouts(timeouts WSTimeouts) Option {
 	return func(o *options) {
 		o.defaultWSTimeouts = timeouts
 		o.hasDefaultWSTimeouts = true
+	}
+}
+
+// WithWatcherJitter sets the maximum random offset to apply to watcher initial execution times.
+// The jitter is applied once in the range [-jitter, +jitter] relative to the scheduled cadence time.
+// This does not cause drift - subsequent executions maintain exact cadence intervals after the
+// jittered first execution. This helps avoid thundering herds when multiple watchers start
+// simultaneously. Negative values are clamped to zero (no jitter).
+func WithWatcherJitter(jitter time.Duration) Option {
+	return func(o *options) {
+		if jitter < 0 {
+			jitter = 0
+		}
+		o.watcherJitter = jitter
 	}
 }
 

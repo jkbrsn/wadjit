@@ -1089,3 +1089,183 @@ func TestWadjit_TaskmanLogLevel(t *testing.T) {
 		// at Trace level, overriding the clamped Debug level from WithLogger
 	})
 }
+
+func TestWadjit_WatcherJitter(t *testing.T) {
+	t.Run("WithWatcherJitter sets jitter on Wadjit", func(t *testing.T) {
+		jitterAmount := 100 * time.Millisecond
+		w := New(WithWatcherJitter(jitterAmount))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		assert.Equal(t, jitterAmount, w.watcherJitter)
+	})
+
+	t.Run("negative jitter is clamped to zero", func(t *testing.T) {
+		w := New(WithWatcherJitter(-50 * time.Millisecond))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		assert.Equal(t, time.Duration(0), w.watcherJitter)
+	})
+
+	t.Run("jitter is applied to watcher when added", func(t *testing.T) {
+		jitterAmount := 200 * time.Millisecond
+		w := New(WithWatcherJitter(jitterAmount))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("http://example.com")
+		endpoint := NewHTTPEndpoint(testURL, http.MethodGet)
+
+		watcher := &Watcher{
+			ID:       xid.New().String(),
+			Cadence:  time.Second,
+			Tasks:    []WatcherTask{endpoint},
+			doneChan: make(chan struct{}),
+		}
+
+		err := w.AddWatcher(watcher)
+		assert.NoError(t, err)
+
+		// Verify jitter was applied to the watcher
+		assert.Equal(t, jitterAmount, watcher.jitter)
+	})
+
+	t.Run("jitter creates variation in NextExec times", func(t *testing.T) {
+		jitterAmount := 500 * time.Millisecond
+		w := New(WithWatcherJitter(jitterAmount))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		// Create multiple watchers with the same cadence
+		testURL, _ := url.Parse("http://example.com")
+		var nextExecTimes []time.Time
+
+		for i := 0; i < 10; i++ {
+			endpoint := NewHTTPEndpoint(testURL, http.MethodGet)
+			watcher := &Watcher{
+				ID:       xid.New().String(),
+				Cadence:  time.Second,
+				Tasks:    []WatcherTask{endpoint},
+				doneChan: make(chan struct{}),
+				jitter:   jitterAmount,
+			}
+
+			job := watcher.job()
+			nextExecTimes = append(nextExecTimes, job.NextExec)
+		}
+
+		// Check that we have some variation (not all identical)
+		uniqueTimes := make(map[time.Time]bool)
+		for _, t := range nextExecTimes {
+			uniqueTimes[t] = true
+		}
+
+		// With 10 watchers and 500ms jitter, we should have multiple unique times
+		// (statistically very unlikely to have all the same)
+		assert.GreaterOrEqual(t, len(uniqueTimes), 2, "jitter should create variation in NextExec times")
+	})
+
+	t.Run("jitter stays within bounds", func(t *testing.T) {
+		jitterAmount := 300 * time.Millisecond
+		cadence := 2 * time.Second
+
+		testURL, _ := url.Parse("http://example.com")
+		endpoint := NewHTTPEndpoint(testURL, http.MethodGet)
+
+		// Test many iterations to ensure jitter always stays in bounds
+		for i := 0; i < 100; i++ {
+			watcher := &Watcher{
+				ID:       xid.New().String(),
+				Cadence:  cadence,
+				Tasks:    []WatcherTask{endpoint},
+				doneChan: make(chan struct{}),
+				jitter:   jitterAmount,
+			}
+
+			start := time.Now()
+			job := watcher.job()
+
+			// NextExec should be in the range [now + cadence - jitter, now + cadence + jitter]
+			minExpected := start.Add(cadence - jitterAmount)
+			maxExpected := start.Add(cadence + jitterAmount)
+
+			assert.True(t,
+				job.NextExec.After(minExpected) || job.NextExec.Equal(minExpected),
+				"NextExec %v should be >= %v", job.NextExec, minExpected)
+			assert.True(t,
+				job.NextExec.Before(maxExpected) || job.NextExec.Equal(maxExpected),
+				"NextExec %v should be <= %v", job.NextExec, maxExpected)
+
+			// NextExec should never be in the past
+			assert.True(t,
+				job.NextExec.After(start) || job.NextExec.Equal(start),
+				"NextExec should not be in the past")
+		}
+	})
+
+	t.Run("zero jitter produces consistent NextExec", func(t *testing.T) {
+		w := New() // No jitter configured
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("http://example.com")
+		endpoint := NewHTTPEndpoint(testURL, http.MethodGet)
+
+		cadence := time.Second
+		watcher := &Watcher{
+			ID:       xid.New().String(),
+			Cadence:  cadence,
+			Tasks:    []WatcherTask{endpoint},
+			doneChan: make(chan struct{}),
+			jitter:   0, // No jitter
+		}
+
+		start := time.Now()
+		job := watcher.job()
+
+		// With no jitter, NextExec should be exactly now + cadence (within a small tolerance)
+		expected := start.Add(cadence)
+		tolerance := 10 * time.Millisecond
+
+		diff := job.NextExec.Sub(expected)
+		if diff < 0 {
+			diff = -diff
+		}
+
+		assert.LessOrEqual(t, diff, tolerance,
+			"With no jitter, NextExec should be approximately now + cadence")
+	})
+
+	t.Run("jitter does not affect Cadence field in job", func(t *testing.T) {
+		jitterAmount := 500 * time.Millisecond
+		cadence := time.Second
+
+		testURL, _ := url.Parse("http://example.com")
+		endpoint := NewHTTPEndpoint(testURL, http.MethodGet)
+
+		watcher := &Watcher{
+			ID:       xid.New().String(),
+			Cadence:  cadence,
+			Tasks:    []WatcherTask{endpoint},
+			doneChan: make(chan struct{}),
+			jitter:   jitterAmount,
+		}
+
+		job := watcher.job()
+
+		// Cadence should remain unchanged regardless of jitter
+		assert.Equal(t, cadence, job.Cadence,
+			"Jitter should only affect NextExec, not Cadence")
+	})
+}
