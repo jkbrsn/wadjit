@@ -116,6 +116,10 @@ type TaskResponseMetadata struct {
 	// Size is the size of the response body, or message, in bytes.
 	Size int64
 
+	// Truncated indicates whether the response was truncated due to size limits.
+	// When true, Size reflects the actual bytes read before truncation.
+	Truncated bool
+
 	// TimeData contains the timing information for the request.
 	TimeData RequestTimes
 
@@ -193,6 +197,9 @@ type httpTaskResponse struct {
 	dnsDecision *DNSDecision
 
 	usedReader atomic.Bool // flags if we returned a Reader
+
+	maxResponseBytes int64 // maximum allowed response size (0 = unlimited)
+	truncated        bool  // set to true if response was truncated
 }
 
 // dataDone checks if the sync.Once for Data() has run.
@@ -201,6 +208,7 @@ func (h *httpTaskResponse) dataDone() bool {
 }
 
 // readBody reads the HTTP response body into memory exactly once and then closes the body.
+// If maxResponseBytes is set, it limits the read and sets truncated flag if exceeded.
 func (h *httpTaskResponse) readBody() {
 	if h.resp.Body == nil {
 		h.dataErr = errors.New("http.Response.Body is nil")
@@ -210,7 +218,13 @@ func (h *httpTaskResponse) readBody() {
 		_ = h.resp.Body.Close()
 	}()
 
-	bodyBytes, err := io.ReadAll(h.resp.Body)
+	var reader io.Reader = h.resp.Body
+	if h.maxResponseBytes > 0 {
+		// Read up to maxResponseBytes + 1 to detect if limit was exceeded
+		reader = io.LimitReader(h.resp.Body, h.maxResponseBytes+1)
+	}
+
+	bodyBytes, err := io.ReadAll(reader)
 	if err != nil {
 		// Best-effort drain to EOF to maximize connection reuse.
 		// Ignore drain errors because we're about to close anyway.
@@ -218,6 +232,14 @@ func (h *httpTaskResponse) readBody() {
 		h.dataErr = err
 		return
 	}
+
+	// Check if response was truncated
+	if h.maxResponseBytes > 0 && int64(len(bodyBytes)) > h.maxResponseBytes {
+		h.truncated = true
+		// Trim to max size
+		bodyBytes = bodyBytes[:h.maxResponseBytes]
+	}
+
 	h.data = bodyBytes
 	h.dataOnce.Store(true)
 	h.timestamps.dataDone = time.Now()
@@ -289,11 +311,18 @@ func (h *httpTaskResponse) Metadata() TaskResponseMetadata {
 		return TaskResponseMetadata{}
 	}
 
+	size := h.resp.ContentLength
+	// If we've read the body, use actual data length
+	if h.dataDone() {
+		size = int64(len(h.data))
+	}
+
 	md := TaskResponseMetadata{
 		RemoteAddr: h.remoteAddr,
 		StatusCode: h.resp.StatusCode,
 		Headers:    http.Header{},
-		Size:       h.resp.ContentLength,
+		Size:       size,
+		Truncated:  h.truncated,
 		TimeData:   TimeDataFromTimestamps(h.timestamps),
 	}
 	maps.Copy(md.Headers, h.resp.Header)
@@ -320,8 +349,13 @@ func (h *httpTaskResponse) Metadata() TaskResponseMetadata {
 }
 
 // newHTTPTaskResponse creates a new httpTaskResponse from an http.Response.
-func newHTTPTaskResponse(remoteAddr net.Addr, r *http.Response) *httpTaskResponse {
-	h := &httpTaskResponse{remoteAddr: remoteAddr, resp: r}
+// maxResponseBytes sets a limit on response body size (0 = unlimited).
+func newHTTPTaskResponse(remoteAddr net.Addr, r *http.Response, maxResponseBytes int64) *httpTaskResponse {
+	h := &httpTaskResponse{
+		remoteAddr:       remoteAddr,
+		resp:             r,
+		maxResponseBytes: maxResponseBytes,
+	}
 	if r != nil && r.Request != nil {
 		if decision, ok := r.Request.Context().Value(dnsDecisionKey{}).(DNSDecision); ok {
 			h.dnsDecision = &decision

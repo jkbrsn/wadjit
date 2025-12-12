@@ -19,7 +19,7 @@ func TestHTTPTaskResponse_Close(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	taskResp := newHTTPTaskResponse(nil, resp)
+	taskResp := newHTTPTaskResponse(nil, resp, 0)
 	require.NoError(t, taskResp.Close())
 }
 
@@ -39,7 +39,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 
-				taskResp := newHTTPTaskResponse(server.Listener.Addr(), resp)
+				taskResp := newHTTPTaskResponse(server.Listener.Addr(), resp, 0)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -77,7 +77,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 
-				taskResp := newHTTPTaskResponse(nil, resp)
+				taskResp := newHTTPTaskResponse(nil, resp, 0)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -104,7 +104,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 					Body:       nil,
 				}
 
-				taskResp := newHTTPTaskResponse(nil, resp)
+				taskResp := newHTTPTaskResponse(nil, resp, 0)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()
@@ -133,7 +133,7 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 				require.NoError(t, err)
 				require.NotNil(t, resp)
 
-				taskResp := newHTTPTaskResponse(nil, resp)
+				taskResp := newHTTPTaskResponse(nil, resp, 0)
 				defer func() {
 					require.NoError(t, taskResp.Close())
 				}()

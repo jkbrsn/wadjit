@@ -39,6 +39,8 @@ type HTTPEndpoint struct {
 	dnsPolicySet    bool
 	timeouts        HTTPTimeouts
 	timeoutsSet     bool
+	maxResponseBytes int64
+	maxResponseBytesSet bool
 	// tlsSkipVerify disables TLS verification when issuing HTTPS requests.
 	tlsSkipVerify bool
 
@@ -166,6 +168,16 @@ func WithHTTPTimeouts(timeouts HTTPTimeouts) HTTPEndpointOption {
 	}
 }
 
+// WithMaxResponseBytes sets the maximum response body size in bytes. If the response exceeds
+// this limit, reading will stop and the Truncated field in metadata will be set to true.
+// A value of 0 or negative means no limit. This overrides any default set at the Wadjit level.
+func WithMaxResponseBytes(maxBytes int64) HTTPEndpointOption {
+	return func(ep *HTTPEndpoint) {
+		ep.maxResponseBytes = maxBytes
+		ep.maxResponseBytesSet = true
+	}
+}
+
 // WithHeader configures the HTTPEndpoint to use the provided header.
 func WithHeader(h http.Header) HTTPEndpointOption {
 	return func(ep *HTTPEndpoint) { ep.Header = h }
@@ -258,7 +270,7 @@ func (r httpRequest) Execute() error {
 	}
 
 	// Create a task response
-	taskResponse := newHTTPTaskResponse(remoteAddr, response)
+	taskResponse := newHTTPTaskResponse(remoteAddr, response, r.endpoint.maxResponseBytes)
 	taskResponse.timestamps = tStore.Snapshot()
 	if r.endpoint.OptReadFast {
 		taskResponse.readBody()
