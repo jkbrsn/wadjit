@@ -381,6 +381,7 @@ type options struct {
 	hasDefaultWSTimeouts bool
 	logger              zerolog.Logger
 	loggerSet           bool
+	taskmanLogLevel     *zerolog.Level
 	metricsSink         MetricsSink
 	metricsSampleRate   float64
 
@@ -436,6 +437,16 @@ func WithLogger(logger zerolog.Logger) Option {
 		logLevel := max(logger.GetLevel(), zerolog.DebugLevel)
 		log := logger.Level(logLevel)
 		o.taskmanOptions = append(o.taskmanOptions, taskman.WithLogger(log))
+	}
+}
+
+// WithTaskmanLogLevel sets the log level for the internal task manager independently from the
+// Wadjit logger. This allows fine-grained control over taskman's logging verbosity. If both
+// WithLogger and WithTaskmanLogLevel are used, the taskman log level takes precedence for the
+// task manager.
+func WithTaskmanLogLevel(level zerolog.Level) Option {
+	return func(o *options) {
+		o.taskmanLogLevel = &level
 	}
 }
 
@@ -509,6 +520,14 @@ func applyOptions(opts []Option) options {
 	}
 	if !cfg.loggerSet {
 		cfg.logger = zerolog.Nop()
+	}
+
+	// If a specific taskman log level is set, apply it as the final taskman logger option.
+	// This ensures it overrides any logger set by WithLogger.
+	if cfg.taskmanLogLevel != nil {
+		// Use the Wadjit logger as the base, but set it to the specified level
+		taskmanLogger := cfg.logger.Level(*cfg.taskmanLogLevel)
+		cfg.taskmanOptions = append(cfg.taskmanOptions, taskman.WithLogger(taskmanLogger))
 	}
 
 	return cfg
