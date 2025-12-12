@@ -636,3 +636,160 @@ func TestNewHTTPEndpoint(t *testing.T) {
 		assert.True(t, endpoint.tlsSkipVerify)
 	})
 }
+
+func TestHTTPEndpointTimeouts(t *testing.T) {
+	t.Run("endpoint with timeouts initializes correctly", func(t *testing.T) {
+		testURL, _ := url.Parse("http://example.com")
+		timeouts := HTTPTimeouts{
+			Total:          10 * time.Second,
+			ResponseHeader: 5 * time.Second,
+			IdleConn:       30 * time.Second,
+			TLSHandshake:   10 * time.Second,
+			Dial:           5 * time.Second,
+		}
+
+		endpoint := NewHTTPEndpoint(
+			testURL,
+			http.MethodGet,
+			WithHTTPTimeouts(timeouts),
+		)
+
+		assert.True(t, endpoint.timeoutsSet)
+		assert.Equal(t, timeouts, endpoint.timeouts)
+
+		// Initialize the endpoint
+		responseChan := make(chan WatcherResponse)
+		err := endpoint.Initialize("watcher-id", responseChan)
+		assert.NoError(t, err)
+
+		// Verify client timeout is set
+		assert.Equal(t, timeouts.Total, endpoint.client.Timeout)
+
+		// Verify transport timeouts are set
+		transport := endpoint.client.Transport.(*policyTransport).base
+		assert.Equal(t, timeouts.ResponseHeader, transport.ResponseHeaderTimeout)
+		assert.Equal(t, timeouts.IdleConn, transport.IdleConnTimeout)
+		assert.Equal(t, timeouts.TLSHandshake, transport.TLSHandshakeTimeout)
+	})
+
+	t.Run("endpoint inherits default timeouts from Wadjit", func(t *testing.T) {
+		defaultTimeouts := HTTPTimeouts{
+			Total: 15 * time.Second,
+			Dial:  7 * time.Second,
+		}
+		w := New(WithDefaultHTTPTimeouts(defaultTimeouts))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("http://example.com")
+		endpoint := NewHTTPEndpoint(testURL, http.MethodGet)
+
+		watcher := &Watcher{
+			ID:      xid.New().String(),
+			Cadence: time.Second,
+			Tasks:   []WatcherTask{endpoint},
+		}
+
+		// Apply defaults
+		w.applyDefaultHTTPTimeouts(watcher)
+
+		assert.True(t, endpoint.timeoutsSet)
+		assert.Equal(t, defaultTimeouts, endpoint.timeouts)
+	})
+
+	t.Run("explicit timeouts override Wadjit defaults", func(t *testing.T) {
+		defaultTimeouts := HTTPTimeouts{
+			Total: 15 * time.Second,
+		}
+		endpointTimeouts := HTTPTimeouts{
+			Total: 5 * time.Second,
+		}
+
+		w := New(WithDefaultHTTPTimeouts(defaultTimeouts))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("http://example.com")
+		endpoint := NewHTTPEndpoint(
+			testURL,
+			http.MethodGet,
+			WithHTTPTimeouts(endpointTimeouts),
+		)
+
+		watcher := &Watcher{
+			ID:      xid.New().String(),
+			Cadence: time.Second,
+			Tasks:   []WatcherTask{endpoint},
+		}
+
+		// Apply defaults (should not override explicit timeouts)
+		w.applyDefaultHTTPTimeouts(watcher)
+
+		assert.True(t, endpoint.timeoutsSet)
+		assert.Equal(t, endpointTimeouts, endpoint.timeouts)
+		assert.NotEqual(t, defaultTimeouts, endpoint.timeouts)
+	})
+
+	t.Run("invalid timeouts fail during initialization", func(t *testing.T) {
+		testURL, _ := url.Parse("http://example.com")
+		invalidTimeouts := HTTPTimeouts{
+			Dial: -1 * time.Second, // Invalid negative dial timeout
+		}
+
+		endpoint := NewHTTPEndpoint(
+			testURL,
+			http.MethodGet,
+			WithHTTPTimeouts(invalidTimeouts),
+		)
+
+		responseChan := make(chan WatcherResponse)
+		err := endpoint.Initialize("watcher-id", responseChan)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid HTTP timeouts")
+	})
+
+	t.Run("timeout causes request to fail", func(t *testing.T) {
+		// Create a server that delays response
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			time.Sleep(200 * time.Millisecond) // Delay longer than timeout
+			_, _ = w.Write([]byte("delayed response"))
+		}))
+		defer server.Close()
+
+		testURL, _ := url.Parse(server.URL)
+		timeouts := HTTPTimeouts{
+			Total: 50 * time.Millisecond, // Very short timeout
+		}
+
+		endpoint := NewHTTPEndpoint(
+			testURL,
+			http.MethodGet,
+			WithHTTPTimeouts(timeouts),
+		)
+
+		responseChan := make(chan WatcherResponse, 1)
+		err := endpoint.Initialize("watcher-id", responseChan)
+		require.NoError(t, err)
+
+		// Execute request
+		task := endpoint.Task()
+		err = task.Execute()
+
+		// Should timeout - Execute returns the error
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "Timeout")
+
+		// Check response channel also has the timeout error
+		select {
+		case resp := <-responseChan:
+			assert.NotNil(t, resp.Err)
+			assert.Contains(t, resp.Err.Error(), "Timeout")
+		case <-time.After(time.Second):
+			t.Fatal("expected response on channel")
+		}
+	})
+}

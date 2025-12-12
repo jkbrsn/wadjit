@@ -34,6 +34,8 @@ type WSEndpoint struct {
 	remoteAddr   net.Addr
 	inflightMsgs sync.Map // Key string to value wsInflightMessage
 	wg           sync.WaitGroup
+	timeouts     WSTimeouts
+	timeoutsSet  bool
 
 	// Set by Initialize
 	watcherID string
@@ -65,6 +67,9 @@ type wsInflightMessage struct {
 	originalID any
 	timeSent   time.Time
 }
+
+// WSEndpointOption is a functional option for the WSEndpoint struct.
+type WSEndpointOption func(*WSEndpoint)
 
 // Close closes the WebSocket connection, and cancels its context.
 func (e *WSEndpoint) Close() error {
@@ -185,8 +190,19 @@ func (e *WSEndpoint) connect() error {
 		return errors.New("connection already established")
 	}
 
+	// Validate timeouts
+	if err := e.timeouts.Validate(); err != nil {
+		return fmt.Errorf("invalid WebSocket timeouts: %w", err)
+	}
+
+	// Create dialer with handshake timeout if configured
+	dialer := *websocket.DefaultDialer
+	if e.timeouts.Handshake > 0 {
+		dialer.HandshakeTimeout = e.timeouts.Handshake
+	}
+
 	// Establish the connection
-	conn, _, err := websocket.DefaultDialer.Dial(e.URL.String(), e.Header)
+	conn, _, err := dialer.Dial(e.URL.String(), e.Header)
 	if err != nil {
 		return err
 	}
@@ -510,6 +526,14 @@ func (e *WSEndpoint) readPump(wg *sync.WaitGroup) {
 			// Clone the URL to avoid downstream mutation
 			urlClone := *e.URL
 
+			// Set read deadline if configured
+			if e.timeouts.Read > 0 {
+				if err := e.conn.SetReadDeadline(time.Now().Add(e.timeouts.Read)); err != nil {
+					e.handleWebSocketReadError(err, &urlClone)
+					return
+				}
+			}
+
 			// Read message from connection
 			_, p, err := e.conn.ReadMessage()
 			if err != nil {
@@ -548,7 +572,13 @@ func (oh *wsOneHit) establishConnection(
 	timestamps.connStart = time.Now()
 	timestamps.tlsStart = time.Now()
 
-	conn, _, err := websocket.DefaultDialer.Dial(urlClone.String(), oh.wsEndpoint.Header)
+	// Create dialer with handshake timeout if configured
+	dialer := *websocket.DefaultDialer
+	if oh.wsEndpoint.timeouts.Handshake > 0 {
+		dialer.HandshakeTimeout = oh.wsEndpoint.timeouts.Handshake
+	}
+
+	conn, _, err := dialer.Dial(urlClone.String(), oh.wsEndpoint.Header)
 	if err != nil {
 		return nil, timestamps, fmt.Errorf("failed to dial: %w", err)
 	}
@@ -565,11 +595,25 @@ func (oh *wsOneHit) sendAndReceiveMessage(
 	conn *websocket.Conn,
 	timestamps requestTimestamps,
 ) (requestTimestamps, []byte, error) {
+	// Set write deadline if configured
+	if oh.wsEndpoint.timeouts.Write > 0 {
+		if err := conn.SetWriteDeadline(time.Now().Add(oh.wsEndpoint.timeouts.Write)); err != nil {
+			return timestamps, nil, fmt.Errorf("failed to set write deadline: %w", err)
+		}
+	}
+
 	// Write message to connection
 	if err := conn.WriteMessage(websocket.TextMessage, oh.wsEndpoint.Payload); err != nil {
 		return timestamps, nil, fmt.Errorf("failed to write message: %w", err)
 	}
 	timestamps.wroteDone = time.Now()
+
+	// Set read deadline if configured
+	if oh.wsEndpoint.timeouts.Read > 0 {
+		if err := conn.SetReadDeadline(time.Now().Add(oh.wsEndpoint.timeouts.Read)); err != nil {
+			return timestamps, nil, fmt.Errorf("failed to set read deadline: %w", err)
+		}
+	}
 
 	// Read exactly one response
 	_, message, err := conn.ReadMessage()
@@ -766,6 +810,13 @@ func (ll *wsPersistent) Execute() error {
 			payload = ll.wsEndpoint.Payload
 		}
 
+		// Set write deadline if configured
+		if ll.wsEndpoint.timeouts.Write > 0 {
+			if err := ll.wsEndpoint.conn.SetWriteDeadline(time.Now().Add(ll.wsEndpoint.timeouts.Write)); err != nil {
+				return ll.handleWriteError(err, &urlClone)
+			}
+		}
+
 		// Write message to connection
 		if err := ll.wsEndpoint.conn.WriteMessage(websocket.TextMessage, payload); err != nil {
 			return ll.handleWriteError(err, &urlClone)
@@ -775,6 +826,30 @@ func (ll *wsPersistent) Execute() error {
 	return nil
 }
 
+// WithWSTimeouts configures timeout values for WebSocket connections. This overrides any default
+// timeouts set at the Wadjit level.
+func WithWSTimeouts(timeouts WSTimeouts) WSEndpointOption {
+	return func(ep *WSEndpoint) {
+		ep.timeouts = timeouts
+		ep.timeoutsSet = true
+	}
+}
+
+// WithWSHeader configures the WSEndpoint to use the provided header.
+func WithWSHeader(h http.Header) WSEndpointOption {
+	return func(ep *WSEndpoint) { ep.Header = h }
+}
+
+// WithWSPayload configures the WSEndpoint to use the provided payload.
+func WithWSPayload(b []byte) WSEndpointOption {
+	return func(ep *WSEndpoint) { ep.Payload = b }
+}
+
+// WithWSID configures the WSEndpoint to use the provided ID.
+func WithWSID(id string) WSEndpointOption {
+	return func(ep *WSEndpoint) { ep.ID = id }
+}
+
 // NewWSEndpoint creates a new WSEndpoint with the given attributes.
 func NewWSEndpoint(
 	wsURL *url.URL,
@@ -782,12 +857,21 @@ func NewWSEndpoint(
 	mode WSEndpointMode,
 	payload []byte,
 	id string,
+	opts ...WSEndpointOption,
 ) *WSEndpoint {
-	return &WSEndpoint{
+	ep := &WSEndpoint{
 		Header:  header,
 		Mode:    mode,
 		Payload: payload,
 		URL:     wsURL,
 		ID:      id,
 	}
+
+	for _, opt := range opts {
+		if opt != nil {
+			opt(ep)
+		}
+	}
+
+	return ep
 }

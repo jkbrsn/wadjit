@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -36,6 +37,8 @@ type HTTPEndpoint struct {
 	dnsDecisionHook DNSDecisionCallback
 	dnsMgr          *dnsPolicyManager
 	dnsPolicySet    bool
+	timeouts        HTTPTimeouts
+	timeoutsSet     bool
 	// tlsSkipVerify disables TLS verification when issuing HTTPS requests.
 	tlsSkipVerify bool
 
@@ -73,14 +76,41 @@ func (e *HTTPEndpoint) Initialize(watcherID string, responseChannel chan<- Watch
 		return err
 	}
 
+	// Validate and apply timeouts
+	if err := e.timeouts.Validate(); err != nil {
+		return fmt.Errorf("invalid HTTP timeouts: %w", err)
+	}
+
+	// Configure dialer timeout
+	dialTimeout := defaultDialTimeout
+	if e.timeouts.Dial > 0 {
+		dialTimeout = e.timeouts.Dial
+	}
+
 	mgr := newDNSPolicyManager(policy, e.dnsDecisionHook)
-	dialer := &net.Dialer{Timeout: defaultDialTimeout}
+	dialer := &net.Dialer{Timeout: dialTimeout}
 	tr.DialContext = mgr.dialContext(dialer)
+
+	// Apply transport-level timeouts
+	if e.timeouts.ResponseHeader > 0 {
+		tr.ResponseHeaderTimeout = e.timeouts.ResponseHeader
+	}
+	if e.timeouts.IdleConn > 0 {
+		tr.IdleConnTimeout = e.timeouts.IdleConn
+	}
+	if e.timeouts.TLSHandshake > 0 {
+		tr.TLSHandshakeTimeout = e.timeouts.TLSHandshake
+	}
 
 	e.dnsMgr = mgr
 	e.dnsPolicy = policy
 
-	e.client = &http.Client{Transport: &policyTransport{base: tr, mgr: mgr}}
+	// Create client with optional total timeout
+	client := &http.Client{Transport: &policyTransport{base: tr, mgr: mgr}}
+	if e.timeouts.Total > 0 {
+		client.Timeout = e.timeouts.Total
+	}
+	e.client = client
 
 	// TODO: set mode based on payload, e.g. JSON RPC, text ete.
 	return nil
@@ -124,6 +154,15 @@ func WithDNSPolicy(policy DNSPolicy) HTTPEndpointOption {
 func WithDNSDecisionHook(cb DNSDecisionCallback) HTTPEndpointOption {
 	return func(ep *HTTPEndpoint) {
 		ep.dnsDecisionHook = cb
+	}
+}
+
+// WithHTTPTimeouts configures timeout values for HTTP requests. This overrides any default
+// timeouts set at the Wadjit level.
+func WithHTTPTimeouts(timeouts HTTPTimeouts) HTTPEndpointOption {
+	return func(ep *HTTPEndpoint) {
+		ep.timeouts = timeouts
+		ep.timeoutsSet = true
 	}
 }
 

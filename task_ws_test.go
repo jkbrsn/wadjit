@@ -623,3 +623,152 @@ func TestWSEndpointSuite(t *testing.T) {
 		runWSEndpointTestSuite(t, &wsEndpointTestSuite{newWS: newWS})
 	})
 }
+
+func TestWSEndpointTimeouts(t *testing.T) {
+	t.Run("endpoint with timeouts configures correctly", func(t *testing.T) {
+		testURL, _ := url.Parse("ws://example.com")
+		timeouts := WSTimeouts{
+			Handshake:    5 * time.Second,
+			Read:         30 * time.Second,
+			Write:        10 * time.Second,
+			PingInterval: 20 * time.Second,
+		}
+
+		endpoint := NewWSEndpoint(
+			testURL,
+			make(http.Header),
+			PersistentJSONRPC,
+			[]byte("test"),
+			"test-id",
+			WithWSTimeouts(timeouts),
+		)
+
+		assert.True(t, endpoint.timeoutsSet)
+		assert.Equal(t, timeouts, endpoint.timeouts)
+	})
+
+	t.Run("endpoint inherits default timeouts from Wadjit", func(t *testing.T) {
+		defaultTimeouts := WSTimeouts{
+			Handshake: 7 * time.Second,
+			Read:      40 * time.Second,
+			Write:     15 * time.Second,
+		}
+		w := New(WithDefaultWSTimeouts(defaultTimeouts))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("ws://example.com")
+		endpoint := NewWSEndpoint(
+			testURL,
+			make(http.Header),
+			PersistentJSONRPC,
+			[]byte("test"),
+			"test-id",
+		)
+
+		watcher := &Watcher{
+			ID:      xid.New().String(),
+			Cadence: time.Second,
+			Tasks:   []WatcherTask{endpoint},
+		}
+
+		// Apply defaults
+		w.applyDefaultWSTimeouts(watcher)
+
+		assert.True(t, endpoint.timeoutsSet)
+		assert.Equal(t, defaultTimeouts, endpoint.timeouts)
+	})
+
+	t.Run("explicit timeouts override Wadjit defaults", func(t *testing.T) {
+		defaultTimeouts := WSTimeouts{
+			Handshake: 10 * time.Second,
+			Read:      50 * time.Second,
+		}
+		endpointTimeouts := WSTimeouts{
+			Handshake: 3 * time.Second,
+			Read:      20 * time.Second,
+		}
+
+		w := New(WithDefaultWSTimeouts(defaultTimeouts))
+		defer func() {
+			err := w.Close()
+			assert.NoError(t, err)
+		}()
+
+		testURL, _ := url.Parse("ws://example.com")
+		endpoint := NewWSEndpoint(
+			testURL,
+			make(http.Header),
+			PersistentJSONRPC,
+			[]byte("test"),
+			"test-id",
+			WithWSTimeouts(endpointTimeouts),
+		)
+
+		watcher := &Watcher{
+			ID:      xid.New().String(),
+			Cadence: time.Second,
+			Tasks:   []WatcherTask{endpoint},
+		}
+
+		// Apply defaults (should not override explicit timeouts)
+		w.applyDefaultWSTimeouts(watcher)
+
+		assert.True(t, endpoint.timeoutsSet)
+		assert.Equal(t, endpointTimeouts, endpoint.timeouts)
+		assert.NotEqual(t, defaultTimeouts, endpoint.timeouts)
+	})
+
+	t.Run("invalid timeouts fail during connection", func(t *testing.T) {
+		testURL, _ := url.Parse("ws://example.com")
+		invalidTimeouts := WSTimeouts{
+			Read:         10 * time.Second,
+			PingInterval: 15 * time.Second, // Invalid: PingInterval >= Read
+		}
+
+		endpoint := NewWSEndpoint(
+			testURL,
+			make(http.Header),
+			PersistentJSONRPC,
+			[]byte("test"),
+			"test-id",
+			WithWSTimeouts(invalidTimeouts),
+		)
+
+		// Attempting to connect should fail validation
+		endpoint.mu.Lock()
+		err := invalidTimeouts.Validate()
+		endpoint.mu.Unlock()
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "PingInterval must be less than")
+	})
+
+	t.Run("option functions work correctly", func(t *testing.T) {
+		testURL, _ := url.Parse("ws://example.com")
+		header := http.Header{"X-Test": []string{"value"}}
+		payload := []byte("test payload")
+		id := "custom-id"
+		timeouts := WSTimeouts{Handshake: 5 * time.Second}
+
+		endpoint := NewWSEndpoint(
+			testURL,
+			make(http.Header), // Initial header will be overridden
+			OneHitText,
+			nil, // Initial payload will be overridden
+			"initial-id",
+			WithWSHeader(header),
+			WithWSPayload(payload),
+			WithWSID(id),
+			WithWSTimeouts(timeouts),
+		)
+
+		assert.Equal(t, header, endpoint.Header)
+		assert.Equal(t, payload, endpoint.Payload)
+		assert.Equal(t, id, endpoint.ID)
+		assert.True(t, endpoint.timeoutsSet)
+		assert.Equal(t, timeouts, endpoint.timeouts)
+	})
+}

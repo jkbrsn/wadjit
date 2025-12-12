@@ -26,9 +26,13 @@ type Wadjit struct {
 	respExportChan chan WatcherResponse
 	metricsSink    MetricsSink
 
-	defaultDNSPolicy    DNSPolicy
-	hasDefaultDNSPolicy bool
-	metricsSampleRate   float64
+	defaultDNSPolicy       DNSPolicy
+	hasDefaultDNSPolicy    bool
+	defaultHTTPTimeouts    HTTPTimeouts
+	hasDefaultHTTPTimeouts bool
+	defaultWSTimeouts      WSTimeouts
+	hasDefaultWSTimeouts   bool
+	metricsSampleRate      float64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -53,13 +57,17 @@ func New(opts ...Option) *Wadjit {
 		ctx:    ctx,
 		cancel: cancel,
 		// TODO: set logger
-		taskManager:         tm,
-		respGatherChan:      make(chan WatcherResponse, options.bufferSize),
-		respExportChan:      make(chan WatcherResponse, options.bufferSize),
-		metricsSink:         options.metricsSink,
-		metricsSampleRate:   options.metricsSampleRate,
-		defaultDNSPolicy:    options.defaultDNSPolicy,
-		hasDefaultDNSPolicy: options.hasDefaultDNSPolicy,
+		taskManager:            tm,
+		respGatherChan:         make(chan WatcherResponse, options.bufferSize),
+		respExportChan:         make(chan WatcherResponse, options.bufferSize),
+		metricsSink:            options.metricsSink,
+		metricsSampleRate:      options.metricsSampleRate,
+		defaultDNSPolicy:       options.defaultDNSPolicy,
+		hasDefaultDNSPolicy:    options.hasDefaultDNSPolicy,
+		defaultHTTPTimeouts:    options.defaultHTTPTimeouts,
+		hasDefaultHTTPTimeouts: options.hasDefaultHTTPTimeouts,
+		defaultWSTimeouts:      options.defaultWSTimeouts,
+		hasDefaultWSTimeouts:   options.hasDefaultWSTimeouts,
 	}
 
 	w.closeWG.Add(1)
@@ -84,6 +92,40 @@ func (w *Wadjit) applyDefaultDNSPolicy(watcher *Watcher) {
 			}
 			endpoint.dnsPolicy = w.defaultDNSPolicy
 			endpoint.dnsPolicySet = true
+		}
+	}
+}
+
+// applyDefaultHTTPTimeouts applies the default HTTP timeouts to the watcher if not already set.
+func (w *Wadjit) applyDefaultHTTPTimeouts(watcher *Watcher) {
+	if !w.hasDefaultHTTPTimeouts || watcher == nil {
+		return
+	}
+
+	for i := range watcher.Tasks {
+		if endpoint, ok := watcher.Tasks[i].(*HTTPEndpoint); ok && endpoint != nil {
+			if endpoint.timeoutsSet {
+				continue
+			}
+			endpoint.timeouts = w.defaultHTTPTimeouts
+			endpoint.timeoutsSet = true
+		}
+	}
+}
+
+// applyDefaultWSTimeouts applies the default WebSocket timeouts to the watcher if not already set.
+func (w *Wadjit) applyDefaultWSTimeouts(watcher *Watcher) {
+	if !w.hasDefaultWSTimeouts || watcher == nil {
+		return
+	}
+
+	for i := range watcher.Tasks {
+		if endpoint, ok := watcher.Tasks[i].(*WSEndpoint); ok && endpoint != nil {
+			if endpoint.timeoutsSet {
+				continue
+			}
+			endpoint.timeouts = w.defaultWSTimeouts
+			endpoint.timeoutsSet = true
 		}
 	}
 }
@@ -115,6 +157,8 @@ func (w *Wadjit) listenForResponses() {
 // AddWatcher adds a Watcher to the Wadjit, starting it in the process.
 func (w *Wadjit) AddWatcher(watcher *Watcher) error {
 	w.applyDefaultDNSPolicy(watcher)
+	w.applyDefaultHTTPTimeouts(watcher)
+	w.applyDefaultWSTimeouts(watcher)
 
 	if err := watcher.Validate(); err != nil {
 		return fmt.Errorf("error validating watcher: %v", err)
@@ -331,6 +375,10 @@ type options struct {
 	bufferSize          int
 	defaultDNSPolicy    DNSPolicy
 	hasDefaultDNSPolicy bool
+	defaultHTTPTimeouts HTTPTimeouts
+	hasDefaultHTTPTimeouts bool
+	defaultWSTimeouts   WSTimeouts
+	hasDefaultWSTimeouts bool
 	logger              zerolog.Logger
 	loggerSet           bool
 	metricsSink         MetricsSink
@@ -356,6 +404,25 @@ func WithDefaultDNSPolicy(policy DNSPolicy) Option {
 	return func(o *options) {
 		o.defaultDNSPolicy = policy
 		o.hasDefaultDNSPolicy = true
+	}
+}
+
+// WithDefaultHTTPTimeouts sets default HTTP timeout values for HTTP endpoints created without
+// explicit timeout configuration. Endpoints configured via WithHTTPTimeouts override this default.
+func WithDefaultHTTPTimeouts(timeouts HTTPTimeouts) Option {
+	return func(o *options) {
+		o.defaultHTTPTimeouts = timeouts
+		o.hasDefaultHTTPTimeouts = true
+	}
+}
+
+// WithDefaultWSTimeouts sets default WebSocket timeout values for WebSocket endpoints created
+// without explicit timeout configuration. Endpoints configured via WithWSTimeouts override this
+// default.
+func WithDefaultWSTimeouts(timeouts WSTimeouts) Option {
+	return func(o *options) {
+		o.defaultWSTimeouts = timeouts
+		o.hasDefaultWSTimeouts = true
 	}
 }
 
