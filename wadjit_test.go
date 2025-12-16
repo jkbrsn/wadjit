@@ -1283,6 +1283,44 @@ func TestWadjit_WatcherJitter(t *testing.T) {
 		assert.Equal(t, cadence, job.Cadence,
 			"Jitter should only affect NextExec, not Cadence")
 	})
+
+	t.Run("per-watcher RNG produces deterministic offsets", func(t *testing.T) {
+		w := New(WithWatcherJitter(200 * time.Millisecond))
+		defer func() { _ = w.Close() }()
+
+		watcher := &Watcher{
+			ID:       "watcher-deterministic",
+			Cadence:  time.Second,
+			Tasks:    []WatcherTask{},
+			doneChan: make(chan struct{}),
+		}
+
+		w.applyJitter(watcher)
+		job1 := watcher.job()
+		job2 := watcher.job()
+
+		delta := job1.NextExec.Sub(job2.NextExec)
+		if delta < 0 {
+			delta = -delta
+		}
+		assert.LessOrEqual(t, delta, 2*time.Millisecond)
+	})
+
+	t.Run("different watchers produce different offsets", func(t *testing.T) {
+		w := New(WithWatcherJitter(200 * time.Millisecond))
+		defer func() { _ = w.Close() }()
+
+		w1 := &Watcher{ID: "w1", Cadence: time.Second, Tasks: []WatcherTask{}, doneChan: make(chan struct{})}
+		w2 := &Watcher{ID: "w2", Cadence: time.Second, Tasks: []WatcherTask{}, doneChan: make(chan struct{})}
+
+		w.applyJitter(w1)
+		w.applyJitter(w2)
+
+		job1 := w1.job()
+		job2 := w2.job()
+
+		assert.NotEqual(t, job1.NextExec, job2.NextExec)
+	})
 }
 
 func TestWadjit_MetricsSampling_PerResponse(t *testing.T) {

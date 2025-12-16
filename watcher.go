@@ -22,6 +22,9 @@ type Watcher struct {
 	// executions maintain the exact cadence interval. This helps avoid thundering herds when
 	// multiple watchers start simultaneously.
 	jitter   time.Duration
+	jitterRNG *rand.Rand
+	jitterOffset     time.Duration
+	jitterOffsetSet  bool
 	doneChan chan struct{}
 }
 
@@ -82,7 +85,8 @@ func (w *Watcher) close() error {
 // watcher's cadence, using the watcher's ID as the job ID. If jitter is configured, a random offset
 // in the range [-jitter, +jitter] is added to the initial execution time only. This does not cause
 // drift - the Cadence field is never modified, so taskman schedules subsequent executions at exact
-// intervals after the jittered first execution.
+// intervals after the jittered first execution. When a per-watcher RNG is present, the offset is
+// derived from it for determinism per watcher.
 func (w *Watcher) job() taskman.Job {
 	tasks := make([]taskman.Task, 0, len(w.Tasks))
 	for i := range w.Tasks {
@@ -90,15 +94,23 @@ func (w *Watcher) job() taskman.Job {
 	}
 
 	// Calculate next execution time with optional jitter
-	nextExec := time.Now().Add(w.Cadence)
+	now := time.Now()
+	nextExec := now.Add(w.Cadence)
 	if w.jitter > 0 {
-		// Generate random offset in range [-jitter, +jitter]
-		jitterRange := int64(w.jitter) * 2
-		offset := time.Duration(rand.Int63n(jitterRange+1)) - w.jitter
+		if !w.jitterOffsetSet {
+			jitterRange := int64(w.jitter) * 2
+			var offset time.Duration
+			if w.jitterRNG != nil {
+				offset = time.Duration(w.jitterRNG.Int63n(jitterRange+1)) - w.jitter
+			} else {
+				offset = time.Duration(rand.Int63n(jitterRange+1)) - w.jitter
+			}
+			w.jitterOffset = offset
+			w.jitterOffsetSet = true
+		}
 
-		// Apply jitter, ensuring the result is not in the past
-		jitteredTime := nextExec.Add(offset)
-		if jitteredTime.After(time.Now()) {
+		jitteredTime := nextExec.Add(w.jitterOffset)
+		if jitteredTime.After(now) {
 			nextExec = jitteredTime
 		}
 	}

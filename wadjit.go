@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -184,6 +185,11 @@ func (w *Wadjit) applyJitter(watcher *Watcher) {
 		return
 	}
 	watcher.jitter = w.watcherJitter
+	// Seed a per-watcher RNG so jitter per cycle stays deterministic to that watcher but varies.
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(watcher.ID))
+	seed := h.Sum64()
+	watcher.jitterRNG = rand.New(rand.NewSource(int64(seed)))
 }
 
 // listenForResponses consumes the channel where Watchers send responses from their monitoring jobs
