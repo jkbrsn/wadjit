@@ -1088,6 +1088,21 @@ func TestWadjit_TaskmanLogLevel(t *testing.T) {
 		// The fact that this doesn't panic means the taskman logger was configured
 		// at Trace level, overriding the clamped Debug level from WithLogger
 	})
+
+	t.Run("WithTaskmanLogger overrides other taskman logging options", func(t *testing.T) {
+		var buf bytes.Buffer
+		base := zerolog.New(zerolog.SyncWriter(&buf)).Level(zerolog.InfoLevel)
+		taskmanLogger := zerolog.New(zerolog.SyncWriter(&buf)).Level(zerolog.TraceLevel)
+
+		w := New(
+			WithLogger(base),
+			WithTaskmanLogLevel(zerolog.ErrorLevel), // should be overridden
+			WithTaskmanLogger(taskmanLogger),
+		)
+		defer func() { _ = w.Close() }()
+
+		assert.NotNil(t, w)
+	})
 }
 
 func TestWadjit_WatcherJitter(t *testing.T) {

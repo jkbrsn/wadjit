@@ -458,6 +458,8 @@ type options struct {
 	logger                      zerolog.Logger
 	loggerSet                   bool
 	taskmanLogLevel             *zerolog.Level
+	taskmanLogger               zerolog.Logger
+	taskmanLoggerSet            bool
 	metricsSink                 MetricsSink
 	metricsSampleRate           float64
 
@@ -544,7 +546,7 @@ func WithLogger(logger zerolog.Logger) Option {
 		o.loggerSet = true
 
 		// Clamp taskman log level to at least INFO
-		logLevel := max(logger.GetLevel(), zerolog.DebugLevel)
+		logLevel := clampMinLevel(logger.GetLevel(), zerolog.DebugLevel)
 		log := logger.Level(logLevel)
 		o.taskmanOptions = append(o.taskmanOptions, taskman.WithLogger(log))
 	}
@@ -557,6 +559,15 @@ func WithLogger(logger zerolog.Logger) Option {
 func WithTaskmanLogLevel(level zerolog.Level) Option {
 	return func(o *options) {
 		o.taskmanLogLevel = &level
+	}
+}
+
+// WithTaskmanLogger sets an explicit logger for the internal task manager. This overrides
+// WithTaskmanLogLevel and the logger derived from WithLogger.
+func WithTaskmanLogger(logger zerolog.Logger) Option {
+	return func(o *options) {
+		o.taskmanLogger = logger
+		o.taskmanLoggerSet = true
 	}
 }
 
@@ -632,13 +643,21 @@ func applyOptions(opts []Option) options {
 		cfg.logger = zerolog.Nop()
 	}
 
-	// If a specific taskman log level is set, apply it as the final taskman logger option.
-	// This ensures it overrides any logger set by WithLogger.
-	if cfg.taskmanLogLevel != nil {
-		// Use the Wadjit logger as the base, but set it to the specified level
-		taskmanLogger := cfg.logger.Level(*cfg.taskmanLogLevel)
-		cfg.taskmanOptions = append(cfg.taskmanOptions, taskman.WithLogger(taskmanLogger))
+	// Determine taskman logger precedence: explicit logger > explicit level > derived from WithLogger.
+	switch {
+	case cfg.taskmanLoggerSet:
+		cfg.taskmanOptions = append(cfg.taskmanOptions, taskman.WithLogger(cfg.taskmanLogger))
+	case cfg.taskmanLogLevel != nil:
+		cfg.taskmanOptions = append(cfg.taskmanOptions, taskman.WithLogger(cfg.logger.Level(*cfg.taskmanLogLevel)))
 	}
 
 	return cfg
+}
+
+// clampMinLevel returns the higher of current and min, used to keep taskman logs reasonably verbose.
+func clampMinLevel(current, min zerolog.Level) zerolog.Level {
+	if current < min {
+		return min
+	}
+	return current
 }
