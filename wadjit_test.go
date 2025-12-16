@@ -1269,3 +1269,22 @@ func TestWadjit_WatcherJitter(t *testing.T) {
 			"Jitter should only affect NextExec, not Cadence")
 	})
 }
+
+func TestWadjit_MetricsSampling_PerResponse(t *testing.T) {
+	w := New(WithMetricsSampleRate(0.5))
+	defer func() { _ = w.Close() }()
+
+	resp := WatcherResponse{WatcherID: "w1", TaskID: "t1"}
+
+	// Collect many decisions and ensure roughly half are sampled and not all-or-nothing.
+	sampled := 0
+	for i := 0; i < 200; i++ {
+		if w.shouldSample(resp) {
+			sampled++
+		}
+	}
+
+	// Very loose bounds to avoid flakiness
+	assert.Greater(t, sampled, 60)
+	assert.Less(t, sampled, 140)
+}

@@ -3,10 +3,12 @@ package wadjit
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jkbrsn/taskman"
@@ -39,6 +41,7 @@ type Wadjit struct {
 	hasDefaultWSMaxMessageBytes bool
 	watcherJitter               time.Duration
 	metricsSampleRate           float64
+	sampleCounters             sync.Map // key: watcherID+"\x00"+taskID -> *uint64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -416,10 +419,19 @@ func (w *Wadjit) shouldSample(resp WatcherResponse) bool {
 		return false
 	}
 
+	// Per-response deterministic sampling using a counter per (watcher, task).
+	key := resp.WatcherID + "\x00" + resp.TaskID
+	counterAny, _ := w.sampleCounters.LoadOrStore(key, new(uint64))
+	counterPtr := counterAny.(*uint64)
+	idx := atomic.AddUint64(counterPtr, 1)
+
+	// Hash the tuple (key, idx) to keep decision stable for the response while allowing
+	// partial sampling over time.
 	h := fnv.New64a()
-	_, _ = h.Write([]byte(resp.WatcherID))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write([]byte(resp.TaskID))
+	_, _ = h.Write([]byte(key))
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], idx)
+	_, _ = h.Write(buf[:])
 	v := h.Sum64()
 	const denom = float64(^uint64(0))
 	return float64(v) <= w.metricsSampleRate*denom
