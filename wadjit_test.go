@@ -973,7 +973,7 @@ func TestWadjit_TaskmanLogLevel(t *testing.T) {
 		var buf bytes.Buffer
 
 		// Set Wadjit logger to Error level
-		wadjitLogger := zerolog.New(&buf).Level(zerolog.ErrorLevel)
+		wadjitLogger := zerolog.New(zerolog.SyncWriter(&buf)).Level(zerolog.ErrorLevel)
 
 		// Set taskman logger to Debug level (more verbose than Wadjit)
 		w := New(
@@ -998,7 +998,7 @@ func TestWadjit_TaskmanLogLevel(t *testing.T) {
 		var buf bytes.Buffer
 
 		// Create loggers
-		logger := zerolog.New(&buf).Level(zerolog.InfoLevel)
+		logger := zerolog.New(zerolog.SyncWriter(&buf)).Level(zerolog.InfoLevel)
 
 		// Apply WithLogger first, then WithTaskmanLogLevel
 		w := New(
@@ -1018,7 +1018,7 @@ func TestWadjit_TaskmanLogLevel(t *testing.T) {
 		var buf bytes.Buffer
 
 		// Set Wadjit logger to Debug level (verbose)
-		wadjitLogger := zerolog.New(&buf).Level(zerolog.DebugLevel)
+		wadjitLogger := zerolog.New(zerolog.SyncWriter(&buf)).Level(zerolog.DebugLevel)
 
 		// Set taskman to Error level only (quiet)
 		w := New(
@@ -1037,7 +1037,7 @@ func TestWadjit_TaskmanLogLevel(t *testing.T) {
 	t.Run("WithTaskmanLogLevel with Disabled level", func(t *testing.T) {
 		var buf bytes.Buffer
 
-		logger := zerolog.New(&buf).Level(zerolog.InfoLevel)
+		logger := zerolog.New(zerolog.SyncWriter(&buf)).Level(zerolog.InfoLevel)
 
 		// Disable taskman logging completely
 		w := New(
@@ -1069,7 +1069,7 @@ func TestWadjit_TaskmanLogLevel(t *testing.T) {
 
 	t.Run("option ordering - taskman level applied last", func(t *testing.T) {
 		var buf bytes.Buffer
-		logger := zerolog.New(&buf).Level(zerolog.WarnLevel)
+		logger := zerolog.New(zerolog.SyncWriter(&buf)).Level(zerolog.WarnLevel)
 
 		// Apply WithTaskmanLogLevel before WithLogger
 		// The taskman level should still take precedence
