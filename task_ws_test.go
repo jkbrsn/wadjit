@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -848,6 +849,54 @@ func TestWSEndpointTimeouts(t *testing.T) {
 
 		assert.True(t, endpoint.timeoutsSet)
 		assert.Equal(t, timeouts, endpoint.timeouts)
+	})
+
+	t.Run("ping interval keeps persistent connection alive during idle periods", func(t *testing.T) {
+		upgrader := websocket.Upgrader{}
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			conn, err := upgrader.Upgrade(w, r, nil)
+			require.NoError(t, err)
+
+			// Keep reading to process control frames (pings) and respond with pongs.
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		}))
+		defer server.Close()
+
+		wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+		parsedURL, err := url.Parse(wsURL)
+		require.NoError(t, err)
+
+		respChan := make(chan WatcherResponse, 1)
+		timeouts := WSTimeouts{
+			Read:         200 * time.Millisecond,
+			Write:        100 * time.Millisecond,
+			PingInterval: 60 * time.Millisecond, // < Read, so validation passes
+		}
+
+		endpoint := NewWSEndpoint(
+			parsedURL,
+			make(http.Header),
+			PersistentJSONRPC,
+			nil,
+			"ping-keepalive",
+			WithWSTimeouts(timeouts),
+		)
+
+		require.NoError(t, endpoint.Initialize("watcher-keepalive", respChan))
+		defer func() { _ = endpoint.Close() }()
+
+		// Wait longer than the read timeout; pings should refresh the deadline so no error surfaces.
+		select {
+		case resp := <-respChan:
+			t.Fatalf("unexpected response received during idle keepalive: %+v", resp)
+		case <-time.After(450 * time.Millisecond):
+			// Success: no error responses emitted despite idle server.
+		}
 	})
 
 	t.Run("endpoint inherits default timeouts from Wadjit", func(t *testing.T) {

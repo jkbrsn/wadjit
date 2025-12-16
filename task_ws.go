@@ -30,14 +30,15 @@ type WSEndpoint struct {
 	ID      string
 
 	// Set internally
-	conn         *websocket.Conn
-	remoteAddr   net.Addr
-	inflightMsgs sync.Map // Key string to value wsInflightMessage
-	wg           sync.WaitGroup
-	timeouts     WSTimeouts
-	timeoutsSet  bool
-	maxMessageBytes int64
+	conn               *websocket.Conn
+	remoteAddr         net.Addr
+	inflightMsgs       sync.Map // Key string to value wsInflightMessage
+	wg                 sync.WaitGroup
+	timeouts           WSTimeouts
+	timeoutsSet        bool
+	maxMessageBytes    int64
 	maxMessageBytesSet bool
+	pingTicker         *time.Ticker
 
 	// Set by Initialize
 	watcherID string
@@ -76,10 +77,12 @@ type WSEndpointOption func(*WSEndpoint)
 // Close closes the WebSocket connection, and cancels its context.
 func (e *WSEndpoint) Close() error {
 	e.lock()
-	defer e.unlock()
-
-	// If the connection is already closed, do nothing
 	if e.conn == nil {
+		e.unlock()
+		e.stopPingLoop()
+		if e.cancel != nil {
+			e.cancel()
+		}
 		return nil
 	}
 
@@ -88,17 +91,23 @@ func (e *WSEndpoint) Close() error {
 	deadline := time.Now().Add(3 * time.Second)
 	err := e.conn.WriteControl(websocket.CloseMessage, formattedCloseMessage, deadline)
 	if err != nil {
+		e.unlock()
 		return err
 	}
 	// Close the connection
 	err = e.conn.Close()
 	if err != nil {
+		e.unlock()
 		return err
 	}
 	e.conn = nil
+	e.unlock()
 
 	// Cancel the context
-	e.cancel()
+	e.stopPingLoop()
+	if e.cancel != nil {
+		e.cancel()
+	}
 
 	return nil
 }
@@ -211,14 +220,14 @@ func (e *WSEndpoint) connect() error {
 	e.conn = conn
 	e.remoteAddr = conn.RemoteAddr()
 
-	// Set read limit if configured
-	if e.maxMessageBytes > 0 {
-		e.conn.SetReadLimit(e.maxMessageBytes)
-	}
+	e.configureConnectionLocked()
 
 	// Start the read pump for incoming messages
 	e.wg.Add(1)
 	go e.readPump(&e.wg)
+
+	// Start ping loop after unlock to avoid holding the mutex
+	go e.startPingLoop()
 
 	return nil
 }
@@ -256,22 +265,137 @@ func (e *WSEndpoint) reconnect() error {
 	e.conn = nil
 
 	// Establish a new connection
-	conn, _, err := websocket.DefaultDialer.Dial(e.URL.String(), e.Header)
+	dialer := *websocket.DefaultDialer
+	if e.timeouts.Handshake > 0 {
+		dialer.HandshakeTimeout = e.timeouts.Handshake
+	}
+
+	conn, _, err := dialer.Dial(e.URL.String(), e.Header)
 	if err != nil {
 		return fmt.Errorf("failed to dial when reconnecting: %w", err)
 	}
 	e.conn = conn
+	e.remoteAddr = conn.RemoteAddr()
 
-	// Set read limit if configured
-	if e.maxMessageBytes > 0 {
-		e.conn.SetReadLimit(e.maxMessageBytes)
-	}
+	e.configureConnectionLocked()
 
 	// Restart the read pump for incoming messages
 	e.wg.Add(1)
 	go e.readPump(&e.wg)
 
+	go e.startPingLoop()
+
 	return nil
+}
+
+// configureConnectionLocked applies per-connection settings that depend on timeouts and limits.
+// Caller must hold e.mu.
+func (e *WSEndpoint) configureConnectionLocked() {
+	if e.conn == nil {
+		return
+	}
+
+	conn := e.conn
+
+	// Set read limit if configured
+	if e.maxMessageBytes > 0 {
+		conn.SetReadLimit(e.maxMessageBytes)
+	}
+
+	// Initial read deadline
+	if e.timeouts.Read > 0 {
+		_ = conn.SetReadDeadline(time.Now().Add(e.timeouts.Read))
+	}
+
+	// Refresh deadline on pong to keep the connection alive during idle periods
+	conn.SetPongHandler(func(string) error {
+		if e.timeouts.Read > 0 {
+			return conn.SetReadDeadline(time.Now().Add(e.timeouts.Read))
+		}
+		return nil
+	})
+}
+
+// startPingLoop sends periodic ping control frames to keep the connection alive and to detect
+// half-open connections. It is idempotent: if a ticker already exists, it returns immediately.
+func (e *WSEndpoint) startPingLoop() {
+	if e.timeouts.PingInterval <= 0 {
+		return
+	}
+
+	e.mu.Lock()
+	if e.pingTicker != nil {
+		e.mu.Unlock()
+		return
+	}
+	ticker := time.NewTicker(e.timeouts.PingInterval)
+	e.pingTicker = ticker
+	e.mu.Unlock()
+
+	for {
+		select {
+		case <-e.ctx.Done():
+			e.stopPingLoop()
+			return
+		case <-ticker.C:
+			e.lock()
+			conn := e.conn
+			e.unlock()
+
+			if conn == nil {
+				continue
+			}
+
+			// Apply write deadline for the control frame if configured
+			var controlDeadline time.Time
+			if e.timeouts.Write > 0 {
+				controlDeadline = time.Now().Add(e.timeouts.Write)
+				_ = conn.SetWriteDeadline(controlDeadline)
+			}
+
+			if err := conn.WriteControl(websocket.PingMessage, nil, controlDeadline); err != nil {
+				if e.ctx.Err() != nil {
+					e.stopPingLoop()
+					return
+				}
+				e.handlePingError(err)
+				e.stopPingLoop()
+				return
+			}
+
+			// Extend read deadline so idle periods don't time out while pongs are expected
+			if e.timeouts.Read > 0 {
+				_ = conn.SetReadDeadline(time.Now().Add(e.timeouts.Read))
+			}
+		}
+	}
+}
+
+// handlePingError surfaces a ping failure and closes the connection.
+func (e *WSEndpoint) handlePingError(err error) {
+	if e.ctx.Err() != nil {
+		return
+	}
+	urlClone := *e.URL
+	e.respChan <- errorResponse(
+		fmt.Errorf("websocket ping error: %w", err),
+		e.ID,
+		e.watcherID,
+		&urlClone,
+	)
+	_ = e.closeConn()
+}
+
+// stopPingLoop stops and clears the ping ticker if it is running.
+func (e *WSEndpoint) stopPingLoop() {
+	e.mu.Lock()
+	ticker := e.pingTicker
+	e.pingTicker = nil
+	e.mu.Unlock()
+
+	if ticker != nil {
+		ticker.Stop()
+	}
 }
 
 // lock and unlock provide exclusive access to the connection's mutex.
