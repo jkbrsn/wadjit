@@ -257,6 +257,8 @@ func (h *httpTaskResponse) readBody() {
 		h.truncatedMu.Lock()
 		h.truncated = true
 		h.truncatedMu.Unlock()
+		// Drain the remainder to keep the connection reusable
+		h.discardRemaining()
 		// Trim to max size
 		bodyBytes = bodyBytes[:h.maxResponseBytes]
 	}
@@ -264,6 +266,14 @@ func (h *httpTaskResponse) readBody() {
 	h.data = bodyBytes
 	h.dataOnce.Store(true)
 	h.timestamps.dataDone = time.Now()
+}
+
+// discardRemaining drains the underlying body to EOF to allow connection reuse after truncation.
+func (h *httpTaskResponse) discardRemaining() {
+	if h.resp == nil || h.resp.Body == nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, h.resp.Body)
 }
 
 // ensureReadForMetrics makes a best-effort attempt to populate size/timing metadata without

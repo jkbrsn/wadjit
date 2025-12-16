@@ -225,6 +225,40 @@ func TestHTTPTaskResponse_Truncation(t *testing.T) {
 	}
 }
 
+func TestHTTPTaskResponse_TruncationDrainsConnection(t *testing.T) {
+	// First request will be truncated; second should still succeed on keep-alive.
+	call := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call++
+		if call == 1 {
+			w.Header().Set("Content-Length", "1000")
+			_, _ = w.Write(bytes.Repeat([]byte("x"), 1000))
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	client := &http.Client{}
+
+	// First request with truncation
+	resp1, err := client.Get(server.URL)
+	require.NoError(t, err)
+	tr1 := newHTTPTaskResponse(nil, resp1, 100)
+	data1, err := tr1.Data()
+	require.NoError(t, err)
+	require.Len(t, data1, 100)
+	require.True(t, tr1.Metadata().Truncated)
+
+	// Second request should reuse or open a fresh conn, but succeed
+	resp2, err := client.Get(server.URL)
+	require.NoError(t, err)
+	tr2 := newHTTPTaskResponse(nil, resp2, 0)
+	data2, err := tr2.Data()
+	require.NoError(t, err)
+	require.Equal(t, []byte("ok"), data2)
+}
+
 func TestWatcherResponse_PrepareForMetrics_AutoReadsHTTP(t *testing.T) {
 	body := bytes.Repeat([]byte("a"), 256)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

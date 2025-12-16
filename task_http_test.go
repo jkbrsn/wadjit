@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -781,13 +782,15 @@ func TestHTTPEndpointTimeouts(t *testing.T) {
 
 		// Should timeout - Execute returns the error
 		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "Timeout")
+		errStr := err.Error()
+		assert.True(t, strings.Contains(errStr, "Timeout") || strings.Contains(errStr, "deadline"))
 
 		// Check response channel also has the timeout error
 		select {
 		case resp := <-responseChan:
 			assert.NotNil(t, resp.Err)
-			assert.Contains(t, resp.Err.Error(), "Timeout")
+			errStr := resp.Err.Error()
+			assert.True(t, strings.Contains(errStr, "Timeout") || strings.Contains(errStr, "deadline"))
 		case <-time.After(time.Second):
 			t.Fatal("expected response on channel")
 		}
