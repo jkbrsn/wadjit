@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -222,6 +223,60 @@ func TestHTTPTaskResponse_Truncation(t *testing.T) {
 			require.Equal(t, int64(tc.expectedDataSize), md.Size)
 		})
 	}
+}
+
+func TestWatcherResponse_PrepareForMetrics_AutoReadsHTTP(t *testing.T) {
+	body := bytes.Repeat([]byte("a"), 256)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	require.NoError(t, err)
+
+	htr := newHTTPTaskResponse(nil, resp, 0)
+	wr := &WatcherResponse{WatcherID: "w1", TaskID: "t1", Payload: htr}
+
+	// Seed timestamps so RequestTimeTotal can be computed
+	start := time.Now()
+	htr.timestamps.start = start
+	htr.timestamps.firstByte = start.Add(2 * time.Millisecond)
+
+	mdBefore := wr.Metadata()
+	require.Equal(t, int64(len(body)), mdBefore.Size) // ContentLength is known
+	require.Nil(t, mdBefore.TimeData.RequestTimeTotal)
+
+	wr.prepareForMetrics()
+
+	md := wr.Metadata()
+	require.Equal(t, int64(len(body)), md.Size)
+	require.NotNil(t, md.TimeData.RequestTimeTotal)
+}
+
+func TestWatcherResponse_PrepareForMetrics_RespectsReaderUse(t *testing.T) {
+	body := bytes.Repeat([]byte("b"), 128)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	require.NoError(t, err)
+
+	htr := newHTTPTaskResponse(nil, resp, 0)
+	wr := &WatcherResponse{WatcherID: "w1", TaskID: "t1", Payload: htr}
+
+	// Caller grabs reader first
+	r, err := htr.Reader()
+	require.NoError(t, err)
+	_, _ = io.ReadAll(r)
+	_ = r.Close()
+
+	wr.prepareForMetrics()
+
+	md := wr.Metadata()
+	require.Equal(t, int64(len(body)), md.Size)
 }
 
 func TestHTTPTaskResponse_ReaderWithTruncation(t *testing.T) {

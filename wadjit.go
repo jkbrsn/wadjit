@@ -196,6 +196,9 @@ func (w *Wadjit) listenForResponses() {
 				return // Context canceled
 			}
 
+			// Prepare response metadata for metrics before emitting.
+			resp.prepareForMetrics()
+
 			w.observeResponse(resp)
 
 			// Send the response to the external facing channel

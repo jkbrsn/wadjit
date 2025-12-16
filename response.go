@@ -29,6 +29,21 @@ type WatcherResponse struct {
 	Payload   TaskResponse // Payload stores the response data from the endpoint
 }
 
+// prepareForMetrics ensures payload-backed metadata (size, timing) is populated before metrics
+// emission. It is a best-effort helper invoked by Wadjit when a metrics sink is configured so
+// callers don't need to read responses to get accurate metrics. Errors are ignored; the regular
+// response path still carries them for consumers to inspect.
+func (wr *WatcherResponse) prepareForMetrics() {
+	if wr == nil || wr.Payload == nil {
+		return
+	}
+
+	switch p := wr.Payload.(type) {
+	case *httpTaskResponse:
+		p.ensureReadForMetrics()
+	}
+}
+
 // MetricsView returns a payload-free snapshot suitable for metrics export.
 // It extracts metadata only; the payload is never read.
 func (wr WatcherResponse) MetricsView() ResponseMetrics {
@@ -197,6 +212,8 @@ type httpTaskResponse struct {
 	dnsDecision *DNSDecision
 
 	usedReader atomic.Bool // flags if we returned a Reader
+	// metricsPrepared guards auto-read for metrics so it runs at most once
+	metricsPrepared atomic.Bool
 
 	maxResponseBytes int64      // maximum allowed response size (0 = unlimited)
 	truncated        bool       // set to true if response was truncated
@@ -247,6 +264,24 @@ func (h *httpTaskResponse) readBody() {
 	h.data = bodyBytes
 	h.dataOnce.Store(true)
 	h.timestamps.dataDone = time.Now()
+}
+
+// ensureReadForMetrics makes a best-effort attempt to populate size/timing metadata without
+// requiring callers to consume the body. It is safe to call multiple times and no-ops if a
+// caller already took the reader.
+func (h *httpTaskResponse) ensureReadForMetrics() {
+	if h.metricsPrepared.Load() {
+		return
+	}
+	if h.usedReader.Load() {
+		h.metricsPrepared.Store(true)
+		return
+	}
+
+	h.once.Do(func() {
+		h.readBody()
+	})
+	h.metricsPrepared.Store(true)
 }
 
 // Close closes the HTTP response body.
