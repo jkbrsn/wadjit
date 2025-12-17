@@ -153,46 +153,46 @@ func TestHTTPTaskResponse_Scenarios(t *testing.T) {
 
 func TestHTTPTaskResponse_Truncation(t *testing.T) {
 	testCases := []struct {
-		name              string
-		bodySize          int
-		maxResponseBytes  int64
-		expectTruncated   bool
-		expectedDataSize  int
+		name             string
+		bodySize         int
+		maxResponseBytes int64
+		expectTruncated  bool
+		expectedDataSize int
 	}{
 		{
-			name:              "no limit",
-			bodySize:          1000,
-			maxResponseBytes:  0,
-			expectTruncated:   false,
-			expectedDataSize:  1000,
+			name:             "no limit",
+			bodySize:         1000,
+			maxResponseBytes: 0,
+			expectTruncated:  false,
+			expectedDataSize: 1000,
 		},
 		{
-			name:              "under limit",
-			bodySize:          500,
-			maxResponseBytes:  1000,
-			expectTruncated:   false,
-			expectedDataSize:  500,
+			name:             "under limit",
+			bodySize:         500,
+			maxResponseBytes: 1000,
+			expectTruncated:  false,
+			expectedDataSize: 500,
 		},
 		{
-			name:              "at limit",
-			bodySize:          1000,
-			maxResponseBytes:  1000,
-			expectTruncated:   false,
-			expectedDataSize:  1000,
+			name:             "at limit",
+			bodySize:         1000,
+			maxResponseBytes: 1000,
+			expectTruncated:  false,
+			expectedDataSize: 1000,
 		},
 		{
-			name:              "over limit",
-			bodySize:          1500,
-			maxResponseBytes:  1000,
-			expectTruncated:   true,
-			expectedDataSize:  1000,
+			name:             "over limit",
+			bodySize:         1500,
+			maxResponseBytes: 1000,
+			expectTruncated:  true,
+			expectedDataSize: 1000,
 		},
 		{
-			name:              "way over limit",
-			bodySize:          10000,
-			maxResponseBytes:  100,
-			expectTruncated:   true,
-			expectedDataSize:  100,
+			name:             "way over limit",
+			bodySize:         10000,
+			maxResponseBytes: 100,
+			expectTruncated:  true,
+			expectedDataSize: 100,
 		},
 	}
 
@@ -259,6 +259,42 @@ func TestHTTPTaskResponse_TruncationDrainsConnection(t *testing.T) {
 	require.Equal(t, []byte("ok"), data2)
 }
 
+func TestHTTPTaskResponse_ReaderTruncationDrainsConnection(t *testing.T) {
+	call := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call++
+		if call == 1 {
+			w.Header().Set("Content-Length", "1000")
+			_, _ = w.Write(bytes.Repeat([]byte("x"), 1000))
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	client := &http.Client{}
+
+	// First request with truncation via Reader path
+	resp1, err := client.Get(server.URL)
+	require.NoError(t, err)
+	tr1 := newHTTPTaskResponse(nil, resp1, 100)
+	reader, err := tr1.Reader()
+	require.NoError(t, err)
+	data1, err := io.ReadAll(reader)
+	require.NoError(t, err)
+	require.Len(t, data1, 100)
+	require.True(t, tr1.Metadata().Truncated)
+	require.NoError(t, reader.Close())
+
+	// Second request should still succeed (connection reusable)
+	resp2, err := client.Get(server.URL)
+	require.NoError(t, err)
+	tr2 := newHTTPTaskResponse(nil, resp2, 0)
+	data2, err := tr2.Data()
+	require.NoError(t, err)
+	require.Equal(t, []byte("ok"), data2)
+}
+
 func TestWatcherResponse_PrepareForMetrics_AutoReadsHTTP(t *testing.T) {
 	body := bytes.Repeat([]byte("a"), 256)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -315,46 +351,46 @@ func TestWatcherResponse_PrepareForMetrics_RespectsReaderUse(t *testing.T) {
 
 func TestHTTPTaskResponse_ReaderWithTruncation(t *testing.T) {
 	testCases := []struct {
-		name              string
-		bodySize          int
-		maxResponseBytes  int64
-		expectTruncated   bool
-		expectedReadSize  int
+		name             string
+		bodySize         int
+		maxResponseBytes int64
+		expectTruncated  bool
+		expectedReadSize int
 	}{
 		{
-			name:              "no limit via reader",
-			bodySize:          1000,
-			maxResponseBytes:  0,
-			expectTruncated:   false,
-			expectedReadSize:  1000,
+			name:             "no limit via reader",
+			bodySize:         1000,
+			maxResponseBytes: 0,
+			expectTruncated:  false,
+			expectedReadSize: 1000,
 		},
 		{
-			name:              "under limit via reader",
-			bodySize:          500,
-			maxResponseBytes:  1000,
-			expectTruncated:   false,
-			expectedReadSize:  500,
+			name:             "under limit via reader",
+			bodySize:         500,
+			maxResponseBytes: 1000,
+			expectTruncated:  false,
+			expectedReadSize: 500,
 		},
 		{
-			name:              "at limit via reader",
-			bodySize:          1000,
-			maxResponseBytes:  1000,
-			expectTruncated:   false,
-			expectedReadSize:  1000,
+			name:             "at limit via reader",
+			bodySize:         1000,
+			maxResponseBytes: 1000,
+			expectTruncated:  false,
+			expectedReadSize: 1000,
 		},
 		{
-			name:              "over limit via reader",
-			bodySize:          1500,
-			maxResponseBytes:  1000,
-			expectTruncated:   true,
-			expectedReadSize:  1000,
+			name:             "over limit via reader",
+			bodySize:         1500,
+			maxResponseBytes: 1000,
+			expectTruncated:  true,
+			expectedReadSize: 1000,
 		},
 		{
-			name:              "way over limit via reader",
-			bodySize:          10000,
-			maxResponseBytes:  100,
-			expectTruncated:   true,
-			expectedReadSize:  100,
+			name:             "way over limit via reader",
+			bodySize:         10000,
+			maxResponseBytes: 100,
+			expectTruncated:  true,
+			expectedReadSize: 100,
 		},
 	}
 

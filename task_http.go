@@ -32,14 +32,14 @@ type HTTPEndpoint struct {
 	URL     *url.URL
 	ID      string
 
-	client          *http.Client
-	dnsPolicy       DNSPolicy
-	dnsDecisionHook DNSDecisionCallback
-	dnsMgr          *dnsPolicyManager
-	dnsPolicySet    bool
-	timeouts        HTTPTimeouts
-	timeoutsSet     bool
-	maxResponseBytes int64
+	client              *http.Client
+	dnsPolicy           DNSPolicy
+	dnsDecisionHook     DNSDecisionCallback
+	dnsMgr              *dnsPolicyManager
+	dnsPolicySet        bool
+	timeouts            HTTPTimeouts
+	timeoutsSet         bool
+	maxResponseBytes    int64
 	maxResponseBytesSet bool
 	// tlsSkipVerify disables TLS verification when issuing HTTPS requests.
 	tlsSkipVerify bool

@@ -21,11 +21,11 @@ type Watcher struct {
 	// The offset is in the range [-jitter, +jitter] and does not cause drift - subsequent
 	// executions maintain the exact cadence interval. This helps avoid thundering herds when
 	// multiple watchers start simultaneously.
-	jitter   time.Duration
-	jitterRNG *rand.Rand
-	jitterOffset     time.Duration
-	jitterOffsetSet  bool
-	doneChan chan struct{}
+	jitter          time.Duration
+	jitterRNG       *rand.Rand
+	jitterOffset    time.Duration
+	jitterOffsetSet bool
+	doneChan        chan struct{}
 }
 
 // Validate checks that the Watcher is valid for use in the Wadjit.

@@ -181,6 +181,8 @@ func (l *limitedTimedReadCloser) Read(p []byte) (int, error) {
 		l.eof = true
 		l.mu.Unlock()
 		l.once.Do(l.doneFn)
+		// Drain remainder so the underlying TCP connection can be reused.
+		l.resp.discardRemaining()
 		return actualN, io.EOF
 	}
 	l.mu.Unlock()
@@ -203,5 +205,10 @@ func (l *limitedTimedReadCloser) Read(p []byte) (int, error) {
 // Close closes the underlying body and records the time when the stream is finished.
 func (l *limitedTimedReadCloser) Close() error {
 	l.once.Do(l.doneFn)
+	// Best-effort drain to keep the connection reusable if the caller stopped early.
+	l.resp.discardRemaining()
+	if l.resp.resp.Body == nil {
+		return nil
+	}
 	return l.resp.resp.Body.Close()
 }
