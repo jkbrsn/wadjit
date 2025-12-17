@@ -1341,3 +1341,30 @@ func TestWadjit_MetricsSampling_PerResponse(t *testing.T) {
 	assert.Greater(t, sampled, 60)
 	assert.Less(t, sampled, 140)
 }
+
+func TestWadjit_RemoveWatcher_CleansSamplingState(t *testing.T) {
+	w := New(WithMetricsSampleRate(0.5))
+	defer func() { _ = w.Close() }()
+
+	watcher := &Watcher{
+		ID:       "watcher-sample-clean",
+		Cadence:  50 * time.Millisecond,
+		Tasks:    []WatcherTask{&MockWatcherTask{}},
+		doneChan: make(chan struct{}),
+	}
+
+	require.NoError(t, w.AddWatcher(watcher))
+
+	resp := WatcherResponse{WatcherID: watcher.ID, TaskID: "task-1"}
+	key := resp.WatcherID + "\x00" + resp.TaskID
+
+	// Populate sampling state
+	_ = w.shouldSample(resp)
+	_, ok := w.sampleCounters.Load(key)
+	require.True(t, ok, "expected sample counter to be present")
+
+	require.NoError(t, w.RemoveWatcher(watcher.ID))
+
+	_, ok = w.sampleCounters.Load(key)
+	require.False(t, ok, "expected sample counter to be removed with watcher")
+}

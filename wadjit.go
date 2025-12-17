@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,7 +43,7 @@ type Wadjit struct {
 	hasDefaultWSMaxMessageBytes bool
 	watcherJitter               time.Duration
 	metricsSampleRate           float64
-	sampleCounters             sync.Map // key: watcherID+"\x00"+taskID -> *uint64
+	sampleCounters              sync.Map // key: watcherID+"\x00"+taskID -> *uint64
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -307,6 +308,8 @@ func (w *Wadjit) RemoveWatcher(id string) error {
 		return fmt.Errorf("error removing watcher: %w", err)
 	}
 
+	w.removeSampleCounters(id)
+
 	w.observeEvent("watcher_removed", map[string]any{"watcher_id": id})
 
 	return nil
@@ -387,6 +390,18 @@ func (w *Wadjit) WatcherIDs() []string {
 // Metrics returns metrics from the Wadjit's internal task manager.
 func (w *Wadjit) Metrics() taskman.TaskManagerMetrics {
 	return w.taskManager.Metrics()
+}
+
+// removeSampleCounters deletes deterministic sampling state for a watcher to avoid unbounded growth
+// when watchers are added and removed over the lifetime of the process.
+func (w *Wadjit) removeSampleCounters(watcherID string) {
+	prefix := watcherID + "\x00"
+	w.sampleCounters.Range(func(key, _ any) bool {
+		if k, ok := key.(string); ok && strings.HasPrefix(k, prefix) {
+			w.sampleCounters.Delete(key)
+		}
+		return true
+	})
 }
 
 // observeResponse reports a response to the metrics sink, if configured.
@@ -535,7 +550,9 @@ func WithDefaultWSMaxMessageBytes(n int64) Option {
 // The jitter is applied once in the range [-jitter, +jitter] relative to the scheduled cadence time.
 // This does not cause drift - subsequent executions maintain exact cadence intervals after the
 // jittered first execution. This helps avoid thundering herds when multiple watchers start
-// simultaneously. Negative values are clamped to zero (no jitter).
+// simultaneously. Negative values are clamped to zero (no jitter), and offsets that would schedule
+// the first run in the past are ignored (the first execution never happens earlier than "now +
+// cadence").
 func WithWatcherJitter(jitter time.Duration) Option {
 	return func(o *options) {
 		if jitter < 0 {
@@ -561,7 +578,8 @@ func WithLogger(logger zerolog.Logger) Option {
 // WithTaskmanLogLevel sets the log level for the internal task manager independently from the
 // Wadjit logger. This allows fine-grained control over taskman's logging verbosity. If both
 // WithLogger and WithTaskmanLogLevel are used, the taskman log level takes precedence for the
-// task manager.
+// task manager. Note: this only sets the level; provide a logger via WithLogger or
+// WithTaskmanLogger for output to be emitted.
 func WithTaskmanLogLevel(level zerolog.Level) Option {
 	return func(o *options) {
 		o.taskmanLogLevel = &level
@@ -599,7 +617,9 @@ func WithTaskmanOptions(opts ...taskman.Option) Option {
 }
 
 // WithMetricsSink configures a sink to observe responses and internal events. The sink is invoked
-// best-effort and must be non-blocking.
+// best-effort and must be non-blocking. When enabled, Wadjit may eagerly buffer HTTP bodies to
+// populate size/timing metrics; set WithDefaultMaxResponseBytes or per-endpoint limits to bound
+// memory use.
 func WithMetricsSink(ms MetricsSink) Option {
 	return func(o *options) {
 		o.metricsSink = ms
